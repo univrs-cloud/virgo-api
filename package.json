@@ -11,6 +11,7 @@
     "version": "1.0.0",
     "install_dir": "/var/www",
     "dependencies": "zfsutils-linux",
+    "user": "root",
     "entrypoints": {
       "daemon": "server.js"
     }
