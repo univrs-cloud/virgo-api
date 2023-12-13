@@ -1,1 +1,2 @@
+npm install -g node-deb
 node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js routes/ services/
