@@ -81,6 +81,16 @@ let stats = {
 					return interface;
 				});
 			});
+	},
+	ups: () => {
+		return new Promise((resolve, reject) => {
+			let stats = {
+				battery_charge: 100,
+				ups_load: 0,
+				ups_status: "OL" // OL(online) OB(onbatery)
+			};
+			resolve(stats);
+		});
 	}
 };
 
