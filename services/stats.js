@@ -1,5 +1,8 @@
 const si = require('systeminformation');
 const { zfs } = require('zfs');
+const { I2C } = require('raspi-i2c');
+
+const i2c = new I2C();
 
 let stats = {
 	system: () => {
@@ -85,8 +88,7 @@ let stats = {
 	ups: () => {
 		return new Promise((resolve, reject) => {
 			let stats = {
-				battery_charge: 100,
-				ups_load: 0,
+				battery_charge: i2c.readByteSync(0x36, 4),
 				ups_status: "OL" // OL(online) OB(onbatery)
 			};
 			resolve(stats);
