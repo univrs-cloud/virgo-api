@@ -62,6 +62,7 @@ let stats = {
 						});
 						filesystem.used = dataset.used;
 						filesystem.free = dataset.avail;
+						filesystem.size = filesystem.used + filesystem.free;
 						filesystem.percent = dataset.used * 100 / (dataset.used + dataset.avail);
 					}
 					
