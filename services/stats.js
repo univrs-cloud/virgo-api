@@ -28,6 +28,8 @@ let stats = {
 	mem: () => {
 		return si.mem()
 			.then((memory) => {
+				memory.free = memory.available;
+				memory.used = memory.active;
 				memory.percent = memory.used * 100 / memory.total;
 				return memory;
 			});
