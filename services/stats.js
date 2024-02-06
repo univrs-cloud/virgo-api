@@ -1,3 +1,5 @@
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 const si = require('systeminformation');
 const { zfs } = require('zfs');
 const { I2C } = require('raspi-i2c');
@@ -8,10 +10,12 @@ let stats = {
 	system: () => {
 		return Promise.all([
 			si.osInfo(),
-			si.cpuTemperature()
+			si.cpuTemperature(),
+			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon1/fan1_input')
 		])
 			.then(([os, cpuTemperature]) => {
-				os.os_version = `${cpuTemperature.main.toFixed()}°C`;
+				os.os_version = `${cpuTemperature.main.toFixed()}° C`;
+				os.hostname = `${fan.stdout.trim()} rpm`;
 				return os;
 			});
 	},
