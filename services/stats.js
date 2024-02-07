@@ -13,7 +13,7 @@ let stats = {
 			si.cpuTemperature(),
 			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon1/fan1_input')
 		])
-			.then(([os, cpuTemperature]) => {
+			.then(([os, cpuTemperature, fan]) => {
 				os.os_version = `${cpuTemperature.main.toFixed()}° C`;
 				os.hostname = `${fan.stdout.trim()} rpm`;
 				return os;
