@@ -11,7 +11,7 @@ let stats = {
 		return Promise.all([
 			si.osInfo(),
 			si.cpuTemperature(),
-			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon1/fan1_input')
+			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input')
 		])
 			.then(([os, cpuTemperature, fan]) => {
 				os.os_version = `${cpuTemperature.main.toFixed()}° C`;
