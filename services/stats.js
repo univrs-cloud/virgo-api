@@ -11,11 +11,11 @@ let stats = {
 		return Promise.all([
 			si.osInfo(),
 			si.cpuTemperature(),
-			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input')
+			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
 		])
 			.then(([os, cpuTemperature, fan]) => {
 				os.os_version = `${cpuTemperature.main.toFixed()}° C`;
-				os.hostname = `${fan.stdout.trim()} rpm`;
+				os.hostname = (fan.stdout ? `${fan.stdout.trim()} rpm` : '');
 				return os;
 			});
 	},
