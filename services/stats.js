@@ -52,7 +52,7 @@ let stats = {
 			});
 	},
 	network: () => {
-		return si.networkStats('*')
+		return si.networkStats()
 			.then((interfaces) => {
 				return interfaces;
 			});
