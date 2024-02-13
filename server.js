@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-const config = require('./config');
+const config = require('./api/config');
 const express = require('express');
 const helmet = require('helmet');
 const bodyParser = require('body-parser');
-const routes = require('./routes');
+const routes = require('./api/routes');
 
 const app = express();
 
@@ -15,6 +15,11 @@ app.set('trust proxy', true);
 app.use(helmet());
 
 app.use(bodyParser.json());
+
+app.use(express.static('dist'));
+app.get('/', (req, res) => {
+	res.sendFile(path.join(__dirname, 'dist/index.html'));
+});
 
 app.use('/api/', routes);
 
