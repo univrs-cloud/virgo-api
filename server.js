@@ -20,6 +20,11 @@ app.set('trust proxy', true);
 
 app.use(bodyParser.json());
 
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    next();
+});
+
 app.use(express.static(path.join(__dirname, '..', '..', 'virgo-ui/app/dist')));
 app.get('/', (req, res) => {
 	res.sendFile(path.join(__dirname, '..', '..', 'virgo-ui/dist/index.html'));
