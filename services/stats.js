@@ -14,7 +14,7 @@ let stats = {
 			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
 		])
 			.then(([currentLoad, cpuTemperature, fan]) => {
-				return { ...currentLoad, ...cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
+				return { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
 			});
 	},
 	mem: () => {
