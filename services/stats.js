@@ -24,17 +24,12 @@ let stats = {
 			si.currentLoad()
 		])
 			.then(([currentLoad]) => {
-				return {
-					'total': currentLoad.currentLoad
-				};
+				return currentLoad;
 			});
 	},
 	mem: () => {
 		return si.mem()
 			.then((memory) => {
-				memory.free = memory.available;
-				memory.used = memory.active;
-				memory.percent = memory.used * 100 / memory.total;
 				return memory;
 			});
 	},
@@ -52,53 +47,37 @@ let stats = {
 		])
 			.then(([filesystems, datasets]) => {
 				return filesystems.map((fs) => {
-					let filesystem = {
-						'device_name': fs.fs,
-						'fs_type': fs.type,
-						'mnt_point': fs.mount,
-						'size': fs.size,
-						'used': fs.used,
-						'free': fs.available,
-						'percent': fs.use,
-						'key': 'mnt_point'
-					};
 					if (fs.type === 'zfs') {
 						let dataset = datasets.find((dataset) => {
 							return dataset.name === fs.fs;
 						});
-						filesystem.used = dataset.used;
-						filesystem.free = dataset.avail;
-						filesystem.size = filesystem.used + filesystem.free;
-						filesystem.percent = dataset.used * 100 / (dataset.used + dataset.avail);
+
+						fs.used = dataset.used;
+						fs.available = dataset.avail;
+						fs.size = dataset.used + dataset.avail;
+						fs.use = dataset.used * 100 / (dataset.used + dataset.avail);
 					}
-					
-					return filesystem;
+					return fs;
 				});
 			});
 	},
 	network: () => {
 		return si.networkStats('*')
 			.then((interfaces) => {
-				return interfaces.map((nif) => {
-					let interface = {
-						'interface_name': nif.iface,
-						'rx': nif.rx_sec * (nif.ms / 1000),
-						'tx': nif.tx_sec * (nif.ms / 1000),
-						'cx': nif.rx_sec * (nif.ms / 1000) + nif.tx_sec * (nif.ms / 1000),
-						'time_since_update': nif.ms / 1000,
-						'key': 'interface_name'
-					}
-					return interface;
-				});
+				return interfaces;
 			});
 	},
 	ups: () => {
 		return new Promise((resolve, reject) => {
-			let stats = {
-				battery_charge: i2c.readByteSync(0x36, 4),
-				ups_status: "OL" // OL(online) OB(onbatery)
-			};
-			resolve(stats);
+			try {
+				let stats = {
+					battery_charge: i2c.readByteSync(0x36, 4),
+					ups_status: "OL" // OL(online) OB(onbatery)
+				};
+				resolve(stats);
+			} catch (error) {
+				reject(error);
+			}
 		});
 	}
 };
