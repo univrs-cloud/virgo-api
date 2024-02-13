@@ -4,7 +4,7 @@ const { body, check, validationResult } = require('express-validator');
 const service = require('./../services/stats');
 
 router
-	.route('/3/system/')
+	.route('/v1/system/')
 	.get((req, res) => {
 		service.system()
 			.then((system) => {
@@ -13,7 +13,7 @@ router
 	});
 
 router
-	.route('/3/cpu/')
+	.route('/v1/cpu/')
 	.get((req, res) => {
 		service.cpu()
 			.then((processor) => {
@@ -22,7 +22,7 @@ router
 	});
 
 router
-	.route('/3/mem/')
+	.route('/v1/mem/')
 	.get((req, res) => {
 		service.mem()
 			.then((memory) => {
@@ -31,7 +31,7 @@ router
 	});
 
 router
-	.route('/3/fs/')
+	.route('/v1/fs/')
 	.get((req, res) => {
 		service.fs()
 			.then((filesystems) => {
@@ -40,7 +40,7 @@ router
 	});
 
 router
-	.route('/3/network/')
+	.route('/v1/network/')
 	.get((req, res) => {
 		service.network()
 			.then((interfaces) => {
