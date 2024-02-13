@@ -7,24 +7,14 @@ const { I2C } = require('raspi-i2c');
 const i2c = new I2C();
 
 let stats = {
-	system: () => {
+	cpu: () => {
 		return Promise.all([
-			si.osInfo(),
+			si.currentLoad(),
 			si.cpuTemperature(),
 			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
 		])
-			.then(([os, cpuTemperature, fan]) => {
-				os.os_version = `${cpuTemperature.main.toFixed()}° C`;
-				os.hostname = (fan.stdout ? `${fan.stdout.trim()} rpm` : '');
-				return os;
-			});
-	},
-	cpu: () => {
-		return Promise.all([
-			si.currentLoad()
-		])
-			.then(([currentLoad]) => {
-				return currentLoad;
+			.then(([currentLoad, cpuTemperature, fan]) => {
+				return { ...currentLoad, ...cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
 			});
 	},
 	mem: () => {
