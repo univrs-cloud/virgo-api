@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+openssl genrsa -out /var/www/virgo-api/app/cert/key.pem
+openssl req -new -key /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/csr.pem -subj "/CN=virgo"
+openssl x509 -req -days 365 -in /var/www/virgo-api/app/cert/csr.pem -signkey /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/cert.pem

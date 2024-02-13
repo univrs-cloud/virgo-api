@@ -38,5 +38,5 @@ app.use((err, req, res, next) => {
 
 const sslServer = https.createServer(options, app);
 sslServer.listen(config.server.port, () => {
-	console.log(`Server started at http://localhost:${config.server.port}`);
+	console.log(`Server started at https://localhost:${config.server.port}`);
 });
