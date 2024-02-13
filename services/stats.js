@@ -54,7 +54,7 @@ let stats = {
 	network: () => {
 		return si.networkStats()
 			.then((interfaces) => {
-				return interfaces;
+				return interfaces[0];
 			});
 	},
 	ups: () => {
