@@ -1,5 +1,5 @@
-const stats = require('./stats');
+const node = require('./node');
 
 module.exports = [
-	stats
+	node
 ];
