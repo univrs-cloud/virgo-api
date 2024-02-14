@@ -6,7 +6,7 @@ const { I2C } = require('raspi-i2c');
 
 const i2c = new I2C();
 
-let node = {
+let host = {
 	system: () => {
 		return si.system();
 	},
@@ -78,4 +78,4 @@ let node = {
 	}
 };
 
-module.exports = node;
+module.exports = host;
