@@ -7,6 +7,9 @@ const { I2C } = require('raspi-i2c');
 const i2c = new I2C();
 
 let stats = {
+	system: () => {
+		return si.system();
+	},
 	cpu: () => {
 		return Promise.all([
 			si.currentLoad(),
@@ -69,6 +72,9 @@ let stats = {
 				reject(error);
 			}
 		});
+	},
+	time: () => {
+		return si.time();
 	}
 };
 
