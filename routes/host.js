@@ -1,7 +1,18 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { body, check, validationResult } = require('express-validator');
-const service = require('./../services/stats');
+const service = require('./../services/host');
+
+router
+	.route('/v1/auth/')
+	.get((req, res) => {
+		res.json({
+			name: req.headers['remote-name'],
+			user: req.headers['remote-user'],
+			email: req.headers['remote-email'],
+			groups: req.headers['remote-groups'].split(',')
+		});
+	});
 
 router
 	.route('/v1/system/')
@@ -52,8 +63,8 @@ router
 	.route('/v1/ups/')
 	.get((req, res) => {
 		service.ups()
-			.then((stats) => {
-				res.json(stats);
+			.then((ups) => {
+				res.json(ups);
 			});
 	});
 
