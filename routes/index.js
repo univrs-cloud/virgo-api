@@ -1,5 +1,5 @@
-const node = require('./node');
+const host = require('./host');
 
 module.exports = [
-	node
+	host
 ];
