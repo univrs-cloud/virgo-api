@@ -10,7 +10,7 @@ router
 			name: req.headers['remote-name'],
 			user: req.headers['remote-user'],
 			email: req.headers['remote-email'],
-			groups: req.headers['remote-groups'].split(',')
+			groups: req.headers['remote-groups']?.split(',')
 		});
 	});
 
