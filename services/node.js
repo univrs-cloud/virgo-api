@@ -6,7 +6,7 @@ const { I2C } = require('raspi-i2c');
 
 const i2c = new I2C();
 
-let stats = {
+let node = {
 	system: () => {
 		return si.system();
 	},
@@ -63,11 +63,11 @@ let stats = {
 	ups: () => {
 		return new Promise((resolve, reject) => {
 			try {
-				let stats = {
-					battery_charge: i2c.readByteSync(0x36, 4),
-					ups_status: "OL" // OL(online) OB(onbatery)
+				let ups = {
+					batteryCharge: i2c.readByteSync(0x36, 4),
+					status: "OL" // OL(online) OB(onbatery)
 				};
-				resolve(stats);
+				resolve(ups);
 			} catch (error) {
 				reject(error);
 			}
@@ -78,4 +78,4 @@ let stats = {
 	}
 };
 
-module.exports = stats;
+module.exports = node;
