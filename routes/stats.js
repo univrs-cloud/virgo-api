@@ -57,4 +57,10 @@ router
 			});
 	});
 
+router
+	.route('/v1/time/')
+	.get((req, res) => {
+		service.time();
+	});
+
 module.exports = router;
