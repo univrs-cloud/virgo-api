@@ -4,17 +4,6 @@ const { body, check, validationResult } = require('express-validator');
 const service = require('./../services/host');
 
 router
-	.route('/v1/auth/')
-	.get((req, res) => {
-		res.json({
-			name: req.headers['remote-name'],
-			user: req.headers['remote-user'],
-			email: req.headers['remote-email'],
-			groups: req.headers['remote-groups']?.split(',')
-		});
-	});
-
-router
 	.route('/v1/system/')
 	.get((req, res) => {
 		service.system()
