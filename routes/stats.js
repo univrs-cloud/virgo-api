@@ -49,7 +49,7 @@ router
 	});
 
 router
-	.route('/v1/devices/ups/')
+	.route('/v1/ups/')
 	.get((req, res) => {
 		service.ups()
 			.then((stats) => {
