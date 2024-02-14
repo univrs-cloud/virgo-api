@@ -21,8 +21,26 @@ app.set('trust proxy', true);
 app.use(bodyParser.json());
 
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    next();
+	if (req.headers['remote-user']) {
+		const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
+		let account = {
+			name: req.headers['remote-name'],
+			user: req.headers['remote-user'],
+			email: req.headers['remote-email'],
+			groups: req.headers['remote-name']?.split(','),
+		};
+		res.cookie('account', JSON.stringify(account), {
+			encode: (val) => { return val; },
+			httpOnly: false,
+			secure: true,
+			sameSite: 'lax',
+			maxAge: SIX_MONTHS_MS
+		});
+	} else {
+		res.clearCookie('account');
+	}
+	res.header("Access-Control-Allow-Origin", "*");
+	next();
 });
 
 app.use(express.static(path.join(__dirname, '..', '..', 'virgo-ui/app/dist')));
