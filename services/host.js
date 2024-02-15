@@ -62,10 +62,14 @@ let host = {
 	},
 	ups: () => {
 		return new Promise((resolve, reject) => {
+			let powerSource = '';
+			try {
+				powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
+			} catch {}
 			try {
 				let ups = {
 					batteryCharge: i2c.readByteSync(0x36, 4),
-					status: "OL" // OL(online) OB(onbatery)
+					status: powerSource
 				};
 				resolve(ups);
 			} catch (error) {
