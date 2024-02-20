@@ -9,6 +9,9 @@ router
 		service.system()
 			.then((system) => {
 				res.json(system);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
@@ -18,6 +21,9 @@ router
 		service.cpu()
 			.then((processor) => {
 				res.json(processor);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
@@ -27,6 +33,9 @@ router
 		service.mem()
 			.then((memory) => {
 				res.json(memory);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
@@ -36,6 +45,9 @@ router
 		service.fs()
 			.then((filesystems) => {
 				res.json(filesystems);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
@@ -45,6 +57,9 @@ router
 		service.network()
 			.then((interfaces) => {
 				res.json(interfaces);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
@@ -54,13 +69,20 @@ router
 		service.ups()
 			.then((ups) => {
 				res.json(ups);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.name });
 			});
 	});
 
 router
 	.route('/v1/time/')
 	.get((req, res) => {
-		res.json(service.time());
-	});
+		try {
+			res.json(service.time());
+		} catch (error) {
+			res.status(500).json({ error: error.name });
+		}
+	})
 
 module.exports = router;

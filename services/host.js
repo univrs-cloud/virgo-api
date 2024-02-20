@@ -5,8 +5,6 @@ const si = require('systeminformation');
 const { zfs } = require('zfs');
 const { I2C } = require('raspi-i2c');
 
-const i2c = new I2C();
-
 let host = {
 	system: () => {
 		return si.system();
@@ -63,19 +61,25 @@ let host = {
 	},
 	ups: () => {
 		return new Promise((resolve, reject) => {
+			let batteryCharge = -1;
 			let powerSource = '';
 			try {
-				powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
-			} catch {}
-			try {
-				let ups = {
-					batteryCharge: i2c.readByteSync(0x36, 4),
-					status: powerSource
-				};
-				resolve(ups);
+				const i2c = new I2C();
+				batteryCharge = i2c.readByteSync(0x36, 4);
 			} catch (error) {
 				reject(error);
 			}
+
+			try {
+				powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
+			} catch (error) {
+				reject(error);
+			}
+
+			resolve({
+				batteryCharge: batteryCharge,
+				powerSource: powerSource
+			});
 		});
 	},
 	time: () => {
