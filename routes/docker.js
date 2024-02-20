@@ -11,7 +11,7 @@ router
 				res.json(containers);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 

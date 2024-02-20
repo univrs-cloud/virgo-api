@@ -11,7 +11,7 @@ router
 				res.json(system);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -23,7 +23,7 @@ router
 				res.json(processor);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -35,7 +35,7 @@ router
 				res.json(memory);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -47,7 +47,7 @@ router
 				res.json(filesystems);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -59,7 +59,7 @@ router
 				res.json(interfaces);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -71,7 +71,11 @@ router
 				res.json(ups);
 			})
 			.catch((error) => {
-				res.status(500).json({ error: error.name });
+				if (error.message.toLowerCase().includes('remote i/o error')) {
+					res.status(204).end();
+					return;
+				}
+				res.status(500).json({ error: error.message });
 			});
 	});
 
@@ -81,7 +85,7 @@ router
 		try {
 			res.json(service.time());
 		} catch (error) {
-			res.status(500).json({ error: error.name });
+			res.status(500).json({ error: error.message });
 		}
 	})
 
