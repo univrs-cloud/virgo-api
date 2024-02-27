@@ -3,6 +3,8 @@
 set -e
 set -o pipefail
 
+touch /var/www/virgo-api/data.json
+
 mkdir -p /var/www/virgo-api/app/cert/
 openssl genrsa -out /var/www/virgo-api/app/cert/key.pem
 openssl req -new -key /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/csr.pem -subj "/CN=virgo"
