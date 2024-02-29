@@ -11,9 +11,14 @@ let docker = {
 			});
 	},
 	configured: () => {
-		return fs.promises.readFile(path.join(__dirname,'../../data.json'), 'utf8')
-			.then((data) => {
-				return JSON.parse(data);
+		return Promise.all([
+			fs.promises.readFile(path.join(__dirname,'../../data.json'), 'utf8'),
+			si.dockerContainers()
+		])
+			.then(([responseData, responseDockerContainers]) => {
+				let response = JSON.parse(responseData)
+				response.containers = responseDockerContainers;
+				return response;
 			});
 	},
 	containers: () => {

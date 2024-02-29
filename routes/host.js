@@ -75,6 +75,7 @@ router
 					res.status(204).end();
 					return;
 				}
+				
 				res.status(500).json({ error: error.message });
 			});
 	});

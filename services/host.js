@@ -5,6 +5,13 @@ const si = require('systeminformation');
 const { zfs } = require('zfs');
 const { I2C } = require('raspi-i2c');
 
+let i2c;
+try {
+	i2c = new I2C();
+} catch (error) {
+	i2c = false;
+}
+
 let host = {
 	system: () => {
 		return si.system();
@@ -33,6 +40,7 @@ let host = {
 					if (error) {
 						return reject(error);
 					}
+
 					resolve(datasets);
 				});
 			})
@@ -43,7 +51,6 @@ let host = {
 						let dataset = datasets.find((dataset) => {
 							return dataset.name === fs.fs;
 						});
-
 						fs.used = dataset.used;
 						fs.available = dataset.avail;
 						fs.size = dataset.used + dataset.avail;
@@ -61,15 +68,11 @@ let host = {
 	},
 	ups: () => {
 		return new Promise((resolve, reject) => {
-			let batteryCharge = -1;
-			let powerSource = '';
-			try {
-				const i2c = new I2C();
-				batteryCharge = i2c.readByteSync(0x36, 4);
-			} catch (error) {
-				reject(error);
+			if (!i2c) {
+				reject(new Error('remote i/o error'));
 			}
 
+			let powerSource = '';
 			try {
 				powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
 			} catch (error) {
@@ -77,7 +80,7 @@ let host = {
 			}
 
 			resolve({
-				batteryCharge: batteryCharge,
+				batteryCharge: i2c.readByteSync(0x36, 4),
 				powerSource: powerSource
 			});
 		});
