@@ -4,6 +4,18 @@ const { body, check, validationResult } = require('express-validator');
 const service = require('./../services/host');
 
 router
+	.route('/v1/proxies/')
+	.get((req, res) => {
+		service.proxies()
+			.then((proxies) => {
+				res.json(proxies);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.message });
+			});
+	});
+
+router
 	.route('/v1/system/')
 	.get((req, res) => {
 		service.system()
@@ -75,7 +87,7 @@ router
 					res.status(204).end();
 					return;
 				}
-				
+
 				res.status(500).json({ error: error.message });
 			});
 	});
