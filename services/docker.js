@@ -5,24 +5,33 @@ const si = require('systeminformation');
 
 let docker = {
 	templates: () => {
-		return axios.get('https://raw.githubusercontent.com/univrs-cloud/portainer/main/template.json')
-			.then((response) => {
-				return response.data.templates;
+		return Promise.all([
+			axios.get('https://raw.githubusercontent.com/univrs-cloud/portainer/main/template.json'),
+			si.dockerContainers(true)
+		])
+			.then(([responseTemplate, dockerContainers]) => {
+				return responseTemplate.data.templates.map((template) => {
+					let dockerContainer = dockerContainers.find((container) => {
+						return container.name.includes(template.name);
+					});
+					template.installed = (dockerContainer !== undefined);
+					return template;
+				});
 			});
 	},
 	configured: () => {
 		return Promise.all([
 			fs.promises.readFile(path.join(__dirname,'../../data.json'), 'utf8'),
-			si.dockerContainers()
+			si.dockerContainers(true)
 		])
-			.then(([responseData, responseDockerContainers]) => {
+			.then(([responseData, dockerContainers]) => {
 				let response = JSON.parse(responseData)
-				response.containers = responseDockerContainers;
+				response.containers = dockerContainers;
 				return response;
 			});
 	},
 	containers: () => {
-		return si.dockerContainers();
+		return si.dockerContainers(true);
 	}
 };
 
