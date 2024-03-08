@@ -12,7 +12,7 @@ How to install DEB
 `dpkg -i virgo-api_1.0.0_all.deb`
 
 
-How to start service
+How to start service/server
 ---
 `systemctl enable --now virgo-api`
 
