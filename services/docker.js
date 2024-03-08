@@ -14,7 +14,7 @@ let docker = {
 					let dockerContainer = dockerContainers.find((container) => {
 						return container.name.includes(template.name);
 					});
-					template.installed = (dockerContainer !== undefined);
+					template.isInstalled = (dockerContainer !== undefined);
 					return template;
 				});
 			});
