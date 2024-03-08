@@ -4,6 +4,7 @@
   "description": "virgo API",
   "main": "server.js",
   "scripts": {
+    "deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js routes/ services/",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "node_deb": {

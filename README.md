@@ -4,7 +4,7 @@ How to build DEB
 
 `npm install`
 
-`node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js routes/ services/`
+`npm run deb`
 
 
 How to install DEB
