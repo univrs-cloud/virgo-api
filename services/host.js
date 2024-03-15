@@ -18,6 +18,7 @@ const ProxyHost = sequelize.define(
 	{
 		enabled: DataTypes.BOOLEAN,
 		domainNames: DataTypes.JSON,
+		sslForced: DataTypes.BOOLEAN,
 		forwardScheme: DataTypes.STRING,
 		forwardHost: DataTypes.STRING,
 		forwardPort: DataTypes.INTEGER
