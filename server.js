@@ -4,15 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const https = require('https');
+const { Server } = require('socket.io');
 const bodyParser = require('body-parser');
 const config = require('./config');
 const routes = require('./routes');
+const emitters = require('./emitters');
 
-const app = express();
 const options = {
 	key: fs.readFileSync(path.join(__dirname,'./cert/key.pem')),
 	cert: fs.readFileSync(path.join(__dirname,'./cert/cert.pem'))
 };
+const app = express();
+const sslServer = https.createServer(options, app);
+const io = new Server(sslServer);
+emitters(io);
 
 app.disable('x-powered-by');
 
@@ -59,7 +64,6 @@ app.use((err, req, res, next) => {
 	res.status(500).send({ error: 'Oops! Something went wrong.' });
 });
 
-const sslServer = https.createServer(options, app);
 sslServer.listen(config.server.port, () => {
 	console.log(`Server started at https://localhost:${config.server.port}`);
 });
