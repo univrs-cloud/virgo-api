@@ -12,8 +12,10 @@ try {
 	i2c = false;
 }
 
+let timeoutIds = {};
+let state = {};
+
 module.exports = (io) => {
-	let timeoutIds = {};
 	const getCpu = () => {
 		Promise.all([
 			si.currentLoad(),
@@ -21,13 +23,14 @@ module.exports = (io) => {
 			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
 		])
 			.then(([currentLoad, cpuTemperature, fan]) => {
-				io.emit('cpu', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
+				state.cpu = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
 				
 			})
 			.catch((error) => {
-				io.emit('cpu', false);
+				state.cpu = false;
 			})
 			.then(() => {
+				io.emit('cpu', state.cpu);
 				timeoutIds.cpu = setTimeout(getCpu, 5000);
 			});
 	};
@@ -35,12 +38,13 @@ module.exports = (io) => {
 	const getMemory = () => {
 		si.mem()
 			.then((memory) => {
-				io.emit('memory', memory);
+				state.memory = memory;
 			})
 			.catch((error) => {
-				io.emit('memory', false);
+				state.memory = false;
 			})
 			.then(() => {
+				io.emit('memory', state.memory);
 				timeoutIds.memory = setTimeout(getMemory, 10000);
 			});
 	};
@@ -71,12 +75,13 @@ module.exports = (io) => {
 					}
 					return fs;
 				});
-				io.emit('filesystem', filesystem);
+				state.filesystem = filesystem;
 			})
 			.catch((error) => {
-				io.emit('filesystem', error);
+				state.filesystem = false;
 			})
 			.then(() => {
+				io.emit('filesystem', state.filesystem);
 				timeoutIds.filesystem = setTimeout(getFilesystem, 60000);
 			});
 	};
@@ -84,19 +89,22 @@ module.exports = (io) => {
 	const getNetwork = () => {
 		si.networkStats()
 			.then((interfaces) => {
-				io.emit('network', interfaces[0]);
+				state.network = interfaces[0];
+				
 			})
 			.catch((error) => {
-				io.emit('network', false);
+				state.network = false;
 			})
 			.then(() => {
+				io.emit('network', state.network);
 				timeoutIds.network = setTimeout(getNetwork, 2000);
 			});
 	};
 
 	const getUps = () => {
 		if (!i2c) {
-			io.emit('ups', 'remote i/o error');
+			state.ups = 'remote i/o error';
+			io.emit('ups', state.ups);
 			return;
 		}
 
@@ -104,35 +112,63 @@ module.exports = (io) => {
 		try {
 			powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
 		} catch (error) {
-			io.emit('ups', error.message);
+			state.ups = error.message;
+			io.emit('ups', state.ups);
 			timeoutIds.ups = setTimeout(getUps, 5000);
 			return;
 		}
 
-		io.emit('ups', {
+		state.ups = {
 			batteryCharge: i2c.readByteSync(0x36, 4),
 			powerSource: powerSource
-		});
+		};
+		io.emit('ups', state.ups);
 		timeoutIds.ups = setTimeout(getUps, 60000);
 	};
 
 	const getTime = () => {
-		io.emit('time', si.time());
+		state.time = si.time();
+		io.emit('time', state.time);
 		timeoutIds.time = setTimeout(getTime, 60000);
 	};
 	
 	io.on('connection', (socket) => {
-		getCpu();
-		getMemory();
-		getFilesystem();
-		getNetwork();
-		getUps();
-		getTime();
+		if (state.cpu) {
+			io.emit('cpu', state.cpu);
+		} else {
+			getCpu();
+		}
+		if (state.memory) {
+			io.emit('memory', state.memory);
+		} else {
+			getMemory();
+		}
+		if (state.filesystem) {
+			io.emit('filesystem', state.filesystem);
+		} else {
+			getFilesystem();
+		}
+		if (state.network) {
+			io.emit('network', state.network);
+		} else {
+			getNetwork();
+		}
+		if (state.ups) {
+			io.emit('ups', state.ups);
+		} else {
+			getUps();
+		}
+		if (state.time) {
+			io.emit('time', state.time);
+		} else {
+			getTime();
+		}
 		
 		socket.on('disconnect', () => {
 			if (io.engine.clientsCount === 0) {
 				Object.entries(timeoutIds).map((timeoutId) => { clearTimeout(timeoutId); });
 				timeoutIds = {};
+				state = {};
 			}
 		});
 	});
