@@ -12,164 +12,189 @@ try {
 	i2c = false;
 }
 
-let timeoutIds = {};
+let io;
 let state = {};
 
-module.exports = (io) => {
-	const getCpu = () => {
-		Promise.all([
-			si.currentLoad(),
-			si.cpuTemperature(),
-			exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
-		])
-			.then(([currentLoad, cpuTemperature, fan]) => {
-				state.cpu = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
-				
-			})
-			.catch((error) => {
-				state.cpu = false;
-			})
-			.then(() => {
-				io.emit('cpu', state.cpu);
-				timeoutIds.cpu = setTimeout(getCpu, 5000);
+const setIo = (value) => {
+	io = value;
+};
+
+const pollCpu = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
+
+	Promise.all([
+		si.currentLoad(),
+		si.cpuTemperature(),
+		exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
+	])
+		.then(([currentLoad, cpuTemperature, fan]) => {
+			state.cpu = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
+			
+		})
+		.catch((error) => {
+			state.cpu = false;
+		})
+		.then(() => {
+			io.emit('cpu', state.cpu);
+			setTimeout(pollCpu, 5000);
+		});
+};
+
+const pollMemory = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
+
+	si.mem()
+		.then((memory) => {
+			state.memory = memory;
+		})
+		.catch((error) => {
+			state.memory = false;
+		})
+		.then(() => {
+			io.emit('memory', state.memory);
+			setTimeout(pollMemory, 10000);
+		});
+};
+
+const pollFilesystem = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
+
+	Promise.all([
+		si.fsSize(),
+		new Promise((resolve, reject) => {
+			zfs.list((error, datasets) => {
+				if (error) {
+					return reject(error);
+				}
+
+				resolve(datasets);
 			});
-	};
-
-	const getMemory = () => {
-		si.mem()
-			.then((memory) => {
-				state.memory = memory;
-			})
-			.catch((error) => {
-				state.memory = false;
-			})
-			.then(() => {
-				io.emit('memory', state.memory);
-				timeoutIds.memory = setTimeout(getMemory, 10000);
+		})
+	])
+		.then(([filesystem, datasets]) => {
+			filesystem.map((fs) => {
+				if (fs.type === 'zfs') {
+					let dataset = datasets.find((dataset) => {
+						return dataset.name === fs.fs;
+					});
+					fs.used = dataset.used;
+					fs.available = dataset.avail;
+					fs.size = dataset.used + dataset.avail;
+					fs.use = dataset.used * 100 / (dataset.used + dataset.avail);
+				}
+				return fs;
 			});
-	};
+			state.filesystem = filesystem;
+		})
+		.catch((error) => {
+			state.filesystem = false;
+		})
+		.then(() => {
+			io.emit('filesystem', state.filesystem);
+			setTimeout(pollFilesystem, 60000);
+		});
+};
 
-	const getFilesystem = () => {
-		Promise.all([
-			si.fsSize(),
-			new Promise((resolve, reject) => {
-				zfs.list((error, datasets) => {
-					if (error) {
-						return reject(error);
-					}
+const pollNetwork = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
 
-					resolve(datasets);
-				});
-			})
-		])
-			.then(([filesystem, datasets]) => {
-				filesystem.map((fs) => {
-					if (fs.type === 'zfs') {
-						let dataset = datasets.find((dataset) => {
-							return dataset.name === fs.fs;
-						});
-						fs.used = dataset.used;
-						fs.available = dataset.avail;
-						fs.size = dataset.used + dataset.avail;
-						fs.use = dataset.used * 100 / (dataset.used + dataset.avail);
-					}
-					return fs;
-				});
-				state.filesystem = filesystem;
-			})
-			.catch((error) => {
-				state.filesystem = false;
-			})
-			.then(() => {
-				io.emit('filesystem', state.filesystem);
-				timeoutIds.filesystem = setTimeout(getFilesystem, 60000);
-			});
-	};
+	si.networkStats()
+		.then((interfaces) => {
+			state.network = interfaces[0];
+			
+		})
+		.catch((error) => {
+			state.network = false;
+		})
+		.then(() => {
+			io.emit('network', state.network);
+			setTimeout(pollNetwork, 2000);
+		});
+};
 
-	const getNetwork = () => {
-		si.networkStats()
-			.then((interfaces) => {
-				state.network = interfaces[0];
-				
-			})
-			.catch((error) => {
-				state.network = false;
-			})
-			.then(() => {
-				io.emit('network', state.network);
-				timeoutIds.network = setTimeout(getNetwork, 2000);
-			});
-	};
+const pollUps = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
 
-	const getUps = () => {
-		if (!i2c) {
-			state.ups = 'remote i/o error';
-			io.emit('ups', state.ups);
-			return;
-		}
-
-		let powerSource = '';
-		try {
-			powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
-		} catch (error) {
-			state.ups = error.message;
-			io.emit('ups', state.ups);
-			timeoutIds.ups = setTimeout(getUps, 5000);
-			return;
-		}
-
-		state.ups = {
-			batteryCharge: i2c.readByteSync(0x36, 4),
-			powerSource: powerSource
-		};
+	if (!i2c) {
+		state.ups = 'remote i/o error';
 		io.emit('ups', state.ups);
-		timeoutIds.ups = setTimeout(getUps, 60000);
-	};
+		return;
+	}
 
-	const getTime = () => {
-		state.time = si.time();
-		io.emit('time', state.time);
-		timeoutIds.time = setTimeout(getTime, 60000);
+	let powerSource = '';
+	try {
+		powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
+	} catch (error) {
+		state.ups = error.message;
+		io.emit('ups', state.ups);
+		setTimeout(pollUps, 5000);
+		return;
+	}
+
+	state.ups = {
+		batteryCharge: i2c.readByteSync(0x36, 4),
+		powerSource: powerSource
 	};
-	
+	io.emit('ups', state.ups);
+	setTimeout(pollUps, 60000);
+};
+
+const pollTime = () => {
+	if (io.engine.clientsCount === 0) {
+		return;
+	}
+
+	state.time = si.time();
+	io.emit('time', state.time);
+	setTimeout(pollTime, 60000);
+};
+
+module.exports = (io) => {	
+	setIo(io);
 	io.on('connection', (socket) => {
 		if (state.cpu) {
 			io.emit('cpu', state.cpu);
 		} else {
-			getCpu();
+			pollCpu();
 		}
 		if (state.memory) {
 			io.emit('memory', state.memory);
 		} else {
-			getMemory();
+			pollMemory();
 		}
 		if (state.filesystem) {
 			io.emit('filesystem', state.filesystem);
 		} else {
-			getFilesystem();
+			pollFilesystem();
 		}
 		if (state.network) {
 			io.emit('network', state.network);
 		} else {
-			getNetwork();
+			pollNetwork();
 		}
 		if (state.ups) {
 			io.emit('ups', state.ups);
 		} else {
-			getUps();
+			pollUps();
 		}
 		if (state.time) {
 			io.emit('time', state.time);
 		} else {
-			getTime();
+			pollTime();
 		}
 		
 		socket.on('disconnect', () => {
-			if (io.engine.clientsCount === 0) {
-				Object.entries(timeoutIds).map((timeoutId) => { clearTimeout(timeoutId); });
-				timeoutIds = {};
-				state = {};
-			}
+			//
 		});
 	});
 };
