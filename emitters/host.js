@@ -161,6 +161,7 @@ const pollTime = () => {
 
 module.exports = (io) => {	
 	setIo(io);
+	
 	io.on('connection', (socket) => {
 		if (state.cpu) {
 			io.emit('cpu', state.cpu);
