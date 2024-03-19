@@ -1,33 +1,9 @@
 const fs = require('fs');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
-const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zfs } = require('zfs');
 const { I2C } = require('raspi-i2c');
-
-const sequelize = new Sequelize({
-	dialect: 'sqlite',
-	storage: '/portainer/Files/AppData/Config/nginx-proxy-manager/data/database.sqlite',
-	define: {
-		timestamps: false
-	}
-});
-const ProxyHost = sequelize.define(
-	'ProxyHost',
-	{
-		enabled: DataTypes.BOOLEAN,
-		domainNames: DataTypes.JSON,
-		sslForced: DataTypes.BOOLEAN,
-		forwardScheme: DataTypes.STRING,
-		forwardHost: DataTypes.STRING,
-		forwardPort: DataTypes.INTEGER
-	},
-	{
-		tableName: 'proxy_host',
-		underscored: true
-	}
-);
 
 let i2c;
 try {
@@ -46,7 +22,13 @@ module.exports = (io) => {
 		])
 			.then(([currentLoad, cpuTemperature, fan]) => {
 				io.emit('cpu', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
-				timeoutIds.cpu = setTimeout(getCpu, 3000);
+				
+			})
+			.catch((error) => {
+				io.emit('cpu', false);
+			})
+			.then(() => {
+				timeoutIds.cpu = setTimeout(getCpu, 5000);
 			});
 	};
 
@@ -54,7 +36,12 @@ module.exports = (io) => {
 		si.mem()
 			.then((memory) => {
 				io.emit('memory', memory);
-				timeoutIds.memory = setTimeout(getMemory, 5000);
+			})
+			.catch((error) => {
+				io.emit('memory', false);
+			})
+			.then(() => {
+				timeoutIds.memory = setTimeout(getMemory, 10000);
 			});
 	};
 
@@ -85,6 +72,11 @@ module.exports = (io) => {
 					return fs;
 				});
 				io.emit('filesystem', filesystem);
+			})
+			.catch((error) => {
+				io.emit('filesystem', error);
+			})
+			.then(() => {
 				timeoutIds.filesystem = setTimeout(getFilesystem, 60000);
 			});
 	};
@@ -93,6 +85,11 @@ module.exports = (io) => {
 		si.networkStats()
 			.then((interfaces) => {
 				io.emit('network', interfaces[0]);
+			})
+			.catch((error) => {
+				io.emit('network', false);
+			})
+			.then(() => {
 				timeoutIds.network = setTimeout(getNetwork, 2000);
 			});
 	};
@@ -108,6 +105,7 @@ module.exports = (io) => {
 			powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
 		} catch (error) {
 			io.emit('ups', error.message);
+			timeoutIds.ups = setTimeout(getUps, 5000);
 			return;
 		}
 
@@ -120,7 +118,7 @@ module.exports = (io) => {
 
 	const getTime = () => {
 		io.emit('time', si.time());
-		timeoutIds.time = setTimeout(getTime, 10000);
+		timeoutIds.time = setTimeout(getTime, 60000);
 	};
 	
 	io.on('connection', (socket) => {
@@ -130,7 +128,7 @@ module.exports = (io) => {
 		getNetwork();
 		getUps();
 		getTime();
-
+		
 		socket.on('disconnect', () => {
 			if (io.engine.clientsCount === 0) {
 				Object.entries(timeoutIds).map((timeoutId) => { clearTimeout(timeoutId); });
