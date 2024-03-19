@@ -21,6 +21,7 @@ const setIo = (value) => {
 
 const pollCpu = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.cpu;
 		return;
 	}
 
@@ -44,6 +45,7 @@ const pollCpu = () => {
 
 const pollMemory = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.memory;
 		return;
 	}
 
@@ -62,6 +64,7 @@ const pollMemory = () => {
 
 const pollFilesystem = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.filesystem;
 		return;
 	}
 
@@ -103,6 +106,7 @@ const pollFilesystem = () => {
 
 const pollNetwork = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.network;
 		return;
 	}
 
@@ -122,11 +126,21 @@ const pollNetwork = () => {
 
 const pollUps = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.ups;
 		return;
 	}
 
 	if (!i2c) {
 		state.ups = 'remote i/o error';
+		io.emit('ups', state.ups);
+		return;
+	}
+
+	let batteryCharge;
+	try {
+		batteryCharge = i2c.readByteSync(0x36, 4);
+	} catch (error) {
+		state.ups = [];
 		io.emit('ups', state.ups);
 		return;
 	}
@@ -142,7 +156,7 @@ const pollUps = () => {
 	}
 
 	state.ups = {
-		batteryCharge: i2c.readByteSync(0x36, 4),
+		batteryCharge: batteryCharge,
 		powerSource: powerSource
 	};
 	io.emit('ups', state.ups);
@@ -151,6 +165,7 @@ const pollUps = () => {
 
 const pollTime = () => {
 	if (io.engine.clientsCount === 0) {
+		delete state.time;
 		return;
 	}
 
