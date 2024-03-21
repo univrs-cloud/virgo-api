@@ -2,7 +2,7 @@ const fs = require('fs');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const si = require('systeminformation');
-const { zfs } = require('zfs');
+const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
 
 let i2c;
@@ -71,25 +71,29 @@ const pollFilesystem = () => {
 	Promise.all([
 		si.fsSize(),
 		new Promise((resolve, reject) => {
-			zfs.list((error, datasets) => {
+			zpool.list((error, pools) => {
 				if (error) {
 					return reject(error);
 				}
 
-				resolve(datasets);
+				resolve(pools);
 			});
 		})
 	])
-		.then(([filesystem, datasets]) => {
+		.then(([filesystem, pools]) => {
 			filesystem.map((fs) => {
 				if (fs.type === 'zfs') {
-					let dataset = datasets.find((dataset) => {
-						return dataset.name === fs.fs;
+					let pool = pools.find((pool) => {
+						return pool.name === fs.fs;
 					});
-					fs.used = dataset.used;
-					fs.available = dataset.avail;
-					fs.size = dataset.used + dataset.avail;
-					fs.use = dataset.used * 100 / (dataset.used + dataset.avail);
+					if (!pool) {
+						return;
+					}
+
+					fs.used = parseInt(pool.alloc);
+					fs.available = parseInt(pool.free);
+					fs.size = parseInt(pool.size);
+					fs.use = parseInt(pool.cap);
 				}
 				return fs;
 			});
