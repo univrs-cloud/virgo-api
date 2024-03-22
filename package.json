@@ -23,7 +23,7 @@
 	"author": "univrs",
 	"license": "ISC",
 	"dependencies": {
-	  "@univrs/zfs": "^1.0.0",
+	  "@univrs/zfs": "^1.0.1",
 	  "axios": "^1.6.8",
 	  "body-parser": "^1.20.2",
 	  "express": "^4.19.1",

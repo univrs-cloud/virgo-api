@@ -62,14 +62,13 @@ const pollMemory = () => {
 		});
 };
 
-const pollFilesystem = () => {
+const pollStorage = () => {
 	if (io.engine.clientsCount === 0) {
-		delete state.filesystem;
+		delete state.storage;
 		return;
 	}
 
 	Promise.all([
-		si.fsSize(),
 		new Promise((resolve, reject) => {
 			zpool.list((error, pools) => {
 				if (error) {
@@ -78,33 +77,39 @@ const pollFilesystem = () => {
 
 				resolve(pools);
 			});
-		})
+		}),
+		si.fsSize()
 	])
-		.then(([filesystem, pools]) => {
-			filesystem.map((fs) => {
-				if (fs.type === 'zfs') {
-					let pool = pools.find((pool) => {
-						return pool.name === fs.fs;
-					});
-					if (!pool) {
-						return;
-					}
-
-					fs.used = parseInt(pool.alloc);
-					fs.available = parseInt(pool.free);
-					fs.size = parseInt(pool.size);
-					fs.use = parseInt(pool.cap);
-				}
-				return fs;
+		.then(([pools, filesystem]) => {
+			let fs = filesystem.find((fs) => {
+				return fs.mount === '/';
 			});
-			state.filesystem = filesystem;
+			if (fs) {
+				let pool = {
+					name: 'system',
+					size: fs.size,
+					alloc: fs.used,
+					free: fs.available,
+					cap: fs.use,
+					health: 'ONLINE'
+				}
+				pools.push(pool);
+			}
+			let storage = pools.map((pool) => {
+				pool.size = Number.parseInt(pool.size);
+				pool.alloc = Number.parseInt(pool.alloc);
+				pool.free = Number.parseInt(pool.free);
+				pool.cap = Number.parseFloat(pool.cap);
+				return pool;
+			});
+			state.storage = storage;
 		})
 		.catch((error) => {
-			state.filesystem = false;
+			state.storage = false;
 		})
 		.then(() => {
-			io.emit('filesystem', state.filesystem);
-			setTimeout(pollFilesystem, 60000);
+			io.emit('storage', state.storage);
+			setTimeout(pollStorage, 60000);
 		});
 };
 
@@ -116,8 +121,15 @@ const pollNetwork = () => {
 
 	si.networkStats()
 		.then((interfaces) => {
-			state.network = interfaces[0];
-			
+			let iface = interfaces[0];
+			if (iface.rx_sec === null) {
+				iface.rx_sec = 0;
+			}
+			if (iface.tx_sec === null) {
+				iface.tx_sec = 0;
+			}
+			console.log(iface);
+			state.network = iface;
 		})
 		.catch((error) => {
 			state.network = false;
@@ -192,10 +204,10 @@ module.exports = (io) => {
 		} else {
 			pollMemory();
 		}
-		if (state.filesystem) {
-			io.emit('filesystem', state.filesystem);
+		if (state.storage) {
+			io.emit('storage', state.storage);
 		} else {
-			pollFilesystem();
+			pollStorage();
 		}
 		if (state.network) {
 			io.emit('network', state.network);
