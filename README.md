@@ -9,7 +9,7 @@ How to build DEB
 
 How to install DEB
 ---
-`dpkg -i virgo-api_1.0.0_all.deb`
+`apt install -y ./virgo-api_1.0.0_all.deb`
 
 
 How to start service/server
