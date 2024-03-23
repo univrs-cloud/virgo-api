@@ -6,7 +6,7 @@ const si = require('systeminformation');
 let docker = {
 	templates: () => {
 		return Promise.all([
-			axios.get('https://raw.githubusercontent.com/univrs-cloud/portainer/main/template.json'),
+			axios.get('https://raw.githubusercontent.com/univrs-cloud/virgo-apps/main/template.json'),
 			si.dockerContainers(true)
 		])
 			.then(([responseTemplate, dockerContainers]) => {
