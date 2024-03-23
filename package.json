@@ -11,7 +11,7 @@
 	  "init": "systemd",
 	  "version": "1.0.0",
 	  "install_dir": "/var/www",
-	  "dependencies": "zfsutils-linux",
+	  "dependencies": "zfsutils-linux,apt-show-versions",
 	  "user": "root",
 	  "templates": {
 		"postinst": "templates/postinstall"
