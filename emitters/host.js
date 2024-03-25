@@ -128,7 +128,6 @@ const pollNetwork = () => {
 			if (iface.tx_sec === null) {
 				iface.tx_sec = 0;
 			}
-			console.log(iface);
 			state.network = iface;
 		})
 		.catch((error) => {

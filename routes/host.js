@@ -27,4 +27,16 @@ router
 			});
 	});
 
+router
+	.route('/v1/updates/')
+	.get((req, res) => {
+		service.updates()
+			.then((updates) => {
+				res.json(updates);
+			})
+			.catch((error) => {
+				res.status(500).json({ error: error.message });
+			});
+	});
+
 module.exports = router;
