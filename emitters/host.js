@@ -262,6 +262,7 @@ const pollTime = () => {
 
 module.exports = (io) => {	
 	setIo(io);
+	
 	si.system()
 		.then((system) => {
 			state.system = system;
