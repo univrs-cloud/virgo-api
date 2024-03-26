@@ -29,9 +29,6 @@ let docker = {
 				response.containers = dockerContainers;
 				return response;
 			});
-	},
-	containers: () => {
-		return si.dockerContainers(true);
 	}
 };
 

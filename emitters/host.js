@@ -1,6 +1,7 @@
 const fs = require('fs');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
+const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
@@ -12,11 +13,81 @@ try {
 	i2c = false;
 }
 
+const sequelize = new Sequelize({
+	dialect: 'sqlite',
+	storage: '/portainer/Files/AppData/Config/nginx-proxy-manager/data/database.sqlite',
+	define: {
+		timestamps: false
+	}
+});
+const ProxyHost = sequelize.define(
+	'ProxyHost',
+	{
+		enabled: DataTypes.BOOLEAN,
+		domainNames: DataTypes.JSON,
+		sslForced: DataTypes.BOOLEAN,
+		forwardScheme: DataTypes.STRING,
+		forwardHost: DataTypes.STRING,
+		forwardPort: DataTypes.INTEGER
+	},
+	{
+		tableName: 'proxy_host',
+		underscored: true
+	}
+);
+
 let io;
 let state = {};
 
 const setIo = (value) => {
 	io = value;
+};
+
+const pollUpdates = () => {
+	if (io.engine.clientsCount === 0) {
+		delete state.updates;
+		return;
+	}
+
+	exec('apt-show-versions -u')
+		.then((response) => {
+			state.updates = response.stdout.trim().split('\n').map((line) => {
+				let parts = line.split(' ');
+				return {
+					package: parts[0].split(':')[0],
+					version: {
+						installed: parts[1].split('~')[0],
+						upgradableTo: parts[4].split('~')[0]
+					}
+				};
+			});
+		})
+		.catch((error) => {
+			state.updates = false;
+		})
+		.then(() => {
+			io.emit('updates', state.updates);
+			setTimeout(pollUpdates, 3600000);
+		});
+};
+
+const pollProxies = () => {
+	if (io.engine.clientsCount === 0) {
+		delete state.proxies;
+		return;
+	}
+
+	 ProxyHost.findAll()
+	 	.then((proxies) => {
+			state.proxies = proxies;
+		})
+		.catch((error) => {
+			state.proxies = false;
+		})
+		.then(() => {
+			io.emit('proxies', state.proxies);
+			setTimeout(pollProxies, 3600000);
+		});
 };
 
 const pollCpu = () => {
@@ -191,8 +262,25 @@ const pollTime = () => {
 
 module.exports = (io) => {	
 	setIo(io);
+	si.system()
+		.then((system) => {
+			state.system = system;
+		});
 	
 	io.on('connection', (socket) => {
+		if (state.system) {
+			io.emit('system', state.system);
+		}
+		if (state.updates) {
+			io.emit('updates', state.updates);
+		} else {
+			pollUpdates();
+		}
+		if (state.proxies) {
+			io.emit('proxies', state.proxies);
+		} else {
+			pollProxies();
+		}
 		if (state.cpu) {
 			io.emit('cpu', state.cpu);
 		} else {
