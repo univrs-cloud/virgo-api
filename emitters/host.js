@@ -260,7 +260,11 @@ const pollTime = () => {
 	setTimeout(pollTime, 60000);
 };
 
-module.exports = (io) => {	
+const upgrade = () => {
+	// TODO: run upgrade command
+};
+
+module.exports = (io) => {
 	setIo(io);
 	
 	si.system()
@@ -312,6 +316,8 @@ module.exports = (io) => {
 		} else {
 			pollTime();
 		}
+
+		socket.on('upgrade', upgrade);
 		
 		socket.on('disconnect', () => {
 			//
