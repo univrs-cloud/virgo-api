@@ -62,7 +62,11 @@ const pollTemplates = () => {
 		});
 };
 
-module.exports = (io) => {	
+const install = (config) => {
+	console.log('install', config);
+};
+
+module.exports = (io) => {
 	setIo(io);
 
 	io.on('connection', (socket) => {
@@ -76,6 +80,8 @@ module.exports = (io) => {
 		} else {
 			pollTemplates();
 		}
+
+		socket.on('install', install);
 
 		socket.on('disconnect', () => {
 			//

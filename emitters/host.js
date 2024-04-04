@@ -261,7 +261,7 @@ const pollTime = () => {
 };
 
 const upgrade = () => {
-	// TODO: run upgrade command
+	console.log('upgrade');
 };
 
 module.exports = (io) => {
