@@ -44,7 +44,7 @@ app.use((req, res, next) => {
 	} else {
 		res.clearCookie('account');
 	}
-	res.header("Access-Control-Allow-Origin", "*");
+	res.header('Access-Control-Allow-Origin', '*');
 	next();
 });
 
