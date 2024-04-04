@@ -1,13 +1,7 @@
-let io;
+let nsp;
 let state = {};
 
-const setIo = (value) => {
-	io = value;
-};
-
 module.exports = (io) => {
-	setIo(io);
-
 	state.shares = [
 		{
 			name: 'downloads',
@@ -27,9 +21,9 @@ module.exports = (io) => {
 		}
 	];
 
-	io.on('connection', (socket) => {
+	nsp = io.of('/share').on('connection', (socket) => {
 		if (state.shares) {
-			io.emit('shares', state.shares);
+			nsp.emit('shares', state.shares);
 		}
 
 		socket.on('disconnect', () => {

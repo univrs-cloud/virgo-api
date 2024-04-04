@@ -36,15 +36,11 @@ const ProxyHost = sequelize.define(
 	}
 );
 
-let io;
+let nsp;
 let state = {};
 
-const setIo = (value) => {
-	io = value;
-};
-
 const pollUpdates = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.updates;
 		return;
 	}
@@ -66,13 +62,13 @@ const pollUpdates = () => {
 			state.updates = false;
 		})
 		.then(() => {
-			io.emit('updates', state.updates);
+			nsp.emit('updates', state.updates);
 			setTimeout(pollUpdates, 3600000);
 		});
 };
 
 const pollProxies = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.proxies;
 		return;
 	}
@@ -85,13 +81,13 @@ const pollProxies = () => {
 			state.proxies = false;
 		})
 		.then(() => {
-			io.emit('proxies', state.proxies);
+			nsp.emit('proxies', state.proxies);
 			setTimeout(pollProxies, 3600000);
 		});
 };
 
 const pollCpu = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.cpu;
 		return;
 	}
@@ -109,13 +105,13 @@ const pollCpu = () => {
 			state.cpu = false;
 		})
 		.then(() => {
-			io.emit('cpu', state.cpu);
+			nsp.emit('cpu', state.cpu);
 			setTimeout(pollCpu, 5000);
 		});
 };
 
 const pollMemory = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.memory;
 		return;
 	}
@@ -128,13 +124,13 @@ const pollMemory = () => {
 			state.memory = false;
 		})
 		.then(() => {
-			io.emit('memory', state.memory);
+			nsp.emit('memory', state.memory);
 			setTimeout(pollMemory, 10000);
 		});
 };
 
 const pollStorage = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.storage;
 		return;
 	}
@@ -179,13 +175,13 @@ const pollStorage = () => {
 			state.storage = false;
 		})
 		.then(() => {
-			io.emit('storage', state.storage);
+			nsp.emit('storage', state.storage);
 			setTimeout(pollStorage, 60000);
 		});
 };
 
 const pollNetwork = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.network;
 		return;
 	}
@@ -205,20 +201,20 @@ const pollNetwork = () => {
 			state.network = false;
 		})
 		.then(() => {
-			io.emit('network', state.network);
+			nsp.emit('network', state.network);
 			setTimeout(pollNetwork, 2000);
 		});
 };
 
 const pollUps = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.ups;
 		return;
 	}
 
 	if (!i2c) {
 		state.ups = 'remote i/o error';
-		io.emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		return;
 	}
 
@@ -227,7 +223,7 @@ const pollUps = () => {
 		batteryCharge = i2c.readByteSync(0x36, 4);
 	} catch (error) {
 		state.ups = [];
-		io.emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		return;
 	}
 
@@ -236,7 +232,7 @@ const pollUps = () => {
 		powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
 	} catch (error) {
 		state.ups = error.message;
-		io.emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		setTimeout(pollUps, 5000);
 		return;
 	}
@@ -245,18 +241,18 @@ const pollUps = () => {
 		batteryCharge: batteryCharge,
 		powerSource: powerSource
 	};
-	io.emit('ups', state.ups);
+	nsp.emit('ups', state.ups);
 	setTimeout(pollUps, 60000);
 };
 
 const pollTime = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.time;
 		return;
 	}
 
 	state.time = si.time();
-	io.emit('time', state.time);
+	nsp.emit('time', state.time);
 	setTimeout(pollTime, 60000);
 };
 
@@ -265,54 +261,52 @@ const upgrade = () => {
 };
 
 module.exports = (io) => {
-	setIo(io);
-	
 	si.system()
 		.then((system) => {
 			state.system = system;
 		});
 	
-	io.on('connection', (socket) => {
+	nsp = io.of('/host').on('connection', (socket) => {
 		if (state.system) {
-			io.emit('system', state.system);
+			nsp.emit('system', state.system);
 		}
 		if (state.updates) {
-			io.emit('updates', state.updates);
+			nsp.emit('updates', state.updates);
 		} else {
 			pollUpdates();
 		}
 		if (state.proxies) {
-			io.emit('proxies', state.proxies);
+			nsp.emit('proxies', state.proxies);
 		} else {
 			pollProxies();
 		}
 		if (state.cpu) {
-			io.emit('cpu', state.cpu);
+			nsp.emit('cpu', state.cpu);
 		} else {
 			pollCpu();
 		}
 		if (state.memory) {
-			io.emit('memory', state.memory);
+			nsp.emit('memory', state.memory);
 		} else {
 			pollMemory();
 		}
 		if (state.storage) {
-			io.emit('storage', state.storage);
+			nsp.emit('storage', state.storage);
 		} else {
 			pollStorage();
 		}
 		if (state.network) {
-			io.emit('network', state.network);
+			nsp.emit('network', state.network);
 		} else {
 			pollNetwork();
 		}
 		if (state.ups) {
-			io.emit('ups', state.ups);
+			nsp.emit('ups', state.ups);
 		} else {
 			pollUps();
 		}
 		if (state.time) {
-			io.emit('time', state.time);
+			nsp.emit('time', state.time);
 		} else {
 			pollTime();
 		}

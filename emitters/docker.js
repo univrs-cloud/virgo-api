@@ -3,15 +3,11 @@ const path = require('path');
 const axios = require('axios');
 const si = require('systeminformation');
 
-let io;
+let nsp;
 let state = {};
 
-const setIo = (value) => {
-	io = value;
-};
-
 const pollConfigured = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.configured;
 		return;
 	}
@@ -29,13 +25,13 @@ const pollConfigured = () => {
 			state.configured = false;
 		})
 		.then(() => {
-			io.emit('configured', state.configured);
+			nsp.emit('configured', state.configured);
 			setTimeout(pollConfigured, 2000);
 		});
 };
 
 const pollTemplates = () => {
-	if (io.engine.clientsCount === 0) {
+	if (nsp.server.engine.clientsCount === 0) {
 		delete state.templates;
 		return;
 	}
@@ -57,7 +53,7 @@ const pollTemplates = () => {
 			state.templates = false;
 		})
 		.then(() => {
-			io.emit('templates', state.templates);
+			nsp.emit('templates', state.templates);
 			setTimeout(pollTemplates, 3600000);
 		});
 };
@@ -67,16 +63,14 @@ const install = (config) => {
 };
 
 module.exports = (io) => {
-	setIo(io);
-
-	io.on('connection', (socket) => {
+	nsp = io.of('/docker').on('connection', (socket) => {
 		if (state.configured) {
-			io.emit('configured', state.configured);
+			nsp.emit('configured', state.configured);
 		} else {
 			pollConfigured();
 		}
 		if (state.templates) {
-			io.emit('templates', state.templates);
+			nsp.emit('templates', state.templates);
 		} else {
 			pollTemplates();
 		}
