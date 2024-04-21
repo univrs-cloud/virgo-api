@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 			name: req.headers['remote-name'],
 			user: req.headers['remote-user'],
 			email: req.headers['remote-email'],
-			groups: req.headers['remote-name']?.split(','),
+			groups: req.headers['remote-groups']?.split(',')
 		};
 		res.cookie('account', JSON.stringify(account), {
 			encode: (val) => { return val; },
