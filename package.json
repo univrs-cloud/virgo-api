@@ -1,6 +1,6 @@
 {
 	"name": "virgo-api",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"description": "virgo API",
 	"main": "server.js",
 	"scripts": {
@@ -9,7 +9,7 @@
 	},
 	"node_deb": {
 	  "init": "systemd",
-	  "version": "1.0.2",
+	  "version": "1.0.3",
 	  "install_dir": "/var/www",
 	  "dependencies": "zfsutils-linux,apt-show-versions",
 	  "user": "root",
@@ -31,6 +31,7 @@
 	  "express": "^4.19.2",
 	  "express-rate-limit": "^7.2.0",
 	  "express-validator": "^7.0.1",
+	  "node-apt-get": "^0.1.1",
 	  "path": "^0.12.7",
 	  "raspi": "^6.0.1",
 	  "raspi-i2c": "^6.2.4",

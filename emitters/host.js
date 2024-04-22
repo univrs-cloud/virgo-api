@@ -5,6 +5,7 @@ const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
+const apt = require('node-apt-get');
 
 let i2c;
 try {
@@ -37,17 +38,60 @@ const ProxyHost = sequelize.define(
 );
 
 let nsp;
+let timeouts = {};
 let state = {};
+let upgradeProcess = null;
 
-const pollUpdates = () => {
-	if (nsp.server.engine.clientsCount === 0) {
-		delete state.updates;
+apt.spawnOptions.stdio = ['pipe', 'pipe', 'pipe'];
+apt.spawnOptions.detached = true;
+
+const upgrade = () => {
+	if (upgradeProcess !== null) {
 		return;
 	}
 
+	state.upgrade = {
+		state: 'running',
+		steps: []
+	};
+	upgradeProcess = apt.upgrade({ 'assume-yes': true });
+	upgradeProcess.unref();
+	upgradeProcess.stdout
+		.on('data', (data) => {
+			data = data.toString().trim();
+			if (data !== '') {
+				state.upgrade.steps.push(data);
+				nsp.emit('upgrade', state.upgrade);
+			}
+		});
+	upgradeProcess
+		.on('close', (code) => {
+			state.upgrade.state = (code === 0 ? 'succeeded' : 'failed');
+			nsp.emit('upgrade', state.upgrade);
+			delete state.upgrade;
+			checkUpdates();
+			upgradeProcess = null;
+		});
+};
+
+const checkUpdates = () => {
+	if (upgradeProcess === null) {
+		nsp.emit('upgrade', null);
+	}
+	clearTimeout(timeouts.updates);
+	delete timeouts.updates;
+	pollUpdates();
+};
+
+const pollUpdates = () => {
 	exec('apt-show-versions -u')
 		.then((response) => {
-			state.updates = response.stdout.trim().split('\n').map((line) => {
+			let stdout = response.stdout.trim();
+			if (stdout === '') {
+				state.updates = [];
+				return;
+			}
+			state.updates = stdout.split('\n').map((line) => {
 				let parts = line.split(' ');
 				return {
 					package: parts[0].split(':')[0],
@@ -63,7 +107,7 @@ const pollUpdates = () => {
 		})
 		.then(() => {
 			nsp.emit('updates', state.updates);
-			setTimeout(pollUpdates, 3600000);
+			timeouts.updates = setTimeout(pollUpdates, 3600000);
 		});
 };
 
@@ -99,7 +143,7 @@ const pollCpu = () => {
 	])
 		.then(([currentLoad, cpuTemperature, fan]) => {
 			state.cpu = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
-			
+
 		})
 		.catch((error) => {
 			state.cpu = false;
@@ -256,16 +300,12 @@ const pollTime = () => {
 	setTimeout(pollTime, 60000);
 };
 
-const upgrade = () => {
-	console.log('upgrade');
-};
-
 module.exports = (io) => {
 	si.system()
 		.then((system) => {
 			state.system = system;
 		});
-	
+
 	nsp = io.of('/host').on('connection', (socket) => {
 		if (state.system) {
 			nsp.emit('system', state.system);
@@ -311,8 +351,9 @@ module.exports = (io) => {
 			pollTime();
 		}
 
+		socket.on('updates', checkUpdates);
 		socket.on('upgrade', upgrade);
-		
+
 		socket.on('disconnect', () => {
 			//
 		});
