@@ -1,6 +1,5 @@
 #!/bin/bash
 
-set -e
 set -o pipefail
 
 touch /var/www/virgo-api/data.json
