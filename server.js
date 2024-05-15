@@ -26,6 +26,9 @@ app.set('trust proxy', true);
 app.use(bodyParser.json());
 
 app.use((req, res, next) => {
+	let hostname = req.hostname.split('.');
+	hostname.splice(0, 1);
+	let domain = hostname.join('.');
 	if (req.headers['remote-user']) {
 		const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
 		let account = {
@@ -35,6 +38,7 @@ app.use((req, res, next) => {
 			groups: req.headers['remote-groups']?.split(',')
 		};
 		res.cookie('account', JSON.stringify(account), {
+			domain: domain,
 			encode: (val) => { return val; },
 			httpOnly: false,
 			secure: true,
@@ -42,7 +46,9 @@ app.use((req, res, next) => {
 			maxAge: SIX_MONTHS_MS
 		});
 	} else {
-		res.clearCookie('account');
+		res.clearCookie('account', {
+			domain: domain
+		});
 	}
 	res.header('Access-Control-Allow-Origin', '*');
 	next();
