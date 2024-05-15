@@ -9,7 +9,6 @@
 	},
 	"node_deb": {
 	  "init": "systemd",
-	  "version": "1.0.5",
 	  "install_dir": "/var/www",
 	  "dependencies": "zfsutils-linux,apt-show-versions",
 	  "user": "root",
