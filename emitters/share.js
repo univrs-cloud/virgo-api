@@ -3,7 +3,7 @@ let state = {};
 
 module.exports = (io) => {
 	state.shares = [
-		{
+		/*{
 			name: 'downloads',
 			isPrivate: false,
 			cap: 47
@@ -18,7 +18,7 @@ module.exports = (io) => {
 			isPrivate: true,
 			cap: 33
 	
-		}
+		}*/
 	];
 
 	nsp = io.of('/share').on('connection', (socket) => {
