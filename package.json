@@ -1,43 +1,43 @@
 {
 	"name": "virgo-api",
-	"version": "1.0.9",
+	"version": "1.0.10",
 	"description": "virgo API",
 	"main": "server.js",
 	"scripts": {
-	  "deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ routes/ services/ emitters/",
-	  "test": "echo \"Error: no test specified\" && exit 1"
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ routes/ services/ emitters/",
+		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"node_deb": {
-	  "init": "systemd",
-	  "install_dir": "/var/www",
-	  "dependencies": "zfsutils-linux,apt-show-versions",
-	  "user": "root",
-	  "templates": {
-		"postinst": "templates/postinstall"
-	  },
-	  "entrypoints": {
-		"daemon": "server.js"
-	  }
+		"init": "systemd",
+		"install_dir": "/var/www",
+		"dependencies": "zfsutils-linux,apt-show-versions",
+		"user": "root",
+		"templates": {
+			"postinst": "templates/postinstall"
+		},
+		"entrypoints": {
+			"daemon": "server.js"
+		}
 	},
 	"engines": {
 		"node": ">=20.12.2",
 		"npm": ">=10.5.0"
 	},
 	"dependencies": {
-	  "@univrs/zfs": "^1.0.1",
-	  "axios": "^1.7.2",
-	  "body-parser": "^1.20.2",
-	  "express": "^4.19.2",
-	  "express-rate-limit": "^7.3.1",
-	  "express-validator": "^7.1.0",
-	  "node-apt-get": "^0.1.1",
-	  "path": "^0.12.7",
-	  "raspi": "^6.0.1",
-	  "raspi-i2c": "^6.2.4",
-	  "sequelize": "^6.37.3",
-	  "socket.io": "^4.7.5",
-	  "sqlite3": "^5.1.7",
-	  "systeminformation": "^5.22.11"
+		"@univrs/zfs": "^1.0.1",
+		"axios": "^1.7.2",
+		"body-parser": "^1.20.2",
+		"express": "^4.19.2",
+		"express-rate-limit": "^7.3.1",
+		"express-validator": "^7.1.0",
+		"node-apt-get": "^0.1.1",
+		"path": "^0.12.7",
+		"raspi": "^6.0.1",
+		"raspi-i2c": "^6.2.4",
+		"sequelize": "^6.37.3",
+		"socket.io": "^4.7.5",
+		"sqlite3": "^5.1.7",
+		"systeminformation": "^5.22.11"
 	},
 	"author": "univrs",
 	"license": "UNLICENSED"
