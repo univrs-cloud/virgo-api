@@ -1,6 +1,6 @@
 {
 	"name": "virgo-api",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"description": "virgo API",
 	"main": "server.js",
 	"scripts": {
@@ -28,7 +28,7 @@
 	  "axios": "^1.7.2",
 	  "body-parser": "^1.20.2",
 	  "express": "^4.19.2",
-	  "express-rate-limit": "^7.2.0",
+	  "express-rate-limit": "^7.3.1",
 	  "express-validator": "^7.1.0",
 	  "node-apt-get": "^0.1.1",
 	  "path": "^0.12.7",
@@ -37,7 +37,7 @@
 	  "sequelize": "^6.37.3",
 	  "socket.io": "^4.7.5",
 	  "sqlite3": "^5.1.7",
-	  "systeminformation": "^5.22.9"
+	  "systeminformation": "^5.22.11"
 	},
 	"author": "univrs",
 	"license": "UNLICENSED"
