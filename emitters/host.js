@@ -224,6 +224,30 @@ const pollStorage = () => {
 		});
 };
 
+const pollDrives = () => {
+	if (nsp.server.engine.clientsCount === 0) {
+		delete state.drives;
+		return;
+	}
+	exec('smartctl --scan | awk \'{print $1}\' | xargs -I {} smartctl -a -j {} | jq -s \'.\'')
+		.then((response) => {
+			let stdout = JSON.parse(response.stdout);
+			state.drives = stdout.map((device) => {
+				return {
+					name: device.device.name,
+					temperature: device.temperature.current
+				};
+			})
+		})
+		.catch((error) => {
+			state.drives = false;
+		})
+		.then(() => {
+			nsp.emit('drives', state.drives);
+			setTimeout(pollDrives, 5000);
+		});
+};
+
 const pollNetwork = () => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.network;
@@ -334,6 +358,11 @@ module.exports = (io) => {
 			nsp.emit('storage', state.storage);
 		} else {
 			pollStorage();
+		}
+		if (state.drives) {
+			nsp.emit('drives', state.drives);
+		} else {
+			pollDrives();
 		}
 		if (state.network) {
 			nsp.emit('network', state.network);
