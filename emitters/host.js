@@ -229,22 +229,23 @@ const pollDrives = () => {
 		delete state.drives;
 		return;
 	}
-	exec('smartctl --scan | awk \'{print $1}\' | xargs -I {} smartctl -a -j {} | jq -s \'.\'')
+
+	exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .")
 		.then((response) => {
 			let stdout = JSON.parse(response.stdout);
-			state.drives = stdout.map((device) => {
+			state.drives = stdout.map((drive) => {
 				return {
-					name: device.device.name,
-					temperature: device.temperature.current
+					name: drive.device.name,
+					temperature: drive.temperature.current
 				};
-			})
+			});
 		})
 		.catch((error) => {
 			state.drives = false;
 		})
 		.then(() => {
 			nsp.emit('drives', state.drives);
-			setTimeout(pollDrives, 5000);
+			setTimeout(pollDrives, 60000);
 		});
 };
 
