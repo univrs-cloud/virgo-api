@@ -10,7 +10,7 @@
 	"node_deb": {
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "zfsutils-linux,apt-show-versions",
+		"dependencies": "zfsutils-linux,apt-show-versions,jq",
 		"user": "root",
 		"templates": {
 			"postinst": "templates/postinstall"
