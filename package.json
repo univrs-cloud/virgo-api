@@ -27,6 +27,7 @@
 		"@univrs/zfs": "^1.0.1",
 		"axios": "^1.7.2",
 		"body-parser": "^1.20.2",
+		"dockerode": "^4.0.2",
 		"express": "^4.19.2",
 		"express-rate-limit": "^7.4.0",
 		"express-validator": "^7.1.0",
