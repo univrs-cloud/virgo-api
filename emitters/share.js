@@ -31,7 +31,7 @@ const pollShares = () => {
 		})
 		.then(() => {
 			nsp.emit('shares', state.shares);
-			setTimeout(pollShares, 2000);
+			setTimeout(pollShares, 60000);
 		});
 };
 
