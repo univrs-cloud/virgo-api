@@ -62,6 +62,10 @@ const install = (config) => {
 	console.log('install', config);
 };
 
+const performAction = (config) => {
+	console.log('performAction', config);
+};
+
 module.exports = (io) => {
 	nsp = io.of('/docker').on('connection', (socket) => {
 		if (state.configured) {
@@ -76,6 +80,8 @@ module.exports = (io) => {
 		}
 
 		socket.on('install', install);
+
+		socket.on('performAction', performAction);
 
 		socket.on('disconnect', () => {
 			//
