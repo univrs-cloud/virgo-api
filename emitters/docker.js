@@ -5,8 +5,8 @@ const path = require('path');
 const axios = require('axios');
 const si = require('systeminformation');
 const dockerode = require('dockerode');
-const docker = new dockerode();
 
+const docker = new dockerode();
 let nsp;
 let state = {};
 let actionStates = [];
