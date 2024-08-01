@@ -1,10 +1,15 @@
 const fs = require('fs');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 const path = require('path');
 const axios = require('axios');
 const si = require('systeminformation');
+const dockerode = require('dockerode');
+const docker = new dockerode();
 
 let nsp;
 let state = {};
+let actionStates = [];
 
 const pollConfigured = () => {
 	if (nsp.server.engine.clientsCount === 0) {
@@ -63,7 +68,37 @@ const install = (config) => {
 };
 
 const performAction = (config) => {
-	console.log('performAction', config);
+	actionStates.push(config);
+	nsp.emit('actionStates', actionStates);
+	
+	let container = docker.getContainer(config.id);
+	container.inspect((error, data) => {
+		let composeProject = data.Config.Labels['com.docker.compose.project'];
+		if (composeProject) {
+			exec(`docker compose -p ${composeProject} ${config.action}`)
+				.then(() => {
+					cb();
+				})
+				.catch((error) => {
+					console.log(error);
+				});
+			return;
+		}
+
+		container[config.action]((error, data) => {
+			cb();
+			if (error !== null) {
+				console.log(error);
+			}
+		});
+	});
+
+	function cb() {
+		actionStates = actionStates.filter((actionState) => {
+			return actionState.id !== config.id;
+		});
+		nsp.emit('actionStates', actionStates);
+	}
 };
 
 module.exports = (io) => {
