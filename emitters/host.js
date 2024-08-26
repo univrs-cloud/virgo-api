@@ -36,7 +36,6 @@ const ProxyHost = sequelize.define(
 		underscored: true
 	}
 );
-
 let nsp;
 let timeouts = {};
 let state = {};

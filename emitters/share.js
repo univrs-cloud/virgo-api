@@ -20,7 +20,7 @@ const pollShares = () => {
 				let share = {
 					name: name,
 					isPrivate: value['guest ok']?.toLowerCase() !== 'yes',
-					cap: 0
+					cap: 100
 				};
 				state.shares.push(share);
 			}
