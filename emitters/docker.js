@@ -37,7 +37,7 @@ const pollTemplates = () => {
 	}
 
 	Promise.all([
-		axios.get('https://raw.githubusercontent.com/univrs-cloud/virgo-apps/main/template.json'),
+		axios.get('https://apps.univrs.cloud/template.json'),
 		si.dockerContainers(true)
 	])
 		.then(([responseTemplate, dockerContainers]) => {
