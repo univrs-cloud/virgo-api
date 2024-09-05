@@ -7,6 +7,7 @@ const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
 const apt = require('node-apt-get');
 
+let isAuthenticated = false;
 let i2c;
 try {
 	i2c = new I2C();
@@ -45,10 +46,15 @@ apt.spawnOptions.stdio = ['pipe', 'pipe', 'pipe'];
 apt.spawnOptions.detached = true;
 
 const upgrade = () => {
+	if (!isAuthenticated) {
+		nsp.emit('upgrade', false);
+		return;
+	}
+	
 	if (upgradeProcess !== null) {
 		return;
 	}
-
+	
 	state.upgrade = {
 		state: 'running',
 		steps: []
@@ -74,6 +80,11 @@ const upgrade = () => {
 };
 
 const checkUpdates = () => {
+	if (!isAuthenticated) {
+		nsp.emit('updates', false);
+		return;
+	}
+	
 	if (upgradeProcess === null) {
 		nsp.emit('upgrade', null);
 	}
@@ -331,6 +342,7 @@ module.exports = (io) => {
 		});
 
 	nsp = io.of('/host').on('connection', (socket) => {
+		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
 		if (state.system) {
 			nsp.emit('system', state.system);
 		}
