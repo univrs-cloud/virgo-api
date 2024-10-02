@@ -41,7 +41,6 @@ let nsp;
 let timeouts = {};
 let state = {};
 let upgradeProcess = null;
-let rebootProcess = null
 
 apt.spawnOptions.stdio = ['pipe', 'pipe', 'pipe'];
 apt.spawnOptions.detached = true;
@@ -52,7 +51,7 @@ const reboot = () => {
 		return;
 	}
 
-	if (state.reboot) {
+	if (state.reboot !== undefined) {
 		return;
 	}
 
@@ -74,7 +73,7 @@ const shutdown = () => {
 		return;
 	}
 
-	if (state.shutdown) {
+	if (state.shutdown !== undefined) {
 		return;
 	}
 
@@ -390,6 +389,12 @@ module.exports = (io) => {
 		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
 		if (state.system) {
 			nsp.emit('system', state.system);
+		}
+		if (state.reboot === undefined) {
+			nsp.emit('reboot', false);
+		}
+		if (state.shutdown === undefined) {
+			nsp.emit('shutdown', false);
 		}
 		if (state.updates) {
 			nsp.emit('updates', state.updates);
