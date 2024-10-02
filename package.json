@@ -26,9 +26,9 @@
 	"dependencies": {
 		"@univrs/zfs": "^1.0.1",
 		"axios": "^1.7.7",
-		"body-parser": "^1.20.2",
+		"body-parser": "^1.20.3",
 		"dockerode": "^4.0.2",
-		"express": "^4.19.2",
+		"express": "^4.21.0",
 		"express-rate-limit": "^7.4.0",
 		"express-validator": "^7.2.0",
 		"ini": "^5.0.0",
@@ -37,7 +37,7 @@
 		"raspi": "^6.0.1",
 		"raspi-i2c": "^6.2.4",
 		"sequelize": "^6.37.3",
-		"socket.io": "^4.7.5",
+		"socket.io": "^4.8.0",
 		"sqlite3": "^5.1.7",
 		"systeminformation": "^5.23.5"
 	},
