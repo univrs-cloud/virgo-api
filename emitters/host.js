@@ -41,9 +41,54 @@ let nsp;
 let timeouts = {};
 let state = {};
 let upgradeProcess = null;
+let rebootProcess = null
 
 apt.spawnOptions.stdio = ['pipe', 'pipe', 'pipe'];
 apt.spawnOptions.detached = true;
+
+const reboot = () => {
+	if (!isAuthenticated) {
+		nsp.emit('reboot', false);
+		return;
+	}
+
+	if (state.reboot) {
+		return;
+	}
+
+	exec('reboot')
+		.then((response) => {
+			state.reboot = true;
+		})
+		.catch((error) => {
+			state.reboot = false;
+		})
+		.then(() => {
+			nsp.emit('reboot', state.reboot);
+		});
+};
+
+const shutdown = () => {
+	if (!isAuthenticated) {
+		nsp.emit('shutdown', false);
+		return;
+	}
+
+	if (state.shutdown) {
+		return;
+	}
+
+	exec('sleep 5 && shutdown -h now')
+		.then((response) => {
+			state.shutdown = true;
+		})
+		.catch((error) => {
+			state.shutdown = false;
+		})
+		.then(() => {
+			nsp.emit('shutdown', state.shutdown);
+		});
+};
 
 const upgrade = () => {
 	if (!isAuthenticated) {
@@ -394,6 +439,8 @@ module.exports = (io) => {
 
 		socket.on('updates', checkUpdates);
 		socket.on('upgrade', upgrade);
+		socket.on('reboot', reboot);
+		socket.on('shutdown', shutdown);
 
 		socket.on('disconnect', () => {
 			//
