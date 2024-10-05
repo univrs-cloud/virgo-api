@@ -3,6 +3,7 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const spawn = childProcess.spawn;
+const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
@@ -97,15 +98,32 @@ const upgrade = () => {
 		return;
 	}
 	
+	touch.sync('./upgrade.log');
+	const logsWatcher = fs.watch('./upgrade.log', (eventType) => {
+		if (eventType === 'change') {
+			fs.readFile('./upgrade.log', 'utf8', (error, data) => {
+				if (error) {
+					return;
+				}
+				
+				data = data.toString().trim();
+				if (data !== '') {
+					state.upgrade.steps = data.split('\n');
+					nsp.emit('upgrade', state.upgrade);
+				}
+			});
+		}
+	});
+
 	state.upgrade = {
 		state: 'running',
 		steps: []
 	};
-	upgradeProcess = childProcess.spawn(
-		'apt',
-		['upgrade', '-y'],
+	upgradeProcess = spawn(
+		'bash',
+		['-c', 'apt-get upgrade -y > ./upgrade.log 2>&1'],
 		{
-			stdio: ['pipe', 'pipe', 'pipe'],
+			stdio: 'ignore',
 			detached: true,
 			env: {
 				DEBIAN_FRONTEND: 'noninteractive'
@@ -113,14 +131,6 @@ const upgrade = () => {
 		}
 	);
 	upgradeProcess.unref();
-	upgradeProcess.stdout
-		.on('data', (data) => {
-			data = data.toString().trim();
-			if (data !== '') {
-				state.upgrade.steps.push(data);
-				nsp.emit('upgrade', state.upgrade);
-			}
-		});
 	upgradeProcess
 		.on('close', (code) => {
 			state.upgrade.state = (code === 0 ? 'succeeded' : 'failed');
@@ -128,6 +138,8 @@ const upgrade = () => {
 			delete state.upgrade;
 			checkUpdates();
 			upgradeProcess = null;
+			logsWatcher.close();
+			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
 		});
 };
 
