@@ -120,27 +120,25 @@ const upgrade = () => {
 		steps: []
 	};
 	upgradeProcess = spawn(
-		'bash',
-		['-c', 'apt-get upgrade -y > ./upgrade.log 2>&1'],
+		'systemd-run',
+		['--unit=upgrade-system --description="System upgrade" --setenv=DEBIAN_FRONTEND=noninteractive', 'bash -c "apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"'],
 		{
+			shell: true,
 			stdio: 'ignore',
-			detached: true,
-			env: {
-				DEBIAN_FRONTEND: 'noninteractive'
-			}
+			detached: true
 		}
 	);
 	upgradeProcess.unref();
-	upgradeProcess
-		.on('close', (code) => {
-			state.upgrade.state = (code === 0 ? 'succeeded' : 'failed');
-			nsp.emit('upgrade', state.upgrade);
-			delete state.upgrade;
-			checkUpdates();
-			upgradeProcess = null;
-			logsWatcher.close();
-			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
-		});
+	// upgradeProcess
+	// 	.on('close', (code) => {
+	// 		state.upgrade.state = (code === 0 ? 'succeeded' : 'failed');
+	// 		nsp.emit('upgrade', state.upgrade);
+	// 		delete state.upgrade;
+	// 		checkUpdates();
+	// 		upgradeProcess = null;
+	// 		logsWatcher.close();
+	// 		fs.closeSync(fs.openSync('./upgrade.log', 'w'));
+	// 	});
 };
 
 const checkUpdates = () => {
