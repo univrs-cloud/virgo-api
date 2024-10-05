@@ -128,11 +128,12 @@ const checkUpgrade = () => {
 
 		upgradePid = parseInt(data.trim(), 10);
 		
+		if (upgradeLogsWatcher === null) {
+			watchUpgradeLog();
+		}
+
 		let intervalId = setInterval(() => {
 			if (isUpgradeInProgress()) {
-				if (upgradeLogsWatcher === null) {
-					watchUpgradeLog();
-				}
 				return;
 			}
 
