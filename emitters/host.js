@@ -102,7 +102,7 @@ const isUpgradeInProgress = () => {
 const watchUpgradeLog = () => {
 	touch.sync('./upgrade.log');
 	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
-		if (eventType === 'change') {
+		if (eventType === 'change' || state.upgrade.steps.length === 0) {
 			fs.readFile('./upgrade.log', 'utf8', (error, data) => {
 				if (error) {
 					return;
