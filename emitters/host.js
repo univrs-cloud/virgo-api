@@ -101,21 +101,28 @@ const isUpgradeInProgress = () => {
 
 const watchUpgradeLog = () => {
 	touch.sync('./upgrade.log');
+	if (state.upgrade === undefined) {
+		readUpgradeLog();
+	}
 	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
-		if (eventType === 'change' || state.upgrade.steps.length === 0) {
-			fs.readFile('./upgrade.log', 'utf8', (error, data) => {
-				if (error) {
-					return;
-				}
-				
-				data = data.toString().trim();
-				if (data !== '') {
-					state.upgrade.steps = data.split('\n');
-					nsp.emit('upgrade', state.upgrade);
-				}
-			});
+		if (eventType === 'change') {
+			readUpgradeLog();
 		}
 	});
+
+	function readUpgradeLog {
+		fs.readFile('./upgrade.log', 'utf8', (error, data) => {
+			if (error) {
+				return;
+			}
+			
+			data = data.toString().trim();
+			if (data !== '') {
+				state.upgrade.steps = data.split('\n');
+				nsp.emit('upgrade', state.upgrade);
+			}
+		});
+	}
 }
 
 const checkUpgrade = () => {
