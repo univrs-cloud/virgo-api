@@ -101,7 +101,9 @@ const isUpgradeInProgress = () => {
 
 const watchUpgradeLog = () => {
 	touch.sync('./upgrade.log');
+	console.log('state.upgrade: ', state.upgrade);
 	if (state.upgrade === undefined) {
+		console.log('is undefined');
 		readUpgradeLog();
 	}
 	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
@@ -128,13 +130,18 @@ const watchUpgradeLog = () => {
 const checkUpgrade = () => {
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
+		console.log('error: ', { error });
+		console.log('data: ', { data });
 		if (error || data === '') {
 			upgradePid = null;
+			console.log('upgradePil null?: ', { upgradePid });
 		  	return;
 		}
 
 		upgradePid = parseInt(data.trim(), 10);
+		console.log('upgradePil: ', { upgradePid });
 		
+		console.log('upgradeLogsWatcher: ', { upgradeLogsWatcher });
 		if (upgradeLogsWatcher === null) {
 			watchUpgradeLog();
 		}
