@@ -101,9 +101,11 @@ const isUpgradeInProgress = () => {
 
 const watchUpgradeLog = () => {
 	touch.sync('./upgrade.log');
-	console.log('state.upgrade: ', state.upgrade);
 	if (state.upgrade === undefined) {
-		console.log('is undefined');
+		state.upgrade = {
+			state: 'running',
+			steps: []
+		};
 		readUpgradeLog();
 	}
 	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
@@ -130,18 +132,13 @@ const watchUpgradeLog = () => {
 const checkUpgrade = () => {
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
-		console.log('error: ', { error });
-		console.log('data: ', { data });
 		if (error || data === '') {
 			upgradePid = null;
-			console.log('upgradePil null?: ', { upgradePid });
 		  	return;
 		}
 
 		upgradePid = parseInt(data.trim(), 10);
-		console.log('upgradePil: ', { upgradePid });
 		
-		console.log('upgradeLogsWatcher: ', { upgradeLogsWatcher });
 		if (upgradeLogsWatcher === null) {
 			watchUpgradeLog();
 		}
@@ -180,8 +177,8 @@ const upgrade = () => {
 	};
 
 	watchUpgradeLog();
-
-	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --property=PIDFile=${upgradePidFile} --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
+	
+	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
 		.then(() => {
 			checkUpgrade();
 		})
