@@ -42,7 +42,9 @@ const ProxyHost = sequelize.define(
 let nsp;
 let timeouts = {};
 let state = {};
-let upgradeProcess = null;
+let upgradePid = null;
+let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
+let upgradeLogsWatcher = null;
 
 const reboot = () => {
 	if (!isAuthenticated) {
@@ -88,18 +90,18 @@ const shutdown = () => {
 		});
 };
 
-const upgrade = () => {
-	if (!isAuthenticated) {
-		nsp.emit('upgrade', false);
-		return;
+const isUpgradeInProgress = () => {
+	try {
+		process.kill(upgradePid, 0);
+		return true;
+	} catch (error) {
+		return false;
 	}
-	
-	if (upgradeProcess !== null) {
-		return;
-	}
-	
+};
+
+const watchUpgradeLog = () => {
 	touch.sync('./upgrade.log');
-	const logsWatcher = fs.watch('./upgrade.log', (eventType) => {
+	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
 		if (eventType === 'change') {
 			fs.readFile('./upgrade.log', 'utf8', (error, data) => {
 				if (error) {
@@ -114,31 +116,67 @@ const upgrade = () => {
 			});
 		}
 	});
+}
 
+const checkUpgrade = () => {
+	touch.sync(upgradePidFile);
+	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
+		if (error || data === '') {
+			upgradePid = null;
+		  	return;
+		}
+
+		upgradePid = parseInt(data.trim(), 10);
+		
+		let intervalId = setInterval(() => {
+			if (isUpgradeInProgress()) {
+				if (upgradeLogsWatcher === null) {
+					watchUpgradeLog();
+				}
+				return;
+			}
+
+			clearInterval(intervalId);
+			state.upgrade.state = 'succeeded';
+			nsp.emit('upgrade', state.upgrade);
+			delete state.upgrade;
+			checkUpdates();
+			upgradeLogsWatcher.close();
+			upgradeLogsWatcher = null;
+			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
+			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
+		  }, 1000);
+	});
+};
+
+const upgrade = () => {
+	if (!isAuthenticated) {
+		nsp.emit('upgrade', false);
+		return;
+	}
+	
+	if (upgradePid !== null) {
+		return;
+	}
+	
 	state.upgrade = {
 		state: 'running',
 		steps: []
 	};
-	upgradeProcess = spawn(
-		'systemd-run',
-		['--unit=upgrade-system --description="System upgrade" --setenv=DEBIAN_FRONTEND=noninteractive', 'bash -c "apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"'],
-		{
-			shell: true,
-			stdio: 'ignore',
-			detached: true
-		}
-	);
-	upgradeProcess.unref();
-	// upgradeProcess
-	// 	.on('close', (code) => {
-	// 		state.upgrade.state = (code === 0 ? 'succeeded' : 'failed');
-	// 		nsp.emit('upgrade', state.upgrade);
-	// 		delete state.upgrade;
-	// 		checkUpdates();
-	// 		upgradeProcess = null;
-	// 		logsWatcher.close();
-	// 		fs.closeSync(fs.openSync('./upgrade.log', 'w'));
-	// 	});
+
+	watchUpgradeLog();
+
+	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --property=PIDFile=${upgradePidFile} --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
+		.then(() => {
+			checkUpgrade();
+		})
+		.catch(() => {
+			state.upgrade.state = 'failed';
+			nsp.emit('upgrade', state.upgrade);
+			delete state.upgrade;
+			checkUpdates();
+			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
+		});
 };
 
 const checkUpdates = () => {
@@ -147,7 +185,7 @@ const checkUpdates = () => {
 		return;
 	}
 	
-	if (upgradeProcess === null) {
+	if (upgradePid === null) {
 		nsp.emit('upgrade', null);
 	}
 	clearTimeout(timeouts.updates);
@@ -405,6 +443,7 @@ module.exports = (io) => {
 
 	nsp = io.of('/host').on('connection', (socket) => {
 		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
+		checkUpgrade();
 		if (state.system) {
 			nsp.emit('system', state.system);
 		}
