@@ -110,7 +110,7 @@ const watchUpgradeLog = () => {
 		}
 	});
 
-	function readUpgradeLog {
+	function readUpgradeLog() {
 		fs.readFile('./upgrade.log', 'utf8', (error, data) => {
 			if (error) {
 				return;
