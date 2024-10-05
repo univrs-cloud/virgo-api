@@ -1,11 +1,12 @@
 const fs = require('fs');
 const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const childProcess = require('child_process');
+const exec = util.promisify(childProcess.exec);
+const spawn = childProcess.spawn;
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
-const apt = require('node-apt-get');
 
 let isAuthenticated = false;
 let i2c;
@@ -41,9 +42,6 @@ let nsp;
 let timeouts = {};
 let state = {};
 let upgradeProcess = null;
-
-apt.spawnOptions.stdio = ['pipe', 'pipe', 'pipe'];
-apt.spawnOptions.detached = true;
 
 const reboot = () => {
 	if (!isAuthenticated) {
@@ -103,7 +101,17 @@ const upgrade = () => {
 		state: 'running',
 		steps: []
 	};
-	upgradeProcess = apt.upgrade({ 'assume-yes': true });
+	upgradeProcess = childProcess.spawn(
+		'apt',
+		['upgrade', '-y'],
+		{
+			stdio: ['pipe', 'pipe', 'pipe'],
+			detached: true,
+			env: {
+				DEBIAN_FRONTEND: 'noninteractive'
+			}
+		}
+	);
 	upgradeProcess.unref();
 	upgradeProcess.stdout
 		.on('data', (data) => {
