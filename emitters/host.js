@@ -178,7 +178,7 @@ const checkUpgrade = () => {
 
 const upgrade = () => {
 	if (!isAuthenticated) {
-		nsp.emit('upgrade', false);
+		nsp.emit('upgrade', null);
 		return;
 	}
 	
@@ -209,7 +209,7 @@ const upgrade = () => {
 
 const updates = () => {
 	if (!isAuthenticated) {
-		nsp.emit('updates', false);
+		nsp.emit('updates', null);
 		return;
 	}
 	
