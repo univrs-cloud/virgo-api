@@ -147,8 +147,9 @@ const watchUpgradeLog = () => {
 const checkUpgrade = () => {
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
-		if (error || data === '') {
+		if (error || data.trim() === '') {
 			upgradePid = null;
+			nsp.emit('upgrade', null);
 		  	return;
 		}
 
