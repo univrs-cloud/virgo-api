@@ -91,6 +91,11 @@ const shutdown = () => {
 };
 
 const checkUpdates = () => {
+	if (!isAuthenticated) {
+		nsp.emit('checkUpdates', false);
+		return;
+	}
+
 	if (state.checkUpdates) {
 		return;
 	}
@@ -145,6 +150,10 @@ const watchUpgradeLog = () => {
 }
 
 const checkUpgrade = () => {
+	if (!isAuthenticated) {
+		nsp.emit('upgrade', false);
+		return;
+	}
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
@@ -179,7 +188,7 @@ const checkUpgrade = () => {
 
 const upgrade = () => {
 	if (!isAuthenticated) {
-		nsp.emit('upgrade', null);
+		nsp.emit('upgrade', false);
 		return;
 	}
 	
@@ -210,7 +219,7 @@ const upgrade = () => {
 
 const updates = () => {
 	if (!isAuthenticated) {
-		nsp.emit('updates', null);
+		nsp.emit('updates', false);
 		return;
 	}
 	
