@@ -8,6 +8,7 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 let isAuthenticated = false;
+let user;
 let nsp;
 let state = {};
 let actionStates = [];
@@ -70,7 +71,7 @@ const install = (config) => {
 
 const performAction = (config) => {
 	if (!isAuthenticated) {
-		nsp.emit('actionStates', false);
+		nsp.to(`user:${user}`).emit('actionStates', false);
 		return;
 	}
 	
@@ -110,6 +111,8 @@ const performAction = (config) => {
 module.exports = (io) => {
 	nsp = io.of('/docker').on('connection', (socket) => {
 		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
+		user = (isAuthenticated ? socket.handshake.headers['remote-user'] : 'unautorized');
+		socket.join(`user:${user}`);
 		if (state.configured) {
 			nsp.emit('configured', state.configured);
 		} else {

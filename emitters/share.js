@@ -2,6 +2,8 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const ini =  require('ini');
 
+let isAuthenticated = false;
+let user;
 let nsp;
 let state = {};
 
@@ -37,6 +39,9 @@ const pollShares = () => {
 
 module.exports = (io) => {
 	nsp = io.of('/share').on('connection', (socket) => {
+		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
+		user = (isAuthenticated ? socket.handshake.headers['remote-user'] : 'unautorized');
+		socket.join(`user:${user}`);
 		if (state.shares) {
 			nsp.emit('shares', state.shares);
 		} else {

@@ -9,7 +9,6 @@ const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
 
-let isAuthenticated = false;
 let i2c;
 try {
 	i2c = new I2C();
@@ -39,6 +38,8 @@ const ProxyHost = sequelize.define(
 		underscored: true
 	}
 );
+let isAuthenticated = false;
+let user;
 let nsp;
 let timeouts = {};
 let state = {};
@@ -48,7 +49,7 @@ let upgradeLogsWatcher = null;
 
 const reboot = () => {
 	if (!isAuthenticated) {
-		nsp.emit('reboot', false);
+		nsp.to(`user:${user}`).emit('reboot', false);
 		return;
 	}
 
@@ -64,13 +65,13 @@ const reboot = () => {
 			state.reboot = false;
 		})
 		.then(() => {
-			nsp.emit('reboot', state.reboot);
+			nsp.to(`user:${user}`).emit('reboot', state.reboot);
 		});
 };
 
 const shutdown = () => {
 	if (!isAuthenticated) {
-		nsp.emit('shutdown', false);
+		nsp.to(`user:${user}`).emit('shutdown', false);
 		return;
 	}
 
@@ -86,13 +87,13 @@ const shutdown = () => {
 			state.shutdown = false;
 		})
 		.then(() => {
-			nsp.emit('shutdown', state.shutdown);
+			nsp.to(`user:${user}`).emit('shutdown', state.shutdown);
 		});
 };
 
 const checkUpdates = () => {
 	if (!isAuthenticated) {
-		nsp.emit('checkUpdates', false);
+		nsp.to(`user:${user}`).emit('checkUpdates', false);
 		return;
 	}
 
@@ -101,11 +102,11 @@ const checkUpdates = () => {
 	}
 
 	state.checkUpdates = true;
-	nsp.emit('checkUpdates', state.checkUpdates);
+	nsp.to(`user:${user}`).emit('checkUpdates', (isAuthenticated ? state.checkUpdates : false));
 	exec('apt update')
 		.then(() => {
 			state.checkUpdates = false;
-			nsp.emit('checkUpdates', state.checkUpdates);
+			nsp.to(`user:${user}`).emit('checkUpdates', (isAuthenticated ? state.checkUpdates : false));
 			updates();
 		});
 };
@@ -143,7 +144,7 @@ const watchUpgradeLog = () => {
 			data = data.toString().trim();
 			if (data !== '') {
 				state.upgrade.steps = data.split('\n');
-				nsp.emit('upgrade', state.upgrade);
+				nsp.to(`user:${user}`).emit('upgrade', (isAuthenticated ? state.upgrade : false));
 			}
 		});
 	}
@@ -151,14 +152,15 @@ const watchUpgradeLog = () => {
 
 const checkUpgrade = () => {
 	if (!isAuthenticated) {
-		nsp.emit('upgrade', false);
+		nsp.to(`user:${user}`).emit('upgrade', false);
 		return;
 	}
+
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
-			nsp.emit('upgrade', null);
+			nsp.to(`user:${user}`).emit('upgrade', null);
 		  	return;
 		}
 
@@ -175,7 +177,7 @@ const checkUpgrade = () => {
 
 			clearInterval(intervalId);
 			state.upgrade.state = 'succeeded';
-			nsp.emit('upgrade', state.upgrade);
+			nsp.to(`user:${user}`).emit('upgrade', (isAuthenticated ? state.upgrade : false));
 			delete state.upgrade;
 			upgradeLogsWatcher.close();
 			upgradeLogsWatcher = null;
@@ -188,7 +190,7 @@ const checkUpgrade = () => {
 
 const upgrade = () => {
 	if (!isAuthenticated) {
-		nsp.emit('upgrade', false);
+		nsp.to(`user:${user}`).emit('upgrade', false);
 		return;
 	}
 	
@@ -209,7 +211,7 @@ const upgrade = () => {
 		})
 		.catch(() => {
 			state.upgrade.state = 'failed';
-			nsp.emit('upgrade', state.upgrade);
+			nsp.to(`user:${user}`).emit('upgrade', (isAuthenticated ? state.upgrade : false));
 			delete state.upgrade;
 			upgradePid = null;
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
@@ -219,12 +221,12 @@ const upgrade = () => {
 
 const updates = () => {
 	if (!isAuthenticated) {
-		nsp.emit('updates', false);
+		nsp.to(`user:${user}`).emit('updates', false);
 		return;
 	}
 	
 	if (upgradePid === null) {
-		nsp.emit('upgrade', null);
+		nsp.to(`user:${user}`).emit('upgrade', null);
 	}
 	clearTimeout(timeouts.updates);
 	delete timeouts.updates;
@@ -254,7 +256,7 @@ const pollUpdates = () => {
 			state.updates = false;
 		})
 		.then(() => {
-			nsp.emit('updates', state.updates);
+			nsp.to(`user:${user}`).emit('updates', (isAuthenticated ? state.updates : false));
 			timeouts.updates = setTimeout(pollUpdates, 3600000);
 		});
 };
@@ -481,21 +483,23 @@ module.exports = (io) => {
 
 	nsp = io.of('/host').on('connection', (socket) => {
 		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
+		user = (isAuthenticated ? socket.handshake.headers['remote-user'] : 'unautorized');
+		socket.join(`user:${user}`);
 		checkUpgrade();
 		if (state.system) {
 			nsp.emit('system', state.system);
 		}
 		if (state.reboot === undefined) {
-			nsp.emit('reboot', false);
+			nsp.to(`user:${user}`).emit('reboot', false);
 		}
 		if (state.shutdown === undefined) {
-			nsp.emit('shutdown', false);
+			nsp.to(`user:${user}`).emit('shutdown', false);
 		}
 		if (state.checkUpdates) {
-			nsp.emit('checkUpdates', state.checkUpdates);
+			nsp.to(`user:${user}`).emit('checkUpdates', (isAuthenticated ? state.checkUpdates : false));
 		}
 		if (state.updates) {
-			nsp.emit('updates', state.updates);
+			nsp.to(`user:${user}`).emit('updates', (isAuthenticated ? state.updates : false));
 		} else {
 			pollUpdates();
 		}
