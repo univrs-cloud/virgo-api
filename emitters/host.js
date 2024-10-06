@@ -152,11 +152,11 @@ const checkUpgrade = () => {
 			state.upgrade.state = 'succeeded';
 			nsp.emit('upgrade', state.upgrade);
 			delete state.upgrade;
-			checkUpdates();
 			upgradeLogsWatcher.close();
 			upgradeLogsWatcher = null;
 			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
+			checkUpdates();
 		  }, 1000);
 	});
 };
@@ -186,8 +186,9 @@ const upgrade = () => {
 			state.upgrade.state = 'failed';
 			nsp.emit('upgrade', state.upgrade);
 			delete state.upgrade;
-			checkUpdates();
+			upgradePid = null;
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
+			checkUpdates();
 		});
 };
 
@@ -511,7 +512,12 @@ module.exports = (io) => {
 			pollTime();
 		}
 
-		socket.on('updates', checkUpdates);
+		socket.on('updates', () => {
+			exec('apt update')
+				.then(() => {
+					checkUpdates();
+				});
+		});
 		socket.on('upgrade', upgrade);
 		socket.on('reboot', reboot);
 		socket.on('shutdown', shutdown);
