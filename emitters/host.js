@@ -90,6 +90,21 @@ const shutdown = () => {
 		});
 };
 
+const checkUpdates = () => {
+	if (state.checkUpdates) {
+		return;
+	}
+
+	state.checkUpdates = true;
+	nsp.emit('checkUpdates', state.checkUpdates);
+	exec('apt update')
+		.then(() => {
+			state.checkUpdates = false;
+			nsp.emit('checkUpdates', state.checkUpdates);
+			updates();
+		});
+};
+
 const isUpgradeInProgress = () => {
 	try {
 		process.kill(upgradePid, 0);
@@ -156,7 +171,7 @@ const checkUpgrade = () => {
 			upgradeLogsWatcher = null;
 			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
-			checkUpdates();
+			updates();
 		  }, 1000);
 	});
 };
@@ -188,11 +203,11 @@ const upgrade = () => {
 			delete state.upgrade;
 			upgradePid = null;
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
-			checkUpdates();
+			updates();
 		});
 };
 
-const checkUpdates = () => {
+const updates = () => {
 	if (!isAuthenticated) {
 		nsp.emit('updates', false);
 		return;
@@ -466,6 +481,9 @@ module.exports = (io) => {
 		if (state.shutdown === undefined) {
 			nsp.emit('shutdown', false);
 		}
+		if (state.checkUpdates) {
+			nsp.emit('checkUpdates', state.checkUpdates);
+		}
 		if (state.updates) {
 			nsp.emit('updates', state.updates);
 		} else {
@@ -512,12 +530,7 @@ module.exports = (io) => {
 			pollTime();
 		}
 
-		socket.on('updates', () => {
-			exec('apt update')
-				.then(() => {
-					checkUpdates();
-				});
-		});
+		socket.on('checkUpdates', checkUpdates);
 		socket.on('upgrade', upgrade);
 		socket.on('reboot', reboot);
 		socket.on('shutdown', shutdown);
