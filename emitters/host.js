@@ -161,7 +161,7 @@ const checkUpgrade = (socket) => {
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
-			//nsp.to(`user:${socket.user}`).emit('upgrade', false);
+			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
 			return;
 		}
 
@@ -179,7 +179,7 @@ const checkUpgrade = (socket) => {
 			clearInterval(intervalId);
 			state.upgrade.state = 'succeeded';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			delete state.upgrade;
+			//delete state.upgrade;
 			upgradeLogsWatcher.close();
 			upgradeLogsWatcher = null;
 			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
@@ -213,7 +213,7 @@ const upgrade = (socket) => {
 		.catch(() => {
 			state.upgrade.state = 'failed';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			delete state.upgrade;
+			//delete state.upgrade;
 			upgradePid = null;
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 			updates(socket);
