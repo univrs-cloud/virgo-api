@@ -7,13 +7,11 @@ const si = require('systeminformation');
 const dockerode = require('dockerode');
 
 const docker = new dockerode();
-let isAuthenticated = false;
-let user;
 let nsp;
 let state = {};
 let actionStates = [];
 
-const pollConfigured = () => {
+const pollConfigured = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.configured;
 		return;
@@ -32,12 +30,12 @@ const pollConfigured = () => {
 			state.configured = false;
 		})
 		.then(() => {
-			nsp.emit('configured', state.configured);
-			setTimeout(pollConfigured, 2000);
+			nsp.to(`user:${socket.user}`).emit('configured', state.configured);
+			setTimeout(pollConfigured.bind(null, socket), 2000);
 		});
 };
 
-const pollTemplates = () => {
+const pollTemplates = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.templates;
 		return;
@@ -60,23 +58,23 @@ const pollTemplates = () => {
 			state.templates = false;
 		})
 		.then(() => {
-			nsp.emit('templates', state.templates);
-			setTimeout(pollTemplates, 3600000);
+			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+			setTimeout(pollTemplates.bind(null, socket), 3600000);
 		});
 };
 
-const install = (config) => {
+const install = (socket, config) => {
 	console.log('install', config);
 };
 
-const performAction = (config) => {
-	if (!isAuthenticated) {
-		nsp.to(`user:${user}`).emit('actionStates', false);
+const performAction = (socket, config) => {
+	if (!socket.isAuthenticated) {
+		nsp.to(`user:${user}`).to(`user:${socket.user}`).emit('actionStates', false);
 		return;
 	}
 	
 	actionStates.push(config);
-	nsp.emit('actionStates', actionStates);
+	nsp.to(`user:${socket.user}`).emit('actionStates', actionStates);
 	
 	let container = docker.getContainer(config.id);
 	container.inspect((error, data) => {
@@ -104,29 +102,34 @@ const performAction = (config) => {
 		actionStates = actionStates.filter((actionState) => {
 			return actionState.id !== config.id;
 		});
-		nsp.emit('actionStates', actionStates);
+		nsp.to(`user:${socket.user}`).emit('actionStates', actionStates);
 	}
 };
 
 module.exports = (io) => {
-	nsp = io.of('/docker').on('connection', (socket) => {
-		isAuthenticated = socket.handshake.headers['remote-user'] !== undefined;
-		user = (isAuthenticated ? socket.handshake.headers['remote-user'] : 'unautorized');
-		socket.join(`user:${user}`);
+	nsp = io.of('/docker');
+	nsp.use((socket, next) => {
+		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		next();
+	});
+	nsp.on('connection', (socket) => {
+		socket.state = {};
+		socket.join(`user:${socket.user}`);
+
 		if (state.configured) {
-			nsp.emit('configured', state.configured);
+			nsp.to(`user:${socket.user}`).emit('configured', state.configured);
 		} else {
-			pollConfigured();
+			pollConfigured(socket);
 		}
 		if (state.templates) {
-			nsp.emit('templates', state.templates);
+			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
 		} else {
-			pollTemplates();
+			pollTemplates(socket);
 		}
 
-		socket.on('install', install);
-
-		socket.on('performAction', performAction);
+		socket.on('install', (config) => { install(socket, config); });
+		socket.on('performAction', (config) => { performAction(socket, config); });
 
 		socket.on('disconnect', () => {
 			//
