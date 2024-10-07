@@ -161,8 +161,7 @@ const checkUpgrade = (socket) => {
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
-			console.log('upgrade null', error, data);
-			nsp.to(`user:${socket.user}`).emit('upgrade', null);
+			nsp.to(`user:${socket.user}`).emit('upgrade', false);
 			return;
 		}
 
@@ -228,7 +227,6 @@ const updates = (socket) => {
 	}
 	
 	if (upgradePid === null) {
-		console.log('upgradePid null', upgradePid);
 		nsp.to(`user:${socket.user}`).emit('upgrade', null);
 	}
 	clearTimeout(timeouts.updates);
