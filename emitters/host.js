@@ -108,7 +108,6 @@ const checkUpdates = (socket) => {
 	exec('apt update')
 		.then(() => {
 			state.checkUpdates = false;
-			//nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
 			updates(socket);
 		});
 };
@@ -144,7 +143,7 @@ const watchUpgradeLog = (socket) => {
 			}
 			
 			data = data.toString().trim();
-			if (data.trim() !== '') {
+			if (data !== '') {
 				state.upgrade.steps = data.split('\n');
 				nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
 			}
@@ -162,6 +161,7 @@ const checkUpgrade = (socket) => {
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
+			console.log('upgrade null', error, data);
 			nsp.to(`user:${socket.user}`).emit('upgrade', null);
 			return;
 		}
@@ -228,6 +228,7 @@ const updates = (socket) => {
 	}
 	
 	if (upgradePid === null) {
+		console.log('upgradePid null', upgradePid);
 		nsp.to(`user:${socket.user}`).emit('upgrade', null);
 	}
 	clearTimeout(timeouts.updates);
