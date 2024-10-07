@@ -161,7 +161,7 @@ const checkUpgrade = (socket) => {
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
-			nsp.to(`user:${socket.user}`).emit('upgrade', false);
+			//nsp.to(`user:${socket.user}`).emit('upgrade', false);
 			return;
 		}
 
