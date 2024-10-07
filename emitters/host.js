@@ -141,7 +141,7 @@ const watchUpgradeLog = (socket) => {
 			if (error) {
 				return;
 			}
-			
+
 			data = data.toString().trim();
 			if (data !== '') {
 				state.upgrade.steps = data.split('\n');
@@ -161,12 +161,14 @@ const checkUpgrade = (socket) => {
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
-			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+			if (upgradeLogsWatcher === null) {
+				watchUpgradeLog(socket);
+			}
 			return;
 		}
 
 		upgradePid = parseInt(data.trim(), 10);
-		
+
 		if (upgradeLogsWatcher === null) {
 			watchUpgradeLog(socket);
 		}
@@ -179,11 +181,8 @@ const checkUpgrade = (socket) => {
 			clearInterval(intervalId);
 			state.upgrade.state = 'succeeded';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			//delete state.upgrade;
 			upgradeLogsWatcher.close();
 			upgradeLogsWatcher = null;
-			fs.closeSync(fs.openSync('./upgrade.log', 'w'));
-			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 			updates(socket);
 		  }, 1000);
 	});
@@ -194,18 +193,18 @@ const upgrade = (socket) => {
 		nsp.to(`user:${socket.user}`).emit('upgrade', false);
 		return;
 	}
-	
+
 	if (upgradePid !== null) {
 		return;
 	}
-	
+
 	state.upgrade = {
 		state: 'running',
 		steps: []
 	};
 
 	watchUpgradeLog(socket);
-	
+
 	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
 		.then(() => {
 			checkUpgrade(socket);
@@ -213,11 +212,22 @@ const upgrade = (socket) => {
 		.catch(() => {
 			state.upgrade.state = 'failed';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			//delete state.upgrade;
 			upgradePid = null;
 			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 			updates(socket);
 		});
+};
+
+const completeUpgrade = (socket) => {
+	if (!socket.isAuthenticated) {
+		nsp.to(`user:${socket.user}`).emit('upgrade', false);
+		return;
+	}
+
+	delete state?.upgrade;
+	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
+	fs.closeSync(fs.openSync('./upgrade.log', 'w'));
+	nsp.to(`user:${socket.user}`).emit('upgrade', null);
 };
 
 const updates = (socket) => {
@@ -225,7 +235,7 @@ const updates = (socket) => {
 		nsp.to(`user:${socket.user}`).emit('updates', false);
 		return;
 	}
-	
+
 	if (upgradePid === null) {
 		nsp.to(`user:${socket.user}`).emit('upgrade', null);
 	}
@@ -547,6 +557,7 @@ module.exports = (io) => {
 
 		socket.on('checkUpdates', () => { checkUpdates(socket); });
 		socket.on('upgrade', () => { upgrade(socket); });
+		socket.on('completeUpgrade', () => { completeUpgrade(socket); });
 		socket.on('reboot', () => { reboot(socket); });
 		socket.on('shutdown', () => { shutdown(socket); });
 
