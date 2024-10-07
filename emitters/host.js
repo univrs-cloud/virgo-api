@@ -2,26 +2,19 @@ const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
-const spawn = childProcess.spawn;
 const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
 const { I2C } = require('raspi-i2c');
 
-let i2c;
-try {
-	i2c = new I2C();
-} catch (error) {
-	i2c = false;
-}
-
 const sequelize = new Sequelize({
 	dialect: 'sqlite',
 	storage: '/portainer/Files/AppData/Config/nginx-proxy-manager/data/database.sqlite',
 	define: {
 		timestamps: false
-	}
+	},
+	logging: false
 });
 const ProxyHost = sequelize.define(
 	'ProxyHost',
@@ -38,6 +31,13 @@ const ProxyHost = sequelize.define(
 		underscored: true
 	}
 );
+
+let i2c;
+try {
+	i2c = new I2C();
+} catch (error) {
+	i2c = false;
+}
 let nsp;
 let state = {};
 let timeouts = {};
@@ -122,7 +122,12 @@ const isUpgradeInProgress = (socket) => {
 };
 
 const watchUpgradeLog = (socket) => {
+	if (upgradeLogsWatcher !== null) {
+		return;
+	}
+
 	touch.sync('./upgrade.log');
+
 	if (state.upgrade === undefined) {
 		state.upgrade = {
 			state: 'running',
@@ -130,6 +135,7 @@ const watchUpgradeLog = (socket) => {
 		};
 		readUpgradeLog();
 	}
+
 	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
 		if (eventType === 'change') {
 			readUpgradeLog();
@@ -138,11 +144,7 @@ const watchUpgradeLog = (socket) => {
 
 	function readUpgradeLog() {
 		fs.readFile('./upgrade.log', 'utf8', (error, data) => {
-			if (error) {
-				return;
-			}
-
-			data = data.toString().trim();
+			data = data.trim();
 			if (data !== '') {
 				state.upgrade.steps = data.split('\n');
 				nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
@@ -157,32 +159,36 @@ const checkUpgrade = (socket) => {
 		return;
 	}
 
+	let intervalId = null;
 	touch.sync(upgradePidFile);
 	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
-		if (error || data.trim() === '') {
+		data = data.trim();
+		if (data === '') {
 			upgradePid = null;
-			if (upgradeLogsWatcher === null) {
-				watchUpgradeLog(socket);
-			}
+			delete state?.upgrade;
+			nsp.to(`user:${socket.user}`).emit('upgrade', null);
 			return;
 		}
 
-		upgradePid = parseInt(data.trim(), 10);
+		upgradePid = parseInt(data, 10);
 
-		if (upgradeLogsWatcher === null) {
-			watchUpgradeLog(socket);
+		watchUpgradeLog(socket);
+
+		if (intervalId !== null) {
+			return;
 		}
 
-		let intervalId = setInterval(() => {
+		intervalId = setInterval(() => {
 			if (isUpgradeInProgress()) {
 				return;
 			}
 
 			clearInterval(intervalId);
-			state.upgrade.state = 'succeeded';
-			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+			intervalId = null;
 			upgradeLogsWatcher.close();
 			upgradeLogsWatcher = null;
+			state.upgrade.state = 'succeeded';
+			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
 			updates(socket);
 		  }, 1000);
 	});
@@ -205,12 +211,11 @@ const upgrade = (socket) => {
 
 	watchUpgradeLog(socket);
 
-	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
+	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1; service virgo-api restart; sleep 10"`)
 		.then(() => {
 			checkUpgrade(socket);
 		})
 		.catch(() => {
-			upgradePid = null;
 			state.upgrade.state = 'failed';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
 			updates(socket);
@@ -224,6 +229,7 @@ const completeUpgrade = (socket) => {
 	}
 
 	delete state?.upgrade;
+	upgradePid = null;
 	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync('./upgrade.log', 'w'));
 	nsp.to(`user:${socket.user}`).emit('upgrade', null);
