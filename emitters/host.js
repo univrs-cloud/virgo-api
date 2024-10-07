@@ -144,7 +144,7 @@ const watchUpgradeLog = (socket) => {
 			}
 			
 			data = data.toString().trim();
-			if (data !== '') {
+			if (data.trim() !== '') {
 				state.upgrade.steps = data.split('\n');
 				nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
 			}
@@ -163,7 +163,7 @@ const checkUpgrade = (socket) => {
 		if (error || data.trim() === '') {
 			upgradePid = null;
 			nsp.to(`user:${socket.user}`).emit('upgrade', null);
-		  	return;
+			return;
 		}
 
 		upgradePid = parseInt(data.trim(), 10);
