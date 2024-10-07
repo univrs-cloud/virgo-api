@@ -108,7 +108,7 @@ const checkUpdates = (socket) => {
 	exec('apt update')
 		.then(() => {
 			state.checkUpdates = false;
-			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+			//nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
 			updates(socket);
 		});
 };
@@ -259,6 +259,7 @@ const pollUpdates = (socket) => {
 		})
 		.then(() => {
 			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
 			timeouts.updates = setTimeout(pollUpdates.bind(null, socket), 3600000);
 		});
 };
