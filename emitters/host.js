@@ -278,7 +278,7 @@ const pollProxies = (socket) => {
 			state.proxies = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('proxies', state.proxies);
+			nsp.emit('proxies', state.proxies);
 			setTimeout(pollProxies.bind(null, socket), 3600000);
 		});
 };
@@ -302,7 +302,7 @@ const pollCpu = (socket) => {
 			state.cpu = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('cpu', state.cpu);
+			nsp.emit('cpu', state.cpu);
 			setTimeout(pollCpu.bind(null, socket), 5000);
 		});
 };
@@ -321,7 +321,7 @@ const pollMemory = (socket) => {
 			state.memory = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('memory', state.memory);
+			nsp.emit('memory', state.memory);
 			setTimeout(pollMemory.bind(null, socket), 10000);
 		});
 };
@@ -372,7 +372,7 @@ const pollStorage = (socket) => {
 			state.storage = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('storage', state.storage);
+			nsp.emit('storage', state.storage);
 			setTimeout(pollStorage.bind(null, socket), 60000);
 		});
 };
@@ -397,7 +397,7 @@ const pollDrives = (socket) => {
 			state.drives = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('drives', state.drives);
+			nsp.emit('drives', state.drives);
 			setTimeout(pollDrives.bind(null, socket), 60000);
 		});
 };
@@ -423,7 +423,7 @@ const pollNetwork = (socket) => {
 			state.network = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('network', state.network);
+			nsp.emit('network', state.network);
 			setTimeout(pollNetwork.bind(null, socket), 2000);
 		});
 };
@@ -436,7 +436,7 @@ const pollUps = (socket) => {
 
 	if (!i2c) {
 		state.ups = 'remote i/o error';
-		nsp.to(`user:${socket.user}`).emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		return;
 	}
 
@@ -445,7 +445,7 @@ const pollUps = (socket) => {
 		batteryCharge = i2c.readByteSync(0x36, 4);
 	} catch (error) {
 		state.ups = [];
-		nsp.to(`user:${socket.user}`).emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		return;
 	}
 
@@ -454,7 +454,7 @@ const pollUps = (socket) => {
 		powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
 	} catch (error) {
 		state.ups = error.message;
-		nsp.to(`user:${socket.user}`).emit('ups', state.ups);
+		nsp.emit('ups', state.ups);
 		setTimeout(pollUps.bind(null, socket), 5000);
 		return;
 	}
@@ -463,7 +463,7 @@ const pollUps = (socket) => {
 		batteryCharge: batteryCharge,
 		powerSource: powerSource
 	};
-	nsp.to(`user:${socket.user}`).emit('ups', state.ups);
+	nsp.emit('ups', state.ups);
 	setTimeout(pollUps.bind(null, socket), 60000);
 };
 
@@ -474,7 +474,7 @@ const pollTime = (socket) => {
 	}
 
 	state.time = si.time();
-	nsp.to(`user:${socket.user}`).emit('time', state.time);
+	nsp.emit('time', state.time);
 	setTimeout(pollTime.bind(null, socket), 60000);
 };
 
@@ -491,7 +491,7 @@ module.exports = (io) => {
 		socket.join(`user:${socket.user}`);
 
 		checkUpgrade(socket);
-		nsp.to(`user:${socket.user}`).emit('system', state.system);
+		nsp.emit('system', state.system);
 		if (state.reboot === undefined) {
 			nsp.to(`user:${socket.user}`).emit('reboot', false);
 		}
@@ -507,42 +507,42 @@ module.exports = (io) => {
 			pollUpdates(socket);
 		}
 		if (state.proxies) {
-			nsp.to(`user:${socket.user}`).emit('proxies', state.proxies);
+			nsp.emit('proxies', state.proxies);
 		} else {
 			pollProxies(socket);
 		}
 		if (state.cpu) {
-			nsp.to(`user:${socket.user}`).emit('cpu', state.cpu);
+			nsp.emit('cpu', state.cpu);
 		} else {
 			pollCpu(socket);
 		}
 		if (state.memory) {
-			nsp.to(`user:${socket.user}`).emit('memory', state.memory);
+			nsp.emit('memory', state.memory);
 		} else {
 			pollMemory(socket);
 		}
 		if (state.storage) {
-			nsp.to(`user:${socket.user}`).emit('storage', state.storage);
+			nsp.emit('storage', state.storage);
 		} else {
 			pollStorage(socket);
 		}
 		if (state.drives) {
-			nsp.to(`user:${socket.user}`).emit('drives', state.drives);
+			nsp.emit('drives', state.drives);
 		} else {
 			pollDrives(socket);
 		}
 		if (state.network) {
-			nsp.to(`user:${socket.user}`).emit('network', state.network);
+			nsp.emit('network', state.network);
 		} else {
 			pollNetwork(socket);
 		}
 		if (state.ups) {
-			nsp.to(`user:${socket.user}`).emit('ups', state.ups);
+			nsp.emit('ups', state.ups);
 		} else {
 			pollUps(socket);
 		}
 		if (state.time) {
-			nsp.to(`user:${socket.user}`).emit('time', state.time);
+			nsp.emit('time', state.time);
 		} else {
 			pollTime(socket);
 		}
