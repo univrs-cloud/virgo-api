@@ -210,10 +210,9 @@ const upgrade = (socket) => {
 			checkUpgrade(socket);
 		})
 		.catch(() => {
+			upgradePid = null;
 			state.upgrade.state = 'failed';
 			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			upgradePid = null;
-			fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 			updates(socket);
 		});
 };
