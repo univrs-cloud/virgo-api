@@ -44,7 +44,6 @@ let timeouts = {};
 let upgradePid = null;
 let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 let upgradeLogsWatcher = null;
-let system;
 
 si.system((data) => {
 	state.system = data;
@@ -231,8 +230,8 @@ const updates = (socket) => {
 	if (upgradePid === null) {
 		nsp.to(`user:${socket.user}`).emit('upgrade', null);
 	}
-	clearTimeout(socket.timeouts.updates);
-	delete socket.timeouts.updates;
+	clearTimeout(timeouts.updates);
+	delete timeouts.updates;
 	pollUpdates(socket);
 };
 
@@ -260,7 +259,7 @@ const pollUpdates = (socket) => {
 		})
 		.then(() => {
 			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
-			socket.timeouts.updates = setTimeout(pollUpdates.bind(null, socket), 3600000);
+			timeouts.updates = setTimeout(pollUpdates.bind(null, socket), 3600000);
 		});
 };
 
@@ -487,7 +486,6 @@ module.exports = (io) => {
 	});
 	nsp.on('connection', (socket) => {
 		socket.state = {};
-    	socket.timeouts = {};
 		socket.join(`user:${socket.user}`);
 
 		checkUpgrade(socket);
