@@ -30,7 +30,7 @@ const pollConfigured = (socket) => {
 			state.configured = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('configured', state.configured);
+			nsp.emit('configured', state.configured);
 			setTimeout(pollConfigured.bind(null, socket), 2000);
 		});
 };
@@ -58,7 +58,7 @@ const pollTemplates = (socket) => {
 			state.templates = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+			nsp.emit('templates', state.templates);
 			setTimeout(pollTemplates.bind(null, socket), 3600000);
 		});
 };
@@ -69,12 +69,12 @@ const install = (socket, config) => {
 
 const performAction = (socket, config) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${user}`).to(`user:${socket.user}`).emit('actionStates', false);
+		nsp.to(`user:${socket.user}`).emit('actionStates', false);
 		return;
 	}
 	
 	actionStates.push(config);
-	nsp.to(`user:${socket.user}`).emit('actionStates', actionStates);
+	nsp.emit('actionStates', actionStates);
 	
 	let container = docker.getContainer(config.id);
 	container.inspect((error, data) => {
@@ -102,7 +102,7 @@ const performAction = (socket, config) => {
 		actionStates = actionStates.filter((actionState) => {
 			return actionState.id !== config.id;
 		});
-		nsp.to(`user:${socket.user}`).emit('actionStates', actionStates);
+		nsp.emit('actionStates', actionStates);
 	}
 };
 
@@ -118,12 +118,12 @@ module.exports = (io) => {
 		socket.join(`user:${socket.user}`);
 
 		if (state.configured) {
-			nsp.to(`user:${socket.user}`).emit('configured', state.configured);
+			nsp.emit('configured', state.configured);
 		} else {
 			pollConfigured(socket);
 		}
 		if (state.templates) {
-			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+			nsp.emit('templates', state.templates);
 		} else {
 			pollTemplates(socket);
 		}

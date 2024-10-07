@@ -29,7 +29,7 @@ const pollShares = (socket) => {
 			state.shares = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('shares', state.shares);
+			nsp.emit('shares', state.shares);
 			setTimeout(pollShares.bind(null, socket), 60000);
 		});
 };
