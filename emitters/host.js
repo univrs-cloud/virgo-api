@@ -43,6 +43,7 @@ let state = {};
 let timeouts = {};
 let upgradePid = null;
 let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
+let upgradeFile = '/var/www/virgo-api/upgrade.log';
 let upgradeLogsWatcher = null;
 
 si.system((data) => {
@@ -126,7 +127,7 @@ const watchUpgradeLog = (socket) => {
 		return;
 	}
 
-	touch.sync('./upgrade.log');
+	touch.sync(upgradeFile);
 
 	if (state.upgrade === undefined) {
 		state.upgrade = {
@@ -136,20 +137,19 @@ const watchUpgradeLog = (socket) => {
 		readUpgradeLog();
 	}
 
-	upgradeLogsWatcher = fs.watch('./upgrade.log', (eventType) => {
+	upgradeLogsWatcher = fs.watch(upgradeFile, (eventType) => {
 		if (eventType === 'change') {
 			readUpgradeLog();
 		}
 	});
 
 	function readUpgradeLog() {
-		fs.readFile('./upgrade.log', 'utf8', (error, data) => {
-			data = data.trim();
-			if (data !== '') {
-				state.upgrade.steps = data.split('\n');
-				nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			}
-		});
+		let data = fs.readFileSync(upgradeFile, { encoding: 'utf8', flag: 'r' });
+		data = data.trim();
+		if (data !== '') {
+			state.upgrade.steps = data.split('\n');
+			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+		}
 	}
 }
 
@@ -161,37 +161,36 @@ const checkUpgrade = (socket) => {
 
 	let intervalId = null;
 	touch.sync(upgradePidFile);
-	fs.readFile(upgradePidFile, 'utf8', (error, data) => {
-		data = data.trim();
-		if (data === '') {
-			upgradePid = null;
-			delete state?.upgrade;
-			nsp.to(`user:${socket.user}`).emit('upgrade', null);
+	let data = fs.readFileSync(upgradePidFile, { encoding: 'utf8', flag: 'r' });
+	data = data.trim();
+	if (data === '') {
+		upgradePid = null;
+		delete state?.upgrade;
+		nsp.to(`user:${socket.user}`).emit('upgrade', null);
+		return;
+	}
+
+	upgradePid = parseInt(data, 10);
+
+	watchUpgradeLog(socket);
+
+	if (intervalId !== null) {
+		return;
+	}
+
+	intervalId = setInterval(() => {
+		if (isUpgradeInProgress()) {
 			return;
 		}
 
-		upgradePid = parseInt(data, 10);
-
-		watchUpgradeLog(socket);
-
-		if (intervalId !== null) {
-			return;
-		}
-
-		intervalId = setInterval(() => {
-			if (isUpgradeInProgress()) {
-				return;
-			}
-
-			clearInterval(intervalId);
-			intervalId = null;
-			upgradeLogsWatcher.close();
-			upgradeLogsWatcher = null;
-			state.upgrade.state = 'succeeded';
-			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
-			updates(socket);
-		  }, 1000);
-	});
+		clearInterval(intervalId);
+		intervalId = null;
+		upgradeLogsWatcher.close();
+		upgradeLogsWatcher = null;
+		state.upgrade.state = 'succeeded';
+		nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+		updates(socket);
+	}, 1000);
 };
 
 const upgrade = (socket) => {
@@ -231,7 +230,7 @@ const completeUpgrade = (socket) => {
 	delete state?.upgrade;
 	upgradePid = null;
 	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
-	fs.closeSync(fs.openSync('./upgrade.log', 'w'));
+	fs.closeSync(fs.openSync(upgradeFile, 'w'));
 	nsp.to(`user:${socket.user}`).emit('upgrade', null);
 };
 
@@ -465,7 +464,7 @@ const pollUps = (socket) => {
 
 	let powerSource = '';
 	try {
-		powerSource = fs.readFileSync('/tmp/ups_power_source', 'utf8');
+		powerSource = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
 	} catch (error) {
 		state.ups = error.message;
 		nsp.emit('ups', state.ups);
