@@ -37,9 +37,10 @@ app.use((req, res, next) => {
 			email: req.headers['remote-email'],
 			groups: req.headers['remote-groups']?.split(',')
 		};
-		res.cookie('account', JSON.stringify(account), {
+		const serializedAccount = Buffer.from(JSON.stringify(account)).toString('base64');
+		res.cookie('account', serializedAccount, {
 			domain: domain,
-			encode: (val) => { return val; },
+			encode: String,
 			httpOnly: false,
 			secure: true,
 			sameSite: 'lax',
