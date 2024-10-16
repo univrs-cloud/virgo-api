@@ -45,6 +45,7 @@ let upgradePid = null;
 let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 let upgradeFile = '/var/www/virgo-api/upgrade.log';
 let upgradeLogsWatcher = null;
+let checkUpgeadeIntervalId = null;
 
 si.system((data) => {
 	state.system = data;
@@ -151,7 +152,6 @@ const watchUpgradeLog = (socket) => {
 }
 
 const checkUpgrade = (socket) => {
-	let intervalId = null;
 	touch.sync(upgradePidFile);
 	let data = fs.readFileSync(upgradePidFile, { encoding: 'utf8', flag: 'r' });
 	data = data.trim();
@@ -166,17 +166,17 @@ const checkUpgrade = (socket) => {
 
 	watchUpgradeLog(socket);
 
-	if (intervalId !== null) {
+	if (checkUpgeadeIntervalId !== null) {
 		return;
 	}
 
-	intervalId = setInterval(() => {
+	checkUpgeadeIntervalId = setInterval(() => {
 		if (isUpgradeInProgress()) {
 			return;
 		}
 
-		clearInterval(intervalId);
-		intervalId = null;
+		clearInterval(checkUpgeadeIntervalId);
+		checkUpgeadeIntervalId = null;
 		upgradeLogsWatcher.close();
 		upgradeLogsWatcher = null;
 		state.upgrade.state = 'succeeded';
