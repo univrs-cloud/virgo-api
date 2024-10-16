@@ -52,7 +52,6 @@ si.system((data) => {
 
 const reboot = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('reboot', false);
 		return;
 	}
 
@@ -74,7 +73,6 @@ const reboot = (socket) => {
 
 const shutdown = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('shutdown', false);
 		return;
 	}
 
@@ -96,7 +94,6 @@ const shutdown = (socket) => {
 
 const checkUpdates = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('checkUpdates', false);
 		return;
 	}
 
@@ -148,7 +145,7 @@ const watchUpgradeLog = (socket) => {
 		data = data.trim();
 		if (data !== '') {
 			state.upgrade.steps = data.split('\n');
-			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+			nsp.emit('upgrade', state.upgrade);
 		}
 	}
 }
@@ -183,14 +180,13 @@ const checkUpgrade = (socket) => {
 		upgradeLogsWatcher.close();
 		upgradeLogsWatcher = null;
 		state.upgrade.state = 'succeeded';
-		nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+		nsp.emit('upgrade', state.upgrade);
 		updates(socket);
 	}, 1000);
 };
 
 const upgrade = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('upgrade', false);
 		return;
 	}
 
@@ -218,7 +214,6 @@ const upgrade = (socket) => {
 
 const completeUpgrade = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('upgrade', false);
 		return;
 	}
 
