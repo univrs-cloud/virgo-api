@@ -154,11 +154,6 @@ const watchUpgradeLog = (socket) => {
 }
 
 const checkUpgrade = (socket) => {
-	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('upgrade', false);
-		return;
-	}
-
 	let intervalId = null;
 	touch.sync(upgradePidFile);
 	let data = fs.readFileSync(upgradePidFile, { encoding: 'utf8', flag: 'r' });
@@ -166,7 +161,7 @@ const checkUpgrade = (socket) => {
 	if (data === '') {
 		upgradePid = null;
 		delete state?.upgrade;
-		nsp.to(`user:${socket.user}`).emit('upgrade', null);
+		nsp.emit('upgrade', null);
 		return;
 	}
 
@@ -216,7 +211,7 @@ const upgrade = (socket) => {
 		})
 		.catch(() => {
 			state.upgrade.state = 'failed';
-			nsp.to(`user:${socket.user}`).emit('upgrade', state.upgrade);
+			nsp.emit('upgrade', state.upgrade);
 			updates(socket);
 		});
 };
@@ -231,7 +226,7 @@ const completeUpgrade = (socket) => {
 	upgradePid = null;
 	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync(upgradeFile, 'w'));
-	nsp.to(`user:${socket.user}`).emit('upgrade', null);
+	nsp.emit('upgrade', null);
 };
 
 const updates = (socket) => {
@@ -241,7 +236,7 @@ const updates = (socket) => {
 	}
 
 	if (upgradePid === null) {
-		nsp.to(`user:${socket.user}`).emit('upgrade', null);
+		nsp.emit('upgrade', null);
 	}
 	clearTimeout(timeouts.updates);
 	delete timeouts.updates;
