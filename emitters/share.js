@@ -19,9 +19,10 @@ const pollShares = (socket) => {
 			for (let [name, value] of Object.entries(shares)) {
 				let share = {
 					name: name,
+					validUsers: value['valid users']?.split(' '),
+					cap: 0,
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
-					isTimeMachine: (value['fruit:time machine'] === 'yes'),
-					cap: 100
+					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
 				state.shares.push(share);
 			}
