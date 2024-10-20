@@ -46,6 +46,7 @@ let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 let upgradeFile = '/var/www/virgo-api/upgrade.log';
 let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
+let powerSourceWatcher = null;
 
 si.system((data) => {
 	state.system = data;
@@ -120,7 +121,7 @@ const isUpgradeInProgress = (socket) => {
 	}
 };
 
-const watchUpgradeLog = (socket) => {
+const watchUpgradeLog = () => {
 	if (upgradeLogsWatcher !== null) {
 		return;
 	}
@@ -157,14 +158,14 @@ const checkUpgrade = (socket) => {
 	data = data.trim();
 	if (data === '') {
 		upgradePid = null;
-		delete state?.upgrade;
+		delete state.upgrade;
 		nsp.emit('upgrade', null);
 		return;
 	}
 
 	upgradePid = parseInt(data, 10);
 
-	watchUpgradeLog(socket);
+	watchUpgradeLog();
 
 	if (checkUpgeadeIntervalId !== null) {
 		return;
@@ -199,7 +200,7 @@ const upgrade = (socket) => {
 		steps: []
 	};
 
-	watchUpgradeLog(socket);
+	watchUpgradeLog();
 
 	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
 		.then(() => {
@@ -217,7 +218,7 @@ const completeUpgrade = (socket) => {
 		return;
 	}
 
-	delete state?.upgrade;
+	delete state.upgrade;
 	upgradePid = null;
 	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync(upgradeFile, 'w'));
@@ -431,11 +432,43 @@ const pollNetwork = (socket) => {
 		});
 };
 
+const watchPowerSource = () => {
+	if (powerSourceWatcher !== null) {
+		return;
+	}
+
+	touch.sync('/tmp/ups_power_source');
+	
+	if (state.ups === undefined) {
+		state.ups = {};
+	}
+	readPowerSource();
+
+	powerSourceWatcher = fs.watch('/tmp/ups_power_source', (eventType) => {
+		if (eventType === 'change') {
+			readPowerSource();
+		}
+	});
+
+	function readPowerSource() {
+		let data = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
+		data = data.trim();
+		if (data !== '') {
+			state.ups.powerSource = data;
+			nsp.emit('ups', state.ups);
+		}
+	}
+};
+
 const pollUps = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
+		powerSourceWatcher.close();
+		powerSourceWatcher = null;
 		delete state.ups;
 		return;
 	}
+
+	watchPowerSource();
 
 	if (!i2c) {
 		state.ups = 'remote i/o error';
@@ -447,25 +480,12 @@ const pollUps = (socket) => {
 	try {
 		batteryCharge = i2c.readByteSync(0x36, 4);
 	} catch (error) {
-		state.ups = [];
+		state.ups.batteryCharge = error;
 		nsp.emit('ups', state.ups);
 		return;
 	}
 
-	let powerSource = '';
-	try {
-		powerSource = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
-	} catch (error) {
-		state.ups = error.message;
-		nsp.emit('ups', state.ups);
-		setTimeout(pollUps.bind(null, socket), 5000);
-		return;
-	}
-
-	state.ups = {
-		batteryCharge: batteryCharge,
-		powerSource: powerSource
-	};
+	state.ups.batteryCharge = batteryCharge;
 	nsp.emit('ups', state.ups);
 	setTimeout(pollUps.bind(null, socket), 60000);
 };
@@ -489,7 +509,6 @@ module.exports = (io) => {
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.state = {};
 		socket.join(`user:${socket.user}`);
 
 		checkUpgrade(socket);

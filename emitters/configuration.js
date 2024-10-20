@@ -41,7 +41,6 @@ module.exports = (io) => {
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.state = {};
 		socket.join(`user:${socket.user}`);
 
 		if (state.configuration) {

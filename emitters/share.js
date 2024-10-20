@@ -44,7 +44,6 @@ module.exports = (io) => {
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.state = {};
     	socket.timeouts = {};
 		socket.join(`user:${socket.user}`);
 
