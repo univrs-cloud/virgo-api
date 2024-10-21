@@ -6,7 +6,10 @@ const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
-const { I2C } = require('raspi-i2c');
+let I2C = false;
+try {
+	({ I2C } = require('raspi-i2c'));
+} catch (error) {}
 
 const sequelize = new Sequelize({
 	dialect: 'sqlite',
@@ -32,11 +35,9 @@ const ProxyHost = sequelize.define(
 	}
 );
 
-let i2c;
-try {
+let i2c = false;
+if (I2C !== false) {
 	i2c = new I2C();
-} catch (error) {
-	i2c = false;
 }
 let nsp;
 let state = {};
@@ -206,7 +207,7 @@ const upgrade = (socket) => {
 		.then(() => {
 			checkUpgrade(socket);
 		})
-		.catch(() => {
+		.catch((error) => {
 			state.upgrade.state = 'failed';
 			nsp.emit('upgrade', state.upgrade);
 			updates(socket);
@@ -468,13 +469,13 @@ const pollUps = (socket) => {
 		return;
 	}
 
-	watchPowerSource();
-
-	if (!i2c) {
+	if (i2c === false) {
 		state.ups = 'remote i/o error';
 		nsp.emit('ups', state.ups);
 		return;
 	}
+
+	watchPowerSource();
 
 	let batteryCharge;
 	try {
