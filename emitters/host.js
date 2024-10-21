@@ -203,7 +203,7 @@ const upgrade = (socket) => {
 
 	watchUpgradeLog();
 
-	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y > /var/www/virgo-api/upgrade.log 2>&1"`)
+	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade -y -q > /var/www/virgo-api/upgrade.log 2>&1"`)
 		.then(() => {
 			checkUpgrade(socket);
 		})
