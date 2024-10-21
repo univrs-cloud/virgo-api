@@ -6,9 +6,10 @@ const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
-let I2C = false;
+let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
+	i2c = new I2C();
 } catch (error) {}
 
 const sequelize = new Sequelize({
@@ -35,10 +36,6 @@ const ProxyHost = sequelize.define(
 	}
 );
 
-let i2c = false;
-if (I2C !== false) {
-	i2c = new I2C();
-}
 let nsp;
 let state = {};
 let timeouts = {};
@@ -179,7 +176,7 @@ const checkUpgrade = (socket) => {
 
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
-		upgradeLogsWatcher.close();
+		upgradeLogsWatcher?.close();
 		upgradeLogsWatcher = null;
 		state.upgrade.state = 'succeeded';
 		nsp.emit('upgrade', state.upgrade);
@@ -439,10 +436,7 @@ const watchPowerSource = () => {
 	}
 
 	touch.sync('/tmp/ups_power_source');
-	
-	if (state.ups === undefined) {
-		state.ups = {};
-	}
+
 	readPowerSource();
 
 	powerSourceWatcher = fs.watch('/tmp/ups_power_source', (eventType) => {
@@ -463,7 +457,7 @@ const watchPowerSource = () => {
 
 const pollUps = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
-		powerSourceWatcher.close();
+		powerSourceWatcher?.close();
 		powerSourceWatcher = null;
 		delete state.ups;
 		return;
@@ -475,16 +469,20 @@ const pollUps = (socket) => {
 		return;
 	}
 
-	watchPowerSource();
+	if (state.ups === undefined) {
+		state.ups = {};
+	}
 
 	let batteryCharge;
 	try {
 		batteryCharge = i2c.readByteSync(0x36, 4);
 	} catch (error) {
-		state.ups.batteryCharge = error;
+		state.ups.batteryCharge = false;
 		nsp.emit('ups', state.ups);
 		return;
 	}
+
+	watchPowerSource();
 
 	state.ups.batteryCharge = batteryCharge;
 	nsp.emit('ups', state.ups);
