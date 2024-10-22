@@ -11,11 +11,12 @@ const pollShares = (socket) => {
 		return;
 	}
 
+	state.shares = [];
+
 	exec('testparm -s -l')
 		.then((response) => {
 			let shares = ini.parse(response.stdout);
 			delete shares.global;
-			state.shares = [];
 			for (let [name, value] of Object.entries(shares)) {
 				let share = {
 					name: name,

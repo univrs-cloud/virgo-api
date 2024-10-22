@@ -46,8 +46,8 @@ let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
 let powerSourceWatcher = null;
 
-si.system((data) => {
-	state.system = data;
+si.system((system) => {
+	state.system = system;
 });
 
 const reboot = (socket) => {
@@ -67,7 +67,7 @@ const reboot = (socket) => {
 			state.reboot = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('reboot', state.reboot);
+			nsp.emit('reboot', state.reboot);
 		});
 };
 
@@ -88,7 +88,7 @@ const shutdown = (socket) => {
 			state.shutdown = false;
 		})
 		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('shutdown', state.shutdown);
+			nsp.emit('shutdown', state.shutdown);
 		});
 };
 
@@ -238,14 +238,15 @@ const updates = (socket) => {
 };
 
 const pollUpdates = (socket) => {
+	state.updates = [];
+	
 	exec('apt-show-versions -u')
 		.then((response) => {
-			let stdout = response.stdout.trim();
-			if (stdout === '') {
-				state.updates = [];
+			let updates = response.stdout.trim();
+			if (updates === '') {
 				return;
 			}
-			state.updates = stdout.split('\n').map((line) => {
+			state.updates = updates.split('\n').map((line) => {
 				let parts = line.split(' ');
 				return {
 					package: parts[0].split(':')[0],
@@ -272,7 +273,9 @@ const pollProxies = (socket) => {
 		return;
 	}
 
-	 ProxyHost.findAll()
+	state.proxies = [];
+
+	ProxyHost.findAll()
 	 	.then((proxies) => {
 			state.proxies = proxies;
 		})
@@ -290,6 +293,8 @@ const pollCpu = (socket) => {
 		delete state.cpu;
 		return;
 	}
+
+	state.cpu = {};
 
 	Promise.all([
 		si.currentLoad(),
@@ -315,6 +320,8 @@ const pollMemory = (socket) => {
 		return;
 	}
 
+	state.memory = {};
+
 	si.mem()
 		.then((memory) => {
 			state.memory = memory;
@@ -333,6 +340,8 @@ const pollStorage = (socket) => {
 		delete state.storage;
 		return;
 	}
+
+	state.storage = [];
 
 	Promise.all([
 		new Promise((resolve, reject) => {
@@ -385,10 +394,12 @@ const pollDrives = (socket) => {
 		return;
 	}
 
+	state.drives = [];
+
 	exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .")
 		.then((response) => {
-			let stdout = JSON.parse(response.stdout);
-			state.drives = stdout.map((drive) => {
+			let drives = JSON.parse(response.stdout);
+			state.drives = drives.map((drive) => {
 				return {
 					name: drive.device.name,
 					temperature: drive.temperature.current
@@ -409,6 +420,8 @@ const pollNetwork = (socket) => {
 		delete state.network;
 		return;
 	}
+
+	state.network = {};
 
 	si.networkStats()
 		.then((interfaces) => {
@@ -513,16 +526,20 @@ module.exports = (io) => {
 		checkUpgrade(socket);
 		nsp.emit('system', state.system);
 		if (state.reboot === undefined) {
-			nsp.to(`user:${socket.user}`).emit('reboot', false);
+			nsp.emit('reboot', false);
 		}
 		if (state.shutdown === undefined) {
-			nsp.to(`user:${socket.user}`).emit('shutdown', false);
+			nsp.emit('shutdown', false);
 		}
 		if (state.checkUpdates) {
-			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+			if (socket.isAuthenticated) {
+				nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+			}
 		}
 		if (state.updates) {
-			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+			if (socket.isAuthenticated) {
+				nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+			}
 		} else {
 			pollUpdates(socket);
 		}

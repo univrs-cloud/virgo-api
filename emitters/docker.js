@@ -17,6 +17,8 @@ const pollConfigured = (socket) => {
 		return;
 	}
 
+	state.configured = {};
+
 	Promise.all([
 		fs.promises.readFile(path.join(__dirname,'../../data.json'), 'utf8'),
 		si.dockerContainers(true)
@@ -41,6 +43,12 @@ const pollTemplates = (socket) => {
 		return;
 	}
 
+	if (!socket.isAuthenticated) {
+		return;
+	}
+
+	state.templates = [];
+
 	Promise.all([
 		axios.get('https://apps.univrs.cloud/template.json'),
 		si.dockerContainers(true)
@@ -58,18 +66,21 @@ const pollTemplates = (socket) => {
 			state.templates = false;
 		})
 		.then(() => {
-			nsp.emit('templates', state.templates);
+			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
 			setTimeout(pollTemplates.bind(null, socket), 3600000);
 		});
 };
 
 const install = (socket, config) => {
+	if (!socket.isAuthenticated) {
+		return;
+	}
+
 	console.log('install', config);
 };
 
 const performAction = (socket, config) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('actionStates', false);
 		return;
 	}
 	
@@ -122,7 +133,9 @@ module.exports = (io) => {
 			pollConfigured(socket);
 		}
 		if (state.templates) {
-			nsp.emit('templates', state.templates);
+			if (socket.isAuthenticated) {
+				nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+			}
 		} else {
 			pollTemplates(socket);
 		}
