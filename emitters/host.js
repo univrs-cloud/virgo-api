@@ -1,3 +1,4 @@
+const os = require('os');
 const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
@@ -51,6 +52,8 @@ si.system((system) => {
 	state.system = { ...state.system, ...system };
 });
 si.osInfo((osInfo) => {
+	let stdout = childProcess.execSync('hostname -f 2>/dev/null');
+	osInfo.fqdn = stdout.toString().split(os.EOL)[0]
 	state.system.osInfo = osInfo;
 });
 si.networkGatewayDefault((defaultGateway) => {
