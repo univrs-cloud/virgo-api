@@ -46,9 +46,19 @@ let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
 let powerSourceWatcher = null;
 
+state.system = {};
 si.system((system) => {
-	state.system = system;
+	state.system = { ...state.system, ...system };
 });
+si.osInfo((osInfo) => {
+	state.system.osInfo = osInfo;
+});
+si.networkGatewayDefault((defaultGateway) => {
+	state.system.defaultGateway = defaultGateway;
+});
+si.networkInterfaces((networkInterface) => {
+	state.system.networkInterface = networkInterface;
+}, null, 'default');
 
 const reboot = (socket) => {
 	if (!socket.isAuthenticated) {
