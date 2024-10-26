@@ -34,8 +34,8 @@
 		"ini": "^5.0.0",
 		"linux-sys-user": "^1.2.0",
 		"path": "^0.12.7",
-		"sequelize": "^6.37.4",
-		"socket.io": "^4.8.0",
+		"sequelize": "^6.37.5",
+		"socket.io": "^4.8.1",
 		"sqlite3": "^5.1.7",
 		"systeminformation": "^5.23.5",
 		"touch": "^3.1.1"
