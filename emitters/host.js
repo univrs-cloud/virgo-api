@@ -15,7 +15,7 @@ try {
 
 const sequelize = new Sequelize({
 	dialect: 'sqlite',
-	storage: '/portainer/Files/AppData/Config/nginx-proxy-manager/data/database.sqlite',
+	storage: '/messier/apps/nginx-proxy-manager/data/database.sqlite',
 	define: {
 		timestamps: false
 	},
