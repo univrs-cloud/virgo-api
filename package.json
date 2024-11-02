@@ -13,7 +13,8 @@
 		"dependencies": "zfsutils-linux,apt-show-versions,smartmontools,jq",
 		"user": "root",
 		"templates": {
-			"postinst": "templates/postinstall"
+			"postinst": "templates/postinstall",
+			"systemd_service": "templates/systemd.service"
 		},
 		"entrypoints": {
 			"daemon": "server.js"
