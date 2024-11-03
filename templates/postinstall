@@ -14,7 +14,7 @@ systemctl enable virgo-api.service
 
 ischroot
 if [ $? == 1 ]; then
-	/usr/local/bin/n stable
+	/usr/local/bin/n lts
 	/usr/local/bin/n prune
 	systemctl start virgo-api.service
 fi
