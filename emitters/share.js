@@ -20,6 +20,7 @@ const pollShares = (socket) => {
 			for (let [name, value] of Object.entries(shares)) {
 				let share = {
 					name: name,
+					comment: value['comment'],
 					validUsers: value['valid users']?.split(' '),
 					cap: 0,
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
