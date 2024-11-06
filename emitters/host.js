@@ -218,6 +218,10 @@ const upgrade = (socket) => {
 			checkUpgrade(socket);
 		})
 		.catch((error) => {
+			upgradeLogsWatcher?.close();
+			upgradeLogsWatcher = null;
+			clearInterval(checkUpgeadeIntervalId);
+			checkUpgeadeIntervalId = null;
 			state.upgrade.state = 'failed';
 			nsp.emit('upgrade', state.upgrade);
 			updates(socket);
