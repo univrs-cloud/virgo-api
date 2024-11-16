@@ -1,12 +1,14 @@
 const fs = require('fs');
 const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const childProcess = require('child_process');
+const exec = util.promisify(childProcess.exec);
 const path = require('path');
 const axios = require('axios');
 const si = require('systeminformation');
 const dockerode = require('dockerode');
 
 const docker = new dockerode();
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 let nsp;
 let state = {};
 let actionStates = [];
@@ -84,16 +86,24 @@ const performAction = (socket, config) => {
 		return;
 	}
 	
+	if (!allowedActions.includes(config?.action)) {
+		return;
+	}
+
+	let container = docker.getContainer(config?.id);
+	if (!container) {
+		return; 
+	}
+
 	actionStates.push(config);
 	nsp.emit('actionStates', actionStates);
-	
-	let container = docker.getContainer(config.id);
+
 	container.inspect((error, data) => {
 		let composeProject = data.Config.Labels['com.docker.compose.project'];
 		if (composeProject) {
 			exec(`docker compose -p ${composeProject} ${config.action}`)
 				.then(() => {
-					cb();
+					callback();
 				})
 				.catch((error) => {
 					console.log(error);
@@ -102,14 +112,14 @@ const performAction = (socket, config) => {
 		}
 
 		container[config.action]((error, data) => {
-			cb();
+			callback();
 			if (error !== null) {
 				console.log(error);
 			}
 		});
 	});
 
-	function cb() {
+	function callback() {
 		actionStates = actionStates.filter((actionState) => {
 			return actionState.id !== config.id;
 		});

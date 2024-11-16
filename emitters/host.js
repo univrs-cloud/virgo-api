@@ -93,7 +93,7 @@ const shutdown = (socket) => {
 		return;
 	}
 
-	exec('sleep 5 && shutdown -h now')
+	exec('shutdown -h now')
 		.then((response) => {
 			state.shutdown = true;
 		})

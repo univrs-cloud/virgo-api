@@ -5,7 +5,7 @@ let nsp;
 let state = {};
 let configurationFile = '/var/www/virgo-api/configuration.json';
 
-const location = (socket, config) => {
+const setLocation = (socket, config) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -49,7 +49,7 @@ module.exports = (io) => {
 			getConfiguration();
 		}
 
-		socket.on('location', (config) => { location(socket, config); });
+		socket.on('location', (config) => { setLocation(socket, config); });
 
 		socket.on('disconnect', () => {
 			//
