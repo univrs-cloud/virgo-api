@@ -56,6 +56,9 @@ si.osInfo((osInfo) => {
 	osInfo.fqdn = stdout.toString().split(os.EOL)[0]
 	state.system.osInfo = osInfo;
 });
+si.cpu((cpu) => {
+	state.system.cpu = cpu;
+});
 si.networkGatewayDefault((defaultGateway) => {
 	state.system.defaultGateway = defaultGateway;
 });
@@ -305,13 +308,13 @@ const pollProxies = (socket) => {
 		});
 };
 
-const pollCpu = (socket) => {
+const pollCpuStats = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
-		delete state.cpu;
+		delete state.cpuStats;
 		return;
 	}
 
-	state.cpu = {};
+	state.cpuStats = {};
 
 	Promise.all([
 		si.currentLoad(),
@@ -319,15 +322,15 @@ const pollCpu = (socket) => {
 		exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
 	])
 		.then(([currentLoad, cpuTemperature, fan]) => {
-			state.cpu = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
+			state.cpuStats = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
 
 		})
 		.catch((error) => {
-			state.cpu = false;
+			state.cpuStats = false;
 		})
 		.then(() => {
-			nsp.emit('cpu', state.cpu);
-			setTimeout(pollCpu.bind(null, socket), 5000);
+			nsp.emit('cpuStats', state.cpuStats);
+			setTimeout(pollCpuStats.bind(null, socket), 5000);
 		});
 };
 
@@ -412,13 +415,15 @@ const pollDrives = (socket) => {
 	}
 
 	state.drives = [];
-
 	exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .")
 		.then((response) => {
 			let drives = JSON.parse(response.stdout);
 			state.drives = drives.map((drive) => {
 				return {
 					name: drive.device.name,
+					model: drive.model_name,
+					serialNumber: drive.serial_number,
+					capcity: drive.user_capacity,
 					temperature: drive.temperature.current
 				};
 			});
@@ -432,31 +437,31 @@ const pollDrives = (socket) => {
 		});
 };
 
-const pollNetwork = (socket) => {
+const pollNetworkStats = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
-		delete state.network;
+		delete state.networkStats;
 		return;
 	}
 
-	state.network = {};
+	state.networkStats = {};
 
 	si.networkStats()
-		.then((interfaces) => {
-			let iface = interfaces[0];
-			if (iface.rx_sec === null) {
-				iface.rx_sec = 0;
+		.then((networkStats) => {
+			let networkInterfaceStats = networkStats[0];
+			if (networkInterfaceStats.rx_sec === null) {
+				networkInterfaceStats.rx_sec = 0;
 			}
-			if (iface.tx_sec === null) {
-				iface.tx_sec = 0;
+			if (networkInterfaceStats.tx_sec === null) {
+				networkInterfaceStats.tx_sec = 0;
 			}
-			state.network = iface;
+			state.networkStats = networkInterfaceStats;
 		})
 		.catch((error) => {
-			state.network = false;
+			state.networkStats = false;
 		})
 		.then(() => {
-			nsp.emit('network', state.network);
-			setTimeout(pollNetwork.bind(null, socket), 2000);
+			nsp.emit('networkStats', state.networkStats);
+			setTimeout(pollNetworkStats.bind(null, socket), 2000);
 		});
 };
 
@@ -565,10 +570,10 @@ module.exports = (io) => {
 		} else {
 			pollProxies(socket);
 		}
-		if (state.cpu) {
-			nsp.emit('cpu', state.cpu);
+		if (state.cpuStats) {
+			nsp.emit('cpuStats', state.cpuStats);
 		} else {
-			pollCpu(socket);
+			pollCpuStats(socket);
 		}
 		if (state.memory) {
 			nsp.emit('memory', state.memory);
@@ -585,10 +590,10 @@ module.exports = (io) => {
 		} else {
 			pollDrives(socket);
 		}
-		if (state.network) {
-			nsp.emit('network', state.network);
+		if (state.networkStats) {
+			nsp.emit('networkStats', state.networkStats);
 		} else {
-			pollNetwork(socket);
+			pollNetworkStats(socket);
 		}
 		if (state.ups) {
 			nsp.emit('ups', state.ups);
