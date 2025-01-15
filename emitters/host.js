@@ -559,9 +559,7 @@ module.exports = (io) => {
 			}
 		}
 		if (state.updates) {
-			if (socket.isAuthenticated) {
-				nsp.to(`user:${socket.user}`).emit('updates', state.updates);
-			}
+			nsp.to(`user:${socket.user}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
 		} else {
 			pollUpdates(socket);
 		}
