@@ -10,7 +10,7 @@
 	"node_deb": {
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "zfsutils-linux,apt-show-versions,smartmontools,jq",
+		"dependencies": "zfsutils-linux,apt-show-versions,smartmontools,nvme-cli,jq",
 		"user": "root",
 		"templates": {
 			"postinst": "templates/postinstall",
@@ -33,6 +33,7 @@
 		"express-rate-limit": "^7.5.0",
 		"express-validator": "^7.2.1",
 		"ini": "^5.0.0",
+		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^1.2.0",
 		"path": "^0.12.7",
 		"sequelize": "^6.37.5",

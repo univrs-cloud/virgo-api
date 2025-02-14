@@ -415,16 +415,22 @@ const pollDrives = (socket) => {
 	}
 
 	state.drives = [];
-	exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .")
-		.then((response) => {
-			let drives = JSON.parse(response.stdout);
+	Promise.all([
+		exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s ."),
+		exec("smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'")
+	])
+		.then(([responseSmartctl, responseNvme]) => {
+			let drives = JSON.parse(responseSmartctl.stdout);
+			let nvme = JSON.parse(responseNvme.stdout);
 			state.drives = drives.map((drive) => {
 				return {
 					name: drive.device.name,
 					model: drive.model_name,
 					serialNumber: drive.serial_number,
 					capcity: drive.user_capacity,
-					temperature: drive.temperature.current
+					temperature: drive.temperature.current,
+					temperatureWarningThreshold: nvme[index].wctemp,
+					temperatureCriticalThreshold: nvme[index].cctemp
 				};
 			});
 		})
@@ -615,3 +621,59 @@ module.exports = (io) => {
 		});
 	});
 };
+
+// zpool status
+//   pool: messier
+//  state: DEGRADED
+// status: One or more devices is currently being resilvered.  The pool will
+// 	continue to function, possibly in a degraded state.
+// action: Wait for the resilver to complete.
+//   scan: resilver in progress since Mon Feb  3 19:04:33 2025
+// 	114G / 114G scanned, 535M / 114G issued at 178M/s
+// 	538M resilvered, 0.46% done, 00:10:52 to go
+// config:
+
+// 	NAME                                             STATE     READ WRITE CKSUM
+// 	messier                                          DEGRADED     0     0     0
+// 	  mirror-0                                       DEGRADED     0     0     0
+// 	    nvme-eui.00000000000000000026b738336717b5    ONLINE       0     0     0
+// 	    replacing-1                                  DEGRADED     0     0     0
+// 	      14055708554257071460                       UNAVAIL      0     0     0  was /dev/disk/by-id/nvme-eui.00000000000000000026b73833673485-part1
+// 	      nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0  (resilvering)
+
+// errors: No known data errors
+
+// zpool status
+//   pool: messier
+//  state: DEGRADED
+// status: One or more devices is currently being resilvered.  The pool will
+// 	continue to function, possibly in a degraded state.
+// action: Wait for the resilver to complete.
+//   scan: resilver in progress since Mon Feb  3 19:20:21 2025
+// 	114G / 114G scanned, 1.39G / 114G issued at 238M/s
+// 	1.40G resilvered, 1.22% done, 00:08:05 to go
+// config:
+
+// 	NAME                                             STATE     READ WRITE CKSUM
+// 	messier                                          DEGRADED     0     0     0
+// 	  mirror-0                                       DEGRADED     0     0     0
+// 	    replacing-0                                  DEGRADED     0     0     0
+// 	      3237883490408593218                        UNAVAIL      0     0     0  was /dev/disk/by-id/nvme-eui.00000000000000000026b738336717b5-part1
+// 	      nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0  (resilvering)
+// 	    nvme-eui.00000000000000000000000000002092    ONLINE       0     0     0
+
+// errors: No known data errors
+
+// zpool status
+//   pool: messier
+//  state: ONLINE
+//   scan: resilvered 114G in 00:06:07 with 0 errors on Mon Feb  3 19:10:40 2025
+// config:
+
+// 	NAME                                           STATE     READ WRITE CKSUM
+// 	messier                                        ONLINE       0     0     0
+// 	  mirror-0                                     ONLINE       0     0     0
+// 	    nvme-eui.00000000000000000026b738336717b5  ONLINE       0     0     0
+// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
+
+// errors: No known data errors
