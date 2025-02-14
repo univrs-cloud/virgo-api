@@ -422,7 +422,7 @@ const pollDrives = (socket) => {
 		.then(([responseSmartctl, responseNvme]) => {
 			let drives = JSON.parse(responseSmartctl.stdout);
 			let nvme = JSON.parse(responseNvme.stdout);
-			state.drives = drives.map((drive) => {
+			state.drives = drives.map((drive, index) => {
 				return {
 					name: drive.device.name,
 					model: drive.model_name,
