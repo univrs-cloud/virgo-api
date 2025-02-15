@@ -365,27 +365,41 @@ const pollStorage = (socket) => {
 
 	Promise.all([
 		new Promise((resolve, reject) => {
-			zpool.list((error, pools) => {
+			let pools;
+			zpool.list((error, response) => {
 				if (error) {
 					return reject(error);
 				}
 
-				resolve(pools);
+				pools = response;
+				
+				zpool.status((error, response) => {
+					if (error) {
+						console.log('error', error);
+						return resolve(pools);
+					}
+
+					pools = pools.map((pool) => {
+						const status = response.find((obj) => { return obj.name === pool.name; });
+						return (status ? { ...pool, ...status } : pool);
+					});
+					resolve(pools);
+				});
 			});
 		}),
 		si.fsSize()
 	])
-		.then(([pools, filesystem]) => {
-			let fs = filesystem.find((fs) => {
-				return fs.mount === '/';
+		.then(([pools, filesystems]) => {
+			let filesystem = filesystems.find((filesystem) => {
+				return filesystem.mount === '/';
 			});
-			if (fs) {
+			if (filesystem) {
 				let pool = {
 					name: 'system',
-					size: fs.size,
-					alloc: fs.used,
-					free: fs.available,
-					cap: fs.use,
+					size: filesystem.size,
+					alloc: filesystem.used,
+					free: filesystem.available,
+					cap: filesystem.use,
 					health: 'ONLINE'
 				}
 				pools.push(pool);
@@ -674,6 +688,36 @@ module.exports = (io) => {
 // 	messier                                        ONLINE       0     0     0
 // 	  mirror-0                                     ONLINE       0     0     0
 // 	    nvme-eui.00000000000000000026b738336717b5  ONLINE       0     0     0
+// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
+
+// errors: No known data errors
+
+// zpool status
+//   pool: messier
+//  state: ONLINE
+//   scan: scrub in progress since Sat Feb 15 18:05:08 2025
+// 	116G / 116G scanned, 521M / 116G issued at 260M/s
+// 	0B repaired, 0.44% done, 00:07:33 to go
+// config:
+
+// 	NAME                                           STATE     READ WRITE CKSUM
+// 	messier                                        ONLINE       0     0     0
+// 	  mirror-0                                     ONLINE       0     0     0
+// 	    nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0
+// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
+
+// errors: No known data errors
+
+// zpool status
+//   pool: messier
+//  state: ONLINE
+//   scan: scrub repaired 0B in 00:09:15 with 0 errors on Sat Feb 15 18:14:23 2025
+// config:
+
+// 	NAME                                           STATE     READ WRITE CKSUM
+// 	messier                                        ONLINE       0     0     0
+// 	  mirror-0                                     ONLINE       0     0     0
+// 	    nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0
 // 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
 
 // errors: No known data errors
