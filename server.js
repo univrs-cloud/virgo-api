@@ -26,9 +26,6 @@ app.set('trust proxy', true);
 app.use(bodyParser.json());
 
 app.use((req, res, next) => {
-	let hostname = req.hostname.split('.');
-	hostname.splice(0, 1);
-	let domain = hostname.join('.');
 	if (req.headers['remote-user']) {
 		const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
 		let account = {
@@ -39,7 +36,7 @@ app.use((req, res, next) => {
 		};
 		const serializedAccount = Buffer.from(JSON.stringify(account)).toString('base64');
 		res.cookie('account', serializedAccount, {
-			domain: domain,
+			domain: req.hostname,
 			encode: String,
 			httpOnly: false,
 			secure: true,
@@ -48,7 +45,7 @@ app.use((req, res, next) => {
 		});
 	} else {
 		res.clearCookie('account', {
-			domain: domain
+			domain: req.hostname
 		});
 	}
 	res.header('Access-Control-Allow-Origin', '*');
