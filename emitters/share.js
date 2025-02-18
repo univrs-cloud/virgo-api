@@ -1,6 +1,7 @@
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
-const ini =  require('ini');
+const ini = require('ini');
+const checkDiskSpace = require('check-disk-space').default;
 
 let nsp;
 let state = {};
@@ -22,11 +23,21 @@ const pollShares = (socket) => {
 					name: name,
 					comment: value['comment'],
 					validUsers: value['valid users']?.split(' '),
+					size: 0,
+					free: 0,
+					alloc: 0,
 					cap: 0,
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
-				state.shares.push(share);
+				checkDiskSpace(value['path'])
+					.then((diskSpace) => {
+						share.size = diskSpace.size;
+						share.free = diskSpace.free;
+						share.alloc = share.size - share.free;
+						share.cap = share.alloc / share.size * 100;
+						state.shares.push(share);
+					});
 			}
 		})
 		.catch((error) => {
@@ -46,7 +57,7 @@ module.exports = (io) => {
 		next();
 	});
 	nsp.on('connection', (socket) => {
-    	socket.timeouts = {};
+		socket.timeouts = {};
 		socket.join(`user:${socket.user}`);
 
 		if (state.shares) {
