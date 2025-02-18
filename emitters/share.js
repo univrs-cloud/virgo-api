@@ -18,7 +18,7 @@ const pollShares = (socket) => {
 		.then((response) => {
 			let shares = ini.parse(response.stdout);
 			delete shares.global;
-			for (let [name, value] of Object.entries(shares)) {
+			let promises = Object.entries(shares).map(([name, value]) => {
 				let share = {
 					name: name,
 					comment: value['comment'],
@@ -36,9 +36,17 @@ const pollShares = (socket) => {
 						share.free = diskSpace.free;
 						share.alloc = share.size - share.free;
 						share.cap = share.alloc / share.size * 100;
-						state.shares.push(share);
-					});
-			}
+						return share;
+					})
+					.catch(((error) => {
+						return share;
+					}));
+			});
+
+			return Promise.all(promises)
+				.then((shares) => {
+					state.shares = shares;
+				});
 		})
 		.catch((error) => {
 			state.shares = false;
