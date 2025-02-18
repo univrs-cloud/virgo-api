@@ -30,7 +30,7 @@ const pollShares = (socket) => {
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
-				checkDiskSpace(value['path'])
+				return checkDiskSpace(value['path'])
 					.then((diskSpace) => {
 						share.size = diskSpace.size;
 						share.free = diskSpace.free;
