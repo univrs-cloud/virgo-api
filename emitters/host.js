@@ -25,7 +25,7 @@ const ProxyHost = sequelize.define(
 	'ProxyHost',
 	{
 		enabled: DataTypes.BOOLEAN,
-		isDeleted: DataTypes.INTEGER,
+		isDeleted: DataTypes.BOOLEAN,
 		domainNames: DataTypes.JSON,
 		sslForced: DataTypes.BOOLEAN,
 		forwardScheme: DataTypes.STRING,
@@ -298,7 +298,7 @@ const pollProxies = (socket) => {
 
 	ProxyHost.findAll({
 		where: {
-			isDeleted: 0
+			isDeleted: false
 		}
 	})
 	 	.then((proxies) => {
