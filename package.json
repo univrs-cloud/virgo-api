@@ -25,7 +25,7 @@
 		"npm": ">=10.9.0"
 	},
 	"dependencies": {
-		"@univrs/zfs": "^1.0.6",
+		"@univrs/zfs": "^1.0.7",
 		"axios": "^1.7.9",
 		"body-parser": "^1.20.3",
 		"check-disk-space": "^3.4.0",
