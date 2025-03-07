@@ -25,7 +25,7 @@ const setSmtp = (socket, config) => {
 	nsp.emit('configuration', state.configuration);
 };
 
-const getConfiguration = () => {
+const getConfiguration = (socket) => {
 	touch.sync(configurationFile);
 	let configuration = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
 	configuration = configuration.trim();
@@ -41,7 +41,9 @@ const getConfiguration = () => {
 		configuration = JSON.parse(configuration);
 	}
 	state.configuration = configuration;
-	nsp.emit('configuration', state.configuration);
+	if (socket.isAuthenticated) {
+		nsp.emit('configuration', state.configuration);
+	}
 };
 
 module.exports = (io) => {
@@ -55,9 +57,11 @@ module.exports = (io) => {
 		socket.join(`user:${socket.user}`);
 
 		if (state.configuration) {
-			nsp.emit('configuration', state.configuration);
+			if (socket.isAuthenticated) {
+				nsp.emit('configuration', state.configuration);
+			}
 		} else {
-			getConfiguration();
+			getConfiguration(socket);
 		}
 
 		socket.on('location', (config) => { setLocation(socket, config); });
