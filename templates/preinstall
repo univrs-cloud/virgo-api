@@ -2,8 +2,8 @@
 
 set -o pipefail
 
-debconf-set-selections <<EOF
-msmtp msmtp/apparmor boolean false
-EOF
+#debconf-set-selections <<EOF
+#msmtp msmtp/apparmor boolean false
+#EOF
 
-apt install msmtp-mta -y
+#apt install msmtp-mta -y
