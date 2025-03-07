@@ -10,7 +10,7 @@
 	"node_deb": {
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp,bsd-mailx",
+		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx",
 		"user": "root",
 		"templates": {
 			"preinst": "templates/preinstall",
