@@ -1,9 +1,14 @@
 const fs = require('fs');
+const util = require('util');
+const childProcess = require('child_process');
+const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
 
 let nsp;
 let state = {};
 let configurationFile = '/var/www/virgo-api/configuration.json';
+let msmtpConfigurationFile = '/etc/msmtprc';
+let zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
 
 const setLocation = (socket, config) => {
 	if (!socket.isAuthenticated) {
@@ -23,6 +28,35 @@ const setSmtp = (socket, config) => {
 	state.configuration.smtp = config;
 	fs.writeFileSync(configurationFile, JSON.stringify(state.configuration, null, 2), 'utf8', { flag: 'w' });
 	nsp.emit('configuration', state.configuration);
+
+	fs.writeFileSync(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8', { flag: 'w' });
+	fs.writeFileSync(zedConfigurationFile, generateZedConfig(config), 'utf8', { flag: 'w' });
+	exec('systemctl restart zfs-zed');
+
+	function generateMsmtpConfig(config) {
+		return `defaults
+${(config.username && config.password ? 'auth on' : 'auth off')}
+tls on
+tls_certcheck off
+${(config.encryption === 'ssl' ? 'ssl-verify off' : '')}
+
+account alerts
+host ${config.address}
+port ${config.port}
+${(config.username && config.password ? `user ${config.username}\npassword ${config.password}` : '')}
+from ${config.sender}
+
+account default : alerts\n`;
+	}
+
+	function generateZedConfig(config) {
+		return `ZED_EMAIL_ADDR="voyager@univrs.cloud"
+ZED_EMAIL_PROG="sendmail"
+ZED_EMAIL_OPTS=" @ADDRESS@ "
+ZED_NOTIFY_INTERVAL_SECS=3600
+ZED_NOTIFY_VERBOSE=1
+ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"\n`;
+	}
 };
 
 const getConfiguration = (socket) => {

@@ -10,7 +10,7 @@
 	"node_deb": {
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "zfsutils-linux,apt-show-versions,smartmontools,nvme-cli,jq",
+		"dependencies": "zfsutils-linux,apt-show-versions,smartmontools,nvme-cli,jq,msmtp,msmtp-mta",
 		"user": "root",
 		"templates": {
 			"postinst": "templates/postinstall",
