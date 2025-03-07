@@ -9,15 +9,7 @@ const bodyParser = require('body-parser');
 const config = require('./config');
 // const routes = require('./routes');
 const emitters = require('./emitters');
-
-const options = {
-	key: fs.readFileSync(path.join(__dirname,'./cert/key.pem')),
-	cert: fs.readFileSync(path.join(__dirname,'./cert/cert.pem'))
-};
 const app = express();
-const sslServer = https.createServer(options, app);
-const io = new Server(sslServer);
-emitters(io);
 
 app.disable('x-powered-by');
 
@@ -67,6 +59,14 @@ app.use((err, req, res, next) => {
 	console.log(err);
 	res.status(500).send({ error: 'Oops! Something went wrong.' });
 });
+
+const options = {
+	key: fs.readFileSync(path.join(__dirname,'./cert/key.pem')),
+	cert: fs.readFileSync(path.join(__dirname,'./cert/cert.pem'))
+};
+const sslServer = https.createServer(options, app);
+const io = new Server(sslServer);
+emitters(io);
 
 sslServer.listen(config.server.port, () => {
 	console.log(`Server started at https://localhost:${config.server.port}`);

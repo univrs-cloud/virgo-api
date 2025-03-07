@@ -15,6 +15,16 @@ const setLocation = (socket, config) => {
 	nsp.emit('configuration', state.configuration);
 };
 
+const setSmtp = (socket, config) => {
+	if (!socket.isAuthenticated) {
+		return;
+	}
+
+	state.configuration.smtp = config;
+	fs.writeFileSync(configurationFile, JSON.stringify(state.configuration, null, 2), 'utf8', { flag: 'w' });
+	nsp.emit('configuration', state.configuration);
+};
+
 const getConfiguration = () => {
 	touch.sync(configurationFile);
 	let configuration = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
@@ -24,7 +34,8 @@ const getConfiguration = () => {
 			location: {
 				latitude: '45.749',
 				longitude: '21.227'
-			}
+			},
+			smtp: null
 		};
 	} else {
 		configuration = JSON.parse(configuration);
@@ -50,6 +61,8 @@ module.exports = (io) => {
 		}
 
 		socket.on('location', (config) => { setLocation(socket, config); });
+		
+		socket.on('smtp', (config) => { setSmtp(socket, config); });
 
 		socket.on('disconnect', () => {
 			//
