@@ -51,8 +51,8 @@ account default : alerts\n`;
 
 	function generateZedConfig(config) {
 		return `ZED_EMAIL_ADDR="voyager@univrs.cloud"
-ZED_EMAIL_PROG="sendmail"
-ZED_EMAIL_OPTS=" @ADDRESS@ "
+ZED_EMAIL_PROG="mail"
+ZED_EMAIL_OPTS="-s '@SUBJECT@' @ADDRESS@ "
 ZED_NOTIFY_INTERVAL_SECS=3600
 ZED_NOTIFY_VERBOSE=1
 ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"\n`;

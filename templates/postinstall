@@ -18,3 +18,9 @@ if [ $? == 1 ]; then
 	/usr/local/bin/n prune
 	systemctl start virgo-api.service
 fi
+
+file_path="/etc/mail.rc"
+line_to_add="set mta=/usr/bin/msmtp"
+if ! grep -Fxq "$line_to_add" "$file_path"; then
+	echo "$line_to_add" >> "$file_path"
+fi
