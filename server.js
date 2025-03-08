@@ -36,9 +36,7 @@ app.use((req, res, next) => {
 			maxAge: SIX_MONTHS_MS
 		});
 	} else {
-		res.clearCookie('account', {
-			domain: req.hostname
-		});
+		res.clearCookie('account');
 	}
 	res.header('Access-Control-Allow-Origin', '*');
 	next();
