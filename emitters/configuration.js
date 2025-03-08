@@ -25,6 +25,13 @@ const setSmtp = (socket, config) => {
 		return;
 	}
 
+	if (!config?.recipients) {
+		config.recipients = [];
+	}
+	if (config.recipients.length === 0) {
+		config.recipients.push('voyager@univrs.cloud');
+	}
+
 	state.configuration.smtp = config;
 	fs.writeFileSync(configurationFile, JSON.stringify(state.configuration, null, 2), 'utf8', { flag: 'w' });
 	nsp.emit('configuration', state.configuration);
@@ -50,7 +57,7 @@ account default : alerts\n`;
 	}
 
 	function generateZedConfig(config) {
-		return `ZED_EMAIL_ADDR="voyager@univrs.cloud"
+		return `ZED_EMAIL_ADDR="${config.recipients.join(' ')}"
 ZED_EMAIL_PROG="mail"
 ZED_EMAIL_OPTS="-s '@SUBJECT@' @ADDRESS@ "
 ZED_NOTIFY_INTERVAL_SECS=3600
