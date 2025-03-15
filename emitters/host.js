@@ -7,6 +7,7 @@ const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const { zpool } = require('@univrs/zfs');
+const { version } = require('../package.json');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
@@ -48,7 +49,11 @@ let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
 let powerSourceWatcher = null;
 
-state.system = {};
+state.system = {
+	api: {
+		version
+	}
+};
 si.system((system) => {
 	state.system = { ...state.system, ...system };
 });
