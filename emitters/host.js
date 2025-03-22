@@ -6,7 +6,6 @@ const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
-const { zpool } = require('@univrs/zfs');
 const { version } = require('../package.json');
 let i2c = false;
 try {
@@ -222,7 +221,7 @@ const upgrade = (socket) => {
 
 	watchUpgradeLog();
 
-	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get upgrade --with-new-pkgs -o Dpkg::Options::='--force-confold' -y -q > /var/www/virgo-api/upgrade.log 2>&1"`)
+	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt full-upgrade -o Dpkg::Options::='--force-confold' -y -q > /var/www/virgo-api/upgrade.log 2>&1"`)
 		.then(() => {
 			checkUpgrade(socket);
 		})
@@ -374,53 +373,45 @@ const pollStorage = (socket) => {
 	state.storage = [];
 
 	Promise.all([
-		new Promise((resolve, reject) => {
-			let pools;
-			zpool.list((error, response) => {
-				if (error) {
-					return reject(error);
-				}
-
-				pools = response;
-				
-				zpool.status((error, response) => {
-					if (error) {
-						console.log('error', error);
-						return resolve(pools);
-					}
-
-					pools = pools.map((pool) => {
-						const status = response.find((obj) => { return obj.name === pool.name; });
-						return (status ? { ...pool, ...status } : pool);
-					});
-					resolve(pools);
-				});
-			});
-		}),
+		exec('zpool list -jp | jq'),
+		exec('zpool status -jp | jq'),
 		si.fsSize()
 	])
-		.then(([pools, filesystems]) => {
+		.then(([poolsList, poolsStatus, filesystems]) => {
+			poolsStatus = JSON.parse(poolsStatus.stdout).pools;
+			let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
+				pool.properties.size.value = Number.parseInt(pool.properties.size.value);
+				pool.properties.allocated.value = Number.parseInt(pool.properties.allocated.value);
+				pool.properties.free.value = Number.parseInt(pool.properties.free.value);
+				pool.properties.capacity.value = Number.parseFloat(pool.properties.capacity.value);
+				return { ...pool, ...poolsStatus[pool.name] };
+			});
 			let filesystem = filesystems.find((filesystem) => {
 				return filesystem.mount === '/';
 			});
 			if (filesystem) {
 				let pool = {
 					name: 'system',
-					size: filesystem.size,
-					alloc: filesystem.used,
-					free: filesystem.available,
-					cap: filesystem.use,
-					health: 'ONLINE'
+					properties: {
+						health: {
+							value: 'ONLINE'
+						},
+						size: {
+							value: filesystem.size
+						},
+						allocated: {
+							value: filesystem.used
+						},
+						free: {
+							value: filesystem.available
+						},
+						capacity: {
+							value: filesystem.use
+						}
+					}
 				}
-				pools.push(pool);
+				storage.push(pool);
 			}
-			let storage = pools.map((pool) => {
-				pool.size = Number.parseInt(pool.size);
-				pool.alloc = Number.parseInt(pool.alloc);
-				pool.free = Number.parseInt(pool.free);
-				pool.cap = Number.parseFloat(pool.cap);
-				return pool;
-			});
 			state.storage = storage;
 		})
 		.catch((error) => {
@@ -440,8 +431,8 @@ const pollDrives = (socket) => {
 
 	state.drives = [];
 	Promise.all([
-		exec("smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s ."),
-		exec("smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'")
+		exec(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`),
+		exec(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`)
 	])
 		.then(([responseSmartctl, responseNvme]) => {
 			let drives = JSON.parse(responseSmartctl.stdout);
@@ -645,89 +636,3 @@ module.exports = (io) => {
 		});
 	});
 };
-
-// zpool status
-//   pool: messier
-//  state: DEGRADED
-// status: One or more devices is currently being resilvered.  The pool will
-// 	continue to function, possibly in a degraded state.
-// action: Wait for the resilver to complete.
-//   scan: resilver in progress since Mon Feb  3 19:04:33 2025
-// 	114G / 114G scanned, 535M / 114G issued at 178M/s
-// 	538M resilvered, 0.46% done, 00:10:52 to go
-// config:
-
-// 	NAME                                             STATE     READ WRITE CKSUM
-// 	messier                                          DEGRADED     0     0     0
-// 	  mirror-0                                       DEGRADED     0     0     0
-// 	    nvme-eui.00000000000000000026b738336717b5    ONLINE       0     0     0
-// 	    replacing-1                                  DEGRADED     0     0     0
-// 	      14055708554257071460                       UNAVAIL      0     0     0  was /dev/disk/by-id/nvme-eui.00000000000000000026b73833673485-part1
-// 	      nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0  (resilvering)
-
-// errors: No known data errors
-
-// zpool status
-//   pool: messier
-//  state: DEGRADED
-// status: One or more devices is currently being resilvered.  The pool will
-// 	continue to function, possibly in a degraded state.
-// action: Wait for the resilver to complete.
-//   scan: resilver in progress since Mon Feb  3 19:20:21 2025
-// 	114G / 114G scanned, 1.39G / 114G issued at 238M/s
-// 	1.40G resilvered, 1.22% done, 00:08:05 to go
-// config:
-
-// 	NAME                                             STATE     READ WRITE CKSUM
-// 	messier                                          DEGRADED     0     0     0
-// 	  mirror-0                                       DEGRADED     0     0     0
-// 	    replacing-0                                  DEGRADED     0     0     0
-// 	      3237883490408593218                        UNAVAIL      0     0     0  was /dev/disk/by-id/nvme-eui.00000000000000000026b738336717b5-part1
-// 	      nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0  (resilvering)
-// 	    nvme-eui.00000000000000000000000000002092    ONLINE       0     0     0
-
-// errors: No known data errors
-
-// zpool status
-//   pool: messier
-//  state: ONLINE
-//   scan: resilvered 114G in 00:06:07 with 0 errors on Mon Feb  3 19:10:40 2025
-// config:
-
-// 	NAME                                           STATE     READ WRITE CKSUM
-// 	messier                                        ONLINE       0     0     0
-// 	  mirror-0                                     ONLINE       0     0     0
-// 	    nvme-eui.00000000000000000026b738336717b5  ONLINE       0     0     0
-// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
-
-// errors: No known data errors
-
-// zpool status
-//   pool: messier
-//  state: ONLINE
-//   scan: scrub in progress since Sat Feb 15 18:05:08 2025
-// 	116G / 116G scanned, 521M / 116G issued at 260M/s
-// 	0B repaired, 0.44% done, 00:07:33 to go
-// config:
-
-// 	NAME                                           STATE     READ WRITE CKSUM
-// 	messier                                        ONLINE       0     0     0
-// 	  mirror-0                                     ONLINE       0     0     0
-// 	    nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0
-// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
-
-// errors: No known data errors
-
-// zpool status
-//   pool: messier
-//  state: ONLINE
-//   scan: scrub repaired 0B in 00:09:15 with 0 errors on Sat Feb 15 18:14:23 2025
-// config:
-
-// 	NAME                                           STATE     READ WRITE CKSUM
-// 	messier                                        ONLINE       0     0     0
-// 	  mirror-0                                     ONLINE       0     0     0
-// 	    nvme-eui.000000000000000000000000020929ae  ONLINE       0     0     0
-// 	    nvme-eui.00000000000000000000000000002092  ONLINE       0     0     0
-
-// errors: No known data errors
