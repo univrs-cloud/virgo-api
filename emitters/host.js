@@ -373,17 +373,14 @@ const pollStorage = (socket) => {
 	state.storage = [];
 
 	Promise.all([
-		exec('zpool list -jp | jq'),
-		exec('zpool status -jp | jq'),
+		exec('zpool list -jp --json-int | jq'),
+		exec('zpool status -jp --json-int | jq'),
 		si.fsSize()
 	])
 		.then(([poolsList, poolsStatus, filesystems]) => {
 			poolsStatus = JSON.parse(poolsStatus.stdout).pools;
 			let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
-				pool.properties.size.value = Number.parseInt(pool.properties.size.value);
-				pool.properties.allocated.value = Number.parseInt(pool.properties.allocated.value);
-				pool.properties.free.value = Number.parseInt(pool.properties.free.value);
-				pool.properties.capacity.value = Number.parseFloat(pool.properties.capacity.value);
+
 				return { ...pool, ...poolsStatus[pool.name] };
 			});
 			let filesystem = filesystems.find((filesystem) => {
