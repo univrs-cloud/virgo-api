@@ -42,11 +42,11 @@ let nsp;
 let state = {};
 let timeouts = {};
 let upgradePid = null;
-let upgradePidFile = '/var/www/virgo-api/upgrade.pid';
-let upgradeFile = '/var/www/virgo-api/upgrade.log';
 let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
 let powerSourceWatcher = null;
+const upgradePidFile = '/var/www/virgo-api/upgrade.pid';
+const upgradeFile = '/var/www/virgo-api/upgrade.log';
 
 state.system = {
 	api: {

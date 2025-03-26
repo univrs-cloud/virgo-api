@@ -6,9 +6,9 @@ const touch = require('touch');
 
 let nsp;
 let state = {};
-let configurationFile = '/var/www/virgo-api/configuration.json';
-let msmtpConfigurationFile = '/etc/msmtprc';
-let zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
+const configurationFile = '/var/www/virgo-api/configuration.json';
+const msmtpConfigurationFile = '/etc/msmtprc';
+const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
 
 const setLocation = (socket, config) => {
 	if (!socket.isAuthenticated) {

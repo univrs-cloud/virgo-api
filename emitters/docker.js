@@ -2,40 +2,63 @@ const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
-const path = require('path');
+const touch = require('touch');
 const axios = require('axios');
 const si = require('systeminformation');
 const dockerode = require('dockerode');
 
-const docker = new dockerode();
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 let nsp;
 let state = {};
 let actionStates = [];
+let dataFileWatcher = null;
+const docker = new dockerode();
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
+const dataFile = '/var/www/virgo-api/data.json';
 
-const pollConfigured = (socket) => {
-	if (nsp.server.engine.clientsCount === 0) {
-		delete state.configured;
+const watchData = () => { 
+	if (dataFileWatcher !== null) {
 		return;
 	}
 
-	state.configured = {};
+	touch.sync(dataFile);
 
-	Promise.all([
-		fs.promises.readFile(path.join(__dirname,'../../data.json'), 'utf8'),
-		si.dockerContainers(true)
-	])
-		.then(([responseData, dockerContainers]) => {
-			let configured = JSON.parse(responseData);
-			configured.containers = dockerContainers;
-			state.configured = configured;
+	if (state.configured === undefined) {
+		state.configured = {};
+		readData();
+	}
+
+	dataFileWatcher = fs.watch(dataFile, (eventType) => {
+		if (eventType === 'change') {
+			readData();
+		}
+	});
+
+	function readData() {
+		let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
+		data = data.trim();
+		if (data !== '') {
+			state.configured = JSON.parse(data);
+			nsp.emit('configured', state.configured);
+		}
+	};
+}
+
+const pollContainers = (socket) => {
+	if (nsp.server.engine.clientsCount === 0) {
+		delete state.containers;
+		return;
+	}
+
+	si.dockerContainers(true)
+		.then((containers) => {
+			state.containers = containers;
 		})
 		.catch((error) => {
-			state.configured = false;
+			state.containers = false;
 		})
 		.then(() => {
-			nsp.emit('configured', state.configured);
-			setTimeout(pollConfigured.bind(null, socket), 2000);
+			nsp.emit('containers', state.containers);
+			setTimeout(pollContainers.bind(null, socket), 2000);
 		});
 };
 
@@ -137,10 +160,15 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
+		watchData();
+
 		if (state.configured) {
 			nsp.emit('configured', state.configured);
+		}
+		if (state.containers) {
+			nsp.emit('containers', state.containers);
 		} else {
-			pollConfigured(socket);
+			pollContainers(socket);
 		}
 		if (state.templates) {
 			if (socket.isAuthenticated) {
