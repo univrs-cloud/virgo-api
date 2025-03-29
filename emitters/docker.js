@@ -15,7 +15,7 @@ const docker = new dockerode();
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 const dataFile = '/var/www/virgo-api/data.json';
 
-const watchData = (socket) => { 
+const watchData = (socket) => {
 	if (dataFileWatcher !== null) {
 		return;
 	}
@@ -108,39 +108,38 @@ const performAction = (socket, config) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
-	
+
 	if (!allowedActions.includes(config?.action)) {
 		return;
 	}
 
-	let container = docker.getContainer(config?.id);
+	const container = docker.getContainer(config?.id);
 	if (!container) {
-		return; 
+		return;
 	}
 
 	actionStates.push(config);
 	nsp.emit('actionStates', actionStates);
 
-	container.inspect((error, data) => {
-		let composeProject = data.Config.Labels['com.docker.compose.project'];
-		if (composeProject) {
-			exec(`docker compose -p ${composeProject} ${config.action}`)
+	container.inspect()
+		.then((data) => {
+			let composeProject = data.Config.Labels['com.docker.compose.project'];
+			if (composeProject) {
+				exec(`docker compose -p ${composeProject} ${config.action}`)
+					.then(() => {
+						callback();
+					});
+				return;
+			}
+
+			container[config.action]()
 				.then(() => {
 					callback();
-				})
-				.catch((error) => {
-					console.log(error);
 				});
-			return;
-		}
-
-		container[config.action]((error, data) => {
-			callback();
-			if (error !== null) {
-				console.log(error);
-			}
+		})
+		.catch((error) => {
+			console.log(error);
 		});
-	});
 
 	function callback() {
 		actionStates = actionStates.filter((actionState) => {
@@ -148,6 +147,60 @@ const performAction = (socket, config) => {
 		});
 		nsp.emit('actionStates', actionStates);
 	}
+};
+
+const terminalConnect = (socket, id) => {
+	if (!socket.isAuthenticated) {
+		return;
+	}
+
+	const container = docker.getContainer(id);
+	if (!container) {
+		return;
+	}
+
+	container.exec(
+		{
+			Cmd: ['/bin/bash'],
+			AttachStdin: true,
+			AttachStdout: true,
+			AttachStderr: true,
+			Tty: true
+		}
+	)
+		.then((exec) => {
+			return exec.start(
+				{
+					stream: true,
+					stdin: true,
+					stdout: true,
+					stderr: true,
+					hijack: true
+				}
+			);
+		})
+		.then((stream) => {
+			// Pipe container output to the client
+			stream.on('data', (chunk) => {
+				socket.emit('terminalOutput', chunk.toString('utf-8'));
+			});
+			// Pipe client input to the container
+			socket.on('terminalInput', (data) => {
+				stream.write(data);
+			});
+			// Client terminated the connection
+			socket.on('terminalDisconnect', () => {
+				stream.destroy();
+			});
+			socket.on('disconnect', () => {
+				stream.destroy();
+			});
+			socket.emit('terminalConnected');
+		})
+		.catch((error) => {
+			console.error(error);
+			socket.emit('terminalError', 'Failed to start container exec.');
+		});
 };
 
 module.exports = (io) => {
@@ -180,6 +233,7 @@ module.exports = (io) => {
 
 		socket.on('install', (config) => { install(socket, config); });
 		socket.on('performAction', (config) => { performAction(socket, config); });
+		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });
 
 		socket.on('disconnect', () => {
 			//
