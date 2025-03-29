@@ -43,17 +43,26 @@ const changePassword = (socket, config) => {
 		return;
 	}
 
-	linuxUser.setPassword(socket.user, config.password)
-		.then(() => {
-			setSambaUserPasswrd(socket.user, config.password);
-			setAutheliaUserPassword(socket.user, config.password);
-		})
-		.catch((error) => {
-			console.log(error);
-		});
+	setLinuxUserPassword(socket.user, config.password);
+	setSambaUserPassword(socket.user, config.password);
+	setAutheliaUserPassword(socket.user, config.password);
 	
-	function setSambaUserPasswrd(username, password) {
-		// `smbpasswd -a "${username}" < <(printf "%s\n%s\n" "${password}" "${password}")`
+	function setLinuxUserPassword(username, password) {
+		linuxUser.setPassword(socket.user, config.password)
+			.then(() => {
+			})
+			.catch((error) => {
+				console.log(error);
+			});
+	}
+
+	function setSambaUserPassword(username, password) {
+		exec(`echo -e "${password}\n${password}" | smbpasswd -a -s "${username}"`)
+			.then(() => {
+			})
+			.catch((error) => {
+				console.log(error);
+			});
 	}
 
 	function setAutheliaUserPassword(username, password) {
