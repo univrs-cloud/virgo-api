@@ -57,7 +57,7 @@ const changePassword = (socket, config) => {
 	}
 
 	function setSambaUserPassword(username, password) {
-		exec(`echo -e "${password}\n${password}" | smbpasswd -a -s "${username}"`)
+		exec(`echo "${password}\n${password}" | smbpasswd -a -s "${username}"`)
 			.then(() => {
 			})
 			.catch((error) => {
