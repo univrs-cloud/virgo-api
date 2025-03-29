@@ -15,7 +15,7 @@ const docker = new dockerode();
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 const dataFile = '/var/www/virgo-api/data.json';
 
-const watchData = () => { 
+const watchData = (socket) => { 
 	if (dataFileWatcher !== null) {
 		return;
 	}
@@ -160,7 +160,7 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
-		watchData();
+		watchData(socket);
 
 		if (state.configured) {
 			nsp.emit('configured', state.configured);

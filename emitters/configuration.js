@@ -10,6 +10,30 @@ const configurationFile = '/var/www/virgo-api/configuration.json';
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
 
+const getConfiguration = (socket) => {
+	touch.sync(configurationFile);
+	let configuration = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
+	configuration = configuration.trim();
+	if (configuration === '') {
+		configuration = {
+			location: {
+				latitude: '45.749',
+				longitude: '21.227'
+			},
+			smtp: null
+		};
+	} else {
+		configuration = JSON.parse(configuration);
+	}
+	state.configuration = configuration;
+	
+	configuration = { ...configuration };
+	if (!socket.isAuthenticated) {
+		delete configuration.smtp;
+	}
+	nsp.to(`user:${socket.user}`).emit('configuration', configuration);
+};
+
 const setLocation = (socket, config) => {
 	if (!socket.isAuthenticated) {
 		return;
@@ -66,27 +90,6 @@ ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"\n`;
 	}
 };
 
-const getConfiguration = (socket) => {
-	touch.sync(configurationFile);
-	let configuration = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
-	configuration = configuration.trim();
-	if (configuration === '') {
-		configuration = {
-			location: {
-				latitude: '45.749',
-				longitude: '21.227'
-			},
-			smtp: null
-		};
-	} else {
-		configuration = JSON.parse(configuration);
-	}
-	state.configuration = configuration;
-	if (socket.isAuthenticated) {
-		nsp.emit('configuration', state.configuration);
-	}
-};
-
 module.exports = (io) => {
 	nsp = io.of('/configuration');
 	nsp.use((socket, next) => {
@@ -98,9 +101,11 @@ module.exports = (io) => {
 		socket.join(`user:${socket.user}`);
 
 		if (state.configuration) {
-			if (socket.isAuthenticated) {
-				nsp.emit('configuration', state.configuration);
+			let configuration = { ...state.configuration };
+			if (!socket.isAuthenticated) {
+				delete configuration.smtp;
 			}
+			nsp.to(`user:${socket.user}`).emit('configuration', configuration);
 		} else {
 			getConfiguration(socket);
 		}
