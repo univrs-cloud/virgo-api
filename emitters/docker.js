@@ -181,9 +181,12 @@ const terminalConnect = (socket, id) => {
 		})
 		.then((stream) => {
 			// Pipe container output to the client
-			stream.on('data', (chunk) => {
-				socket.emit('terminalOutput', chunk.toString('utf-8'));
-			});
+			// Create readable streams for stdout and stderr
+			const stdout = new require('stream').PassThrough();
+    		const stderr = new require('stream').PassThrough();
+			docker.modem.demuxStream(stream, stdout, stderr);
+			stdout.on('data', (data) => { socket.emit('terminalOutput', data.toString('utf8')) });
+    		stderr.on('data', (data) => { socket.emit('terminalOutput', data.toString('utf8')) });
 			// Pipe client input to the container
 			socket.on('terminalInput', (data) => {
 				stream.write(data);
