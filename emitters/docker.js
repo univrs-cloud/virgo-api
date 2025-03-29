@@ -159,9 +159,11 @@ const terminalConnect = (socket, id) => {
 		return;
 	}
 
+	let shell = findContainerShell(id);
+
 	container.exec(
 		{
-			Cmd: ['/bin/bash'],
+			Cmd: [`/bin/${shell}`],
 			AttachStdin: true,
 			AttachStdout: true,
 			AttachStderr: true,
@@ -204,6 +206,19 @@ const terminalConnect = (socket, id) => {
 			console.error(error);
 			socket.emit('terminalError', 'Failed to start container exec.');
 		});
+
+	function findContainerShell(id) {
+		const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
+		for (const shell of commonShells) {
+			try {
+				childProcess.execSync(`docker exec ${id} ${shell} -c 'exit 0'`, { stdio: 'ignore' });
+				return shell;
+			} catch (error) {
+				continue;
+			}
+		}
+		return null;
+	}
 };
 
 module.exports = (io) => {
