@@ -4,6 +4,7 @@ const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
 const axios = require('axios');
+const camelcaseKeys = require('camelcase-keys').default;
 const si = require('systeminformation');
 const dockerode = require('dockerode');
 
@@ -49,11 +50,12 @@ const pollContainers = (socket) => {
 		return;
 	}
 
-	si.dockerContainers(true)
+	docker.listContainers({ all: true })
 		.then((containers) => {
-			state.containers = containers;
+			state.containers = camelcaseKeys(containers, { deep: true });
 		})
 		.catch((error) => {
+			console.log(error);
 			state.containers = false;
 		})
 		.then(() => {
@@ -113,32 +115,21 @@ const performAction = (socket, config) => {
 		return;
 	}
 
-	const container = docker.getContainer(config?.id);
-	if (!container) {
-		return;
-	}
-
 	actionStates.push(config);
 	nsp.emit('actionStates', actionStates);
 
-	container.inspect()
-		.then((data) => {
-			let composeProject = data.Config.Labels['com.docker.compose.project'];
-			if (composeProject) {
-				exec(`docker compose -p ${composeProject} ${config.action}`)
-					.then(() => {
-						callback();
-					});
-				return;
-			}
+	if (config?.composeProject !== '') {
+		exec(`docker compose -p ${config.composeProject} ${config.action}`)
+			.then(() => {
+				callback();
+			});
+		return;
+	}
 
-			container[config.action]()
-				.then(() => {
-					callback();
-				});
-		})
-		.catch((error) => {
-			console.log(error);
+	const container = docker.getContainer(config?.id);
+	container[config.action]()
+		.then(() => {
+			callback();
 		});
 
 	function callback() {
