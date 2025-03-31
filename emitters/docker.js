@@ -2,17 +2,19 @@ const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
+const path = require('path');
 const touch = require('touch');
 const axios = require('axios');
 const camelcaseKeys = require('camelcase-keys').default;
-const si = require('systeminformation');
 const dockerode = require('dockerode');
+const dockerCompose = require('docker-compose');
 
 let nsp;
 let state = {};
 let actionStates = [];
 let dataFileWatcher = null;
 const docker = new dockerode();
+const composeDir = '/opt/docker';
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 const dataFile = '/var/www/virgo-api/data.json';
 
@@ -76,18 +78,9 @@ const pollTemplates = (socket) => {
 
 	state.templates = [];
 
-	Promise.all([
-		axios.get('https://apps.univrs.cloud/template.json'),
-		si.dockerContainers(true)
-	])
-		.then(([responseTemplate, dockerContainers]) => {
-			state.templates = responseTemplate.data.templates.map((template) => {
-				let dockerContainer = dockerContainers.find((container) => {
-					return container.name.includes(template.name);
-				});
-				template.isInstalled = (dockerContainer !== undefined);
-				return template;
-			});
+	axios.get('https://apps.univrs.cloud/template.json')
+		.then((response) => {
+			state.templates = response.data.templates;
 		})
 		.catch((error) => {
 			state.templates = false;
@@ -103,7 +96,60 @@ const install = (socket, config) => {
 		return;
 	}
 
-	console.log('install', config);
+	let template = state.templates.find((template) => {
+		return template.id === config.id;
+	});
+	if (!template) {
+		return;
+	}
+
+	if (template.type === 1) {
+		// install using docker run
+	}
+
+	if (template.type === 3) {
+		axios.get(template.repository.url + template.repository.stackfile)
+			.then((response) => {
+				let stack = response.data;
+				let env = Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join('\n');
+				const composeProjectDir = path.join(composeDir, template.name);
+				fs.mkdirSync(composeProjectDir, { recursive: true });
+				fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+				fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
+				dockerCompose.upAll({
+					cwd: composeProjectDir,
+					callback: (chunk) => {
+						state.progress = state.progress || {};
+						state.progress[template.id] = state.progress[template.id] || {};
+						state.progress[template.id].install = chunk.toString();
+						nsp.to(`user:${socket.user}`).emit('progress', state.progress);
+					}
+				})
+					.then(() => {
+						let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
+						data = JSON.parse(data);
+						data.configuration = data.configuration.filter((configuration) => { return configuration.name !== template.name });
+						data.configuration.push({
+							name: template.name,
+							type: 'app',
+							canBeRemoved: true,
+							category: template.categories.find((_, index) => { return index === 0; }),
+							title: template.title,
+							icon: template.logo.split('/').pop()
+						});
+						fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8', { flag: 'w' });
+					})
+					.catch((error) => {
+						console.log(error);
+					})
+					.then(() => {
+						delete state.progress[template.id];
+						nsp.to(`user:${socket.user}`).emit('progress', state.progress);
+					});
+			});
+	}
+
+	pollTemplates(socket);
 };
 
 const performAction = (socket, config) => {
