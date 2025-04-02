@@ -8,6 +8,7 @@ const axios = require('axios');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
+const { Queue, Worker } = require('bullmq');
 
 let nsp;
 let state = {};
@@ -17,6 +18,34 @@ const docker = new dockerode();
 const composeDir = '/opt/docker';
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 const dataFile = '/var/www/virgo-api/data.json';
+const queue = new Queue('jobs');
+const worker = new Worker(
+	'jobs',
+	async (job) => {
+		if (job.name === 'appInstall') {
+			await install(job);
+		}
+	},
+	{
+		connection: {
+			host: 'localhost',
+			port: 6379,
+		}
+	}
+);
+worker.on('completed', async (job) => {
+	if (job) {
+		await job.updateProgress({ state: await job.getState(), message: job.progress.message });
+	}
+});
+worker.on('failed', async (job, error) => {
+	if (job) {
+		await job.updateProgress({ state: await job.getState(), message: `App install failed.` });
+	}
+});
+worker.on('error', (error) => {
+	console.error(error);
+});
 
 const watchData = (socket) => {
 	if (dataFileWatcher !== null) {
@@ -91,65 +120,57 @@ const pollTemplates = (socket) => {
 		});
 };
 
-const install = (socket, config) => {
-	if (!socket.isAuthenticated) {
-		return;
-	}
-
+const install = async (job) => {
+	let config = job.data.config;
 	let template = state.templates.find((template) => {
 		return template.id === config.id;
 	});
 	if (!template) {
-		return;
+		throw new Error('App template not found.');
 	}
+
+	await job.updateProgress({ state: await job.getState(), message: `${template.title} installation starting...` });
 
 	if (template.type === 1) {
 		// install using docker run
+		throw new Error('Installing this app type not yet supported.');
 	}
 
 	if (template.type === 3) {
-		axios.get(template.repository.url + template.repository.stackfile)
-			.then((response) => {
-				let stack = response.data;
-				let env = Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join('\n');
-				const composeProjectDir = path.join(composeDir, template.name);
-				fs.mkdirSync(composeProjectDir, { recursive: true });
-				fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
-				fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
-				dockerCompose.upAll({
-					cwd: composeProjectDir,
-					callback: (chunk) => {
-						state.progress = state.progress || {};
-						state.progress[template.id] = state.progress[template.id] || {};
-						state.progress[template.id].install = chunk.toString();
-						nsp.to(`user:${socket.user}`).emit('progress', state.progress);
-					}
-				})
-					.then(() => {
-						let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
-						data = JSON.parse(data);
-						data.configuration = data.configuration.filter((configuration) => { return configuration.name !== template.name });
-						data.configuration.push({
-							name: template.name,
-							type: 'app',
-							canBeRemoved: true,
-							category: template.categories.find((_, index) => { return index === 0; }),
-							title: template.title,
-							icon: template.logo.split('/').pop()
-						});
-						fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8', { flag: 'w' });
-					})
-					.catch((error) => {
-						console.log(error);
-					})
-					.then(() => {
-						delete state.progress[template.id];
-						nsp.to(`user:${socket.user}`).emit('progress', state.progress);
-					});
-			});
-	}
+		await job.updateProgress({ state: await job.getState(), message: `Downloading ${template.title} project template...` });
+		const response = await axios.get(template.repository.url + template.repository.stackfile);
+		let stack = response.data;
+		let env = Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join('\n');
+		const composeProjectDir = path.join(composeDir, template.name);
+		await job.updateProgress({ state: await job.getState(), message: `Making ${template.title} project directory...` });
+		fs.mkdirSync(composeProjectDir, { recursive: true });
+		await job.updateProgress({ state: await job.getState(), message: `Writing ${template.title} project template...` });
+		fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+		await job.updateProgress({ state: await job.getState(), message: `Writing ${template.title} project configuration...` });
+		fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
+		await job.updateProgress({ state: await job.getState(), message: `Installing ${template.title}...` });
 
-	pollTemplates(socket);
+		await dockerCompose.upAll({
+			cwd: composeProjectDir,
+			callback: async (chunk) => {
+				await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+			}
+		})	
+		let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
+		data = JSON.parse(data);
+		data.configuration = data.configuration.filter((configuration) => { return configuration.name !== template.name });
+		data.configuration.push({
+			name: template.name,
+			type: 'app',
+			canBeRemoved: true,
+			category: template.categories.find((_, index) => { return index === 0; }),
+			title: template.title,
+			icon: template.logo.split('/').pop()
+		});
+		await job.updateProgress({ state: await job.getState(), message: `Updating configuration...` });
+		fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8', { flag: 'w' });
+		await job.updateProgress({ state: await job.getState(), message: `${template.title} installed.` });
+	}
 };
 
 const performAction = (socket, config) => {
@@ -286,7 +307,14 @@ module.exports = (io) => {
 			pollTemplates(socket);
 		}
 
-		socket.on('install', (config) => { install(socket, config); });
+		socket.on('install', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('appInstall', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
 		socket.on('performAction', (config) => { performAction(socket, config); });
 		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });
 
