@@ -93,8 +93,6 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
-		getUsers(socket);
-
 		if (state.users) {
 			if (socket.isAuthenticated) {
 				nsp.to(`user:${socket.user}`).emit('users', state.users);
