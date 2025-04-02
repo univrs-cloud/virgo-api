@@ -23,7 +23,7 @@ const worker = new Worker(
 	'jobs',
 	async (job) => {
 		if (job.name === 'appInstall') {
-			await install(job);
+			return await install(job);
 		}
 	},
 	{
@@ -33,9 +33,9 @@ const worker = new Worker(
 		}
 	}
 );
-worker.on('completed', async (job) => {
+worker.on('completed', async (job, result) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: job.progress.message });
+		await job.updateProgress({ state: await job.getState(), message: result });
 	}
 });
 worker.on('failed', async (job, error) => {
@@ -169,7 +169,7 @@ const install = async (job) => {
 		});
 		await job.updateProgress({ state: await job.getState(), message: `Updating configuration...` });
 		fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8', { flag: 'w' });
-		await job.updateProgress({ state: await job.getState(), message: `${template.title} installed.` });
+		return `${template.title} installed.`;
 	}
 };
 
