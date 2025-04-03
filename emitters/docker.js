@@ -83,7 +83,12 @@ const pollContainers = (socket) => {
 
 	docker.listContainers({ all: true })
 		.then((containers) => {
-			state.containers = camelcaseKeys(containers, { deep: true });
+			containers = camelcaseKeys(containers, { deep: true });
+			containers = containers.map((container) => {
+				container.name = container.names[0].replace('/', '');
+				return container;
+			});
+			state.containers = containers;
 		})
 		.catch((error) => {
 			console.log(error);
