@@ -4,10 +4,11 @@
 	"description": "virgo API",
 	"main": "server.js",
 	"scripts": {
-		"deb": "node-deb --arch=arm64 --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ routes/ services/ emitters/",
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ routes/ services/ emitters/",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"node_deb": {
+		"architecture": "arm64",
 		"init": "systemd",
 		"install_dir": "/var/www",
 		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server",
