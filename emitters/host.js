@@ -124,7 +124,7 @@ const checkUpdates = (socket) => {
 
 	state.checkUpdates = true;
 	nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
-	exec('apt update')
+	exec('apt update --allow-releaseinfo-change')
 		.then(() => {
 			state.checkUpdates = false;
 			updates(socket);
