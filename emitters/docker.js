@@ -145,7 +145,7 @@ const install = async (job) => {
 		await job.updateProgress({ state: await job.getState(), message: `Downloading ${template.title} project template...` });
 		const response = await axios.get(template.repository.url + template.repository.stackfile);
 		let stack = response.data;
-		let env = Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join('\n');
+		let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 		const composeProjectDir = path.join(composeDir, template.name);
 		await job.updateProgress({ state: await job.getState(), message: `Making ${template.title} project directory...` });
 		fs.mkdirSync(composeProjectDir, { recursive: true });
