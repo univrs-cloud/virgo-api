@@ -106,7 +106,7 @@ const setSmtp = async (job) => {
 	fs.writeFileSync(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8', { flag: 'w' });
 	fs.writeFileSync(zedConfigurationFile, generateZedConfig(config), 'utf8', { flag: 'w' });
 	await exec('systemctl restart zfs-zed');
-	return `Notification server saved`;
+	return `Notification server saved.`;
 
 	function generateMsmtpConfig(config) {
 		return `defaults
