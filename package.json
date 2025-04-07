@@ -1,6 +1,6 @@
 {
 	"name": "virgo-api",
-	"version": "1.2.39",
+	"version": "2.0.0",
 	"description": "virgo API",
 	"main": "server.js",
 	"scripts": {
