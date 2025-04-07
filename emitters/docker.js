@@ -17,9 +17,9 @@ const docker = new dockerode();
 const composeDir = '/opt/docker';
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
 const dataFile = '/var/www/virgo-api/data.json';
-const queue = new Queue('jobs');
+const queue = new Queue('docker-jobs');
 const worker = new Worker(
-	'jobs',
+	'docker-jobs',
 	async (job) => {
 		if (job.name === 'appInstall') {
 			return await install(job);
@@ -58,16 +58,16 @@ const watchData = (socket) => {
 
 	if (state.configured === undefined) {
 		state.configured = {};
-		readData();
+		readFile();
 	}
 
 	dataFileWatcher = fs.watch(dataFile, (eventType) => {
 		if (eventType === 'change') {
-			readData();
+			readFile();
 		}
 	});
 
-	function readData() {
+	function readFile() {
 		let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
@@ -320,6 +320,7 @@ module.exports = (io) => {
 					});
 			}
 		});
+
 		socket.on('performAction', (config) => {
 			if (socket.isAuthenticated) {
 				queue.add('performAction', { config, user: socket.user })
@@ -328,6 +329,7 @@ module.exports = (io) => {
 					});
 			}
 		});
+		
 		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });
 
 		socket.on('disconnect', () => {

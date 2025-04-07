@@ -1,56 +1,22 @@
 const { Queue, QueueEvents } = require('bullmq');
 
-const queue = new Queue('jobs');
+const queues = ['configuration-jobs', 'docker-jobs'];
 let nsp;
 
-const setupQueueEvents = () => {
-	const queueEvents = new QueueEvents('jobs');
-	queueEvents.on('waiting', (job) => {
-		emitJob(job.jobId);
+queues.forEach((queueName) => {
+	const queue = new Queue(queueName);
+	const queueEvents = new QueueEvents(queueName);
+	queueEvents.on('progress', async (response) => {
+		let job = await queue.getJob(response.jobId);
+		if (job) {
+			nsp.sockets.forEach((socket) => {
+				if (socket.isAuthenticated) {
+					nsp.to(`user:${socket.user}`).emit('job', job);
+				}
+			});
+		}
 	});
-	queueEvents.on('active', (job) => {
-		emitJob(job.jobId);
-	});
-	queueEvents.on('progress', (job) => {
-		emitJob(job.jobId);
-	});
-	queueEvents.on('completed', (job) => {
-		emitJob(job.jobId);
-	});
-	queueEvents.on('failed', (job) => {
-		emitJob(job.jobId);
-	});
-};
-
-const emitJob = (jobId) => {
-	queue.getJob(jobId)
-		.then((job) => {
-			if (job) {
-				nsp.sockets.forEach((socket) => {
-					if (socket.isAuthenticated) {
-						nsp.to(`user:${socket.user}`).emit('job', job);
-					}
-				});
-			}
-		})
-		.catch((error) => {
-			console.error(`Error fetching job ${job.id}:`, error);
-		});
-};
-
-const initialJobs = (socket) => {
-	if (!socket.isAuthenticated) {
-		return;
-	}
-
-	queue.getJobs()
-		.then((jobs) => {
-			nsp.to(`user:${socket.user}`).emit('jobs', jobs);
-		})
-		.catch((error) => {
-			console.error('Error fetching initial jobs:', error);
-		});
-};
+});
 
 module.exports = (io) => {
 	nsp = io.of('/job');
@@ -61,12 +27,9 @@ module.exports = (io) => {
 	});
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
-		
-		initialJobs(socket);
 
 		socket.on('disconnect', () => {
 			//
 		});
 	});
-	setupQueueEvents();
 };
