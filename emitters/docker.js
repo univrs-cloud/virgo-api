@@ -12,7 +12,6 @@ const { Queue, Worker } = require('bullmq');
 
 let nsp;
 let state = {};
-let actionStates = [];
 let dataFileWatcher = null;
 const docker = new dockerode();
 const composeDir = '/opt/docker';
@@ -24,6 +23,9 @@ const worker = new Worker(
 	async (job) => {
 		if (job.name === 'appInstall') {
 			return await install(job);
+		}
+		if (job.name === 'performAction') {
+			return await performAction(job);
 		}
 	},
 	{
@@ -40,7 +42,7 @@ worker.on('completed', async (job, result) => {
 });
 worker.on('failed', async (job, error) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: `App install failed.` });
+		await job.updateProgress({ state: await job.getState(), message: `` });
 	}
 });
 worker.on('error', (error) => {
@@ -91,7 +93,6 @@ const pollContainers = (socket) => {
 			state.containers = containers;
 		})
 		.catch((error) => {
-			console.log(error);
 			state.containers = false;
 		})
 		.then(() => {
@@ -160,11 +161,10 @@ const install = async (job) => {
 			callback: async (chunk) => {
 				await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
 			}
-		})	
-		let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
-		data = JSON.parse(data);
-		data.configuration = data.configuration.filter((configuration) => { return configuration.name !== template.name });
-		data.configuration.push({
+		});
+		let configuration = [...state.configured.configuration];
+		configuration = configuration.filter((configuration) => { return configuration.name !== template.name });
+		configuration.push({
 			name: template.name,
 			type: 'app',
 			canBeRemoved: true,
@@ -173,43 +173,43 @@ const install = async (job) => {
 			icon: template.logo.split('/').pop()
 		});
 		await job.updateProgress({ state: await job.getState(), message: `Updating configuration...` });
-		fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8', { flag: 'w' });
+		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 		return `${template.title} installed.`;
 	}
 };
 
-const performAction = (socket, config) => {
-	if (!socket.isAuthenticated) {
-		return;
-	}
-
+const performAction = async (job) => {
+	let config = job.data.config;
 	if (!allowedActions.includes(config?.action)) {
-		return;
+		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
 
-	actionStates.push(config);
-	nsp.emit('actionStates', actionStates);
-
-	if (config?.composeProject !== '') {
-		exec(`docker compose -p ${config.composeProject} ${config.action}`)
-			.then(() => {
-				callback();
-			});
-		return;
+	let configuration = [...state.configured.configuration];
+	let app = configuration.find((app) => {
+		return app.name === config?.name;
+	});
+	if (!app) {
+		throw new Error(`App not found.`);
 	}
 
-	const container = docker.getContainer(config?.id);
-	container[config.action]()
-		.then(() => {
-			callback();
-		});
+	await job.updateProgress({ state: await job.getState(), message: `${app.title} is ${config.action}ing...` });
 
-	function callback() {
-		actionStates = actionStates.filter((actionState) => {
-			return actionState.id !== config.id;
-		});
-		nsp.emit('actionStates', actionStates);
+	const container = state.containers.find((container) => {
+		return container.names.includes(`/${app.name}`);
+	});
+	composeProject = container.labels.comDockerComposeProject ?? false;
+	if (composeProject !== false) {
+		await exec(`docker compose -p ${composeProject} ${config.action}`)
+	} else {
+		await container[config.action]();
 	}
+
+	if (config.action === 'remove') {
+		configuration = configuration.filter((configuration) => { return configuration.name !== app.name });
+		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	}
+
+	return `${app.title} ${config.action}ed.`;
 };
 
 const terminalConnect = (socket, id) => {
@@ -320,7 +320,14 @@ module.exports = (io) => {
 					});
 			}
 		});
-		socket.on('performAction', (config) => { performAction(socket, config); });
+		socket.on('performAction', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('performAction', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
 		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });
 
 		socket.on('disconnect', () => {
