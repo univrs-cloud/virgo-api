@@ -5,14 +5,46 @@ const exec = util.promisify(childProcess.exec);
 const yaml = require('js-yaml');
 const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
+const { Queue, Worker } = require('bullmq');
 const cost = 12;
 
 let nsp;
 let state = {};
 const autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
+const queue = new Queue('user-jobs');
+const worker = new Worker(
+	'user-jobs',
+	async (job) => {
+		if (job.name === 'updateProfile') {
+			return await updateProfile(job);
+		}
+		if (job.name === 'changePassword') {
+			return await changePassword(job);
+		}
+	},
+	{
+		connection: {
+			host: 'localhost',
+			port: 6379,
+		}
+	}
+);
+worker.on('completed', async (job, result) => {
+	if (job) {
+		await job.updateProgress({ state: await job.getState(), message: result });
+	}
+});
+worker.on('failed', async (job, error) => {
+	if (job) {
+		await job.updateProgress({ state: await job.getState(), message: `` });
+	}
+});
+worker.on('error', (error) => {
+	console.error(error);
+});
 
 const getUsers = (socket) => {
-	Promise.all(
+	return Promise.all(
 		[
 			linuxUser.getUsers(),
 			linuxUser.getGroups()
@@ -29,33 +61,47 @@ const getUsers = (socket) => {
 		})
 		.catch((error) => {
 			state.users = false;
-		})
-		.then(() => {
-			if (socket.isAuthenticated) {
-				nsp.to(`user:${socket.user}`).emit('users', state.users);
-			}
 		});
 };
 
-const updateProfile = (socket, config) => {
-	if (!socket.isAuthenticated) {
-		return;
-	}
+const updateProfile = async (job) => {
+	let config = job.data.config;
+	await job.updateProgress({ state: await job.getState(), message: `Updating system user profile...` });
+	await exec(`chfn -f "${config.fullname}" ${job.data.user}`);
+	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password...` });
+	await updateAutheliaUserProfile(job.data.user, config);
+	await getUsers();
+	nsp.sockets.forEach((socket) => {
+		if (socket.isAuthenticated) {
+			nsp.to(`user:${socket.user}`).emit('users', state.users);
+		}
+	});
+	return `Profile updated.`;
 
-	getUsers(socket);
+	async function updateAutheliaUserProfile(username, config) {
+		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		let usersConfig = yaml.load(fileContents);
+		if (usersConfig.users && usersConfig.users[username]) {
+			usersConfig.users[username].displayname = config.fullname;
+			usersConfig.users[username].email = config.email;
+			const updatedYaml = yaml.dump(usersConfig, { indent: 2 });
+			fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+		}
+	}
 };
 
-const changePassword = (socket, config) => {
-	if (!socket.isAuthenticated) {
-		return;
-	}
-
-	setLinuxUserPassword(socket.user, config.password);
-	setSambaUserPassword(socket.user, config.password);
-	setAutheliaUserPassword(socket.user, config.password);
+const changePassword = async (job) => {
+	let config = job.data.config;
+	await job.updateProgress({ state: await job.getState(), message: `Changing system user password...` });
+	await linuxUser.setPassword(job.data.user, config.password);
+	await job.updateProgress({ state: await job.getState(), message: `Changing SMB user password...` });
+	await setSambaUserPassword(job.data.user, config.password);
+	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password...` });
+	await setAutheliaUserPassword(job.data.user, config.password);
+	return `Password changed.`;
 	
-	function setLinuxUserPassword(username, password) {
-		linuxUser.setPassword(socket.user, config.password)
+	async function setSambaUserPassword(username, password) {
+		return exec(`echo "${password}\n${password}" | smbpasswd -a -s "${username}"`)
 			.then(() => {
 			})
 			.catch((error) => {
@@ -63,16 +109,7 @@ const changePassword = (socket, config) => {
 			});
 	}
 
-	function setSambaUserPassword(username, password) {
-		exec(`echo "${password}\n${password}" | smbpasswd -a -s "${username}"`)
-			.then(() => {
-			})
-			.catch((error) => {
-				console.log(error);
-			});
-	}
-
-	function setAutheliaUserPassword(username, password) {
+	async function setAutheliaUserPassword(username, password) {
 		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let usersConfig = yaml.load(fileContents);
 		if (usersConfig.users && usersConfig.users[username]) {
@@ -98,11 +135,31 @@ module.exports = (io) => {
 				nsp.to(`user:${socket.user}`).emit('users', state.users);
 			}
 		} else {
-			getUsers(socket);
+			getUsers()
+				.then(() => {
+					if (socket.isAuthenticated) {
+						nsp.to(`user:${socket.user}`).emit('users', state.users);
+					}		
+				});
 		}
 
-		socket.on('profile', (config) => { updateProfile(socket, config); });
-		socket.on('password', (config) => { changePassword(socket, config); });
+		socket.on('profile', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('updateProfile', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
+
+		socket.on('password', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('changePassword', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
 
 		socket.on('disconnect', () => {
 			//
