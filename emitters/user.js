@@ -44,6 +44,8 @@ worker.on('error', (error) => {
 });
 
 const getUsers = (socket) => {
+	const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+	let autheliaUsersConfig = yaml.load(fileContents);
 	return Promise.all(
 		[
 			linuxUser.getUsers(),
@@ -55,6 +57,9 @@ const getUsers = (socket) => {
 			users = users.map((user) => {
 				user.isOwner = (user.uid === 1000);
 				user.groups = groups.filter((group) => { return group.gid === user.gid });
+				if (autheliaUsersConfig.users && autheliaUsersConfig.users[user.username]) {
+					user.email = autheliaUsersConfig.users[user.username].email;
+				}
 				return user;
 			});
 			state.users = users;
@@ -80,11 +85,11 @@ const updateProfile = async (job) => {
 
 	async function updateAutheliaUserProfile(username, config) {
 		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
-		let usersConfig = yaml.load(fileContents);
-		if (usersConfig.users && usersConfig.users[username]) {
-			usersConfig.users[username].displayname = config.fullname;
-			usersConfig.users[username].email = config.email;
-			const updatedYaml = yaml.dump(usersConfig, { indent: 2 });
+		let autheliaUsersConfig = yaml.load(fileContents);
+		if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
+			autheliaUsersConfig.users[username].displayname = config.fullname;
+			autheliaUsersConfig.users[username].email = config.email;
+			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
 		}
 	}
@@ -111,10 +116,10 @@ const changePassword = async (job) => {
 
 	async function setAutheliaUserPassword(username, password) {
 		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
-		let usersConfig = yaml.load(fileContents);
-		if (usersConfig.users && usersConfig.users[username]) {
-			usersConfig.users[username].password = bcrypt.hashSync(password, cost);
-			const updatedYaml = yaml.dump(usersConfig, { indent: 2 });
+		let autheliaUsersConfig = yaml.load(fileContents);
+		if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
+			autheliaUsersConfig.users[username].password = bcrypt.hashSync(password, cost);
+			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
 		}
 	}
