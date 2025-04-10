@@ -86,6 +86,7 @@ const createUser = async (job) => {
 		create_home: false,
 		shell: null
 	});
+	await linuxUser.setPassword(config.username, config.password);
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Creating SMB user ${config.username}...` });
 	await setSambaUserPassword(config.username, config.password);
@@ -135,17 +136,17 @@ const updateUser = async (job) => {
 
 const deleteUser = async (job) => {
 	let config = job.data.config;
-	let user = state.users.find((user) => { user.username === config.username; });
+	let user = state.users.find((user) => { return user.username === config.username; });
 	if (user.uid === 1000) {
 		throw new Error('Owner cannot be deleted.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Deleting system user ${config.username}...` });
-	await linuxUser.removeUser(config.username);
-	await job.updateProgress({ state: await job.getState(), message: `Deleting SMB user ${config.username}...` });
-	await exec(`smbpasswd -s -x ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Deleting Authelia user ${config.username}...` });
 	await deleteAutheliaUser(config.username);
+	await job.updateProgress({ state: await job.getState(), message: `Deleting SMB user ${config.username}...` });
+	await exec(`smbpasswd -s -x ${config.username}`);
+	await job.updateProgress({ state: await job.getState(), message: `Deleting system user ${config.username}...` });
+	await linuxUser.removeUser(config.username);
 	await getUsers();
 	nsp.sockets.forEach((socket) => {
 		if (socket.isAuthenticated) {
