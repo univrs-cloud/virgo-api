@@ -86,6 +86,7 @@ const createUser = async (job) => {
 		create_home: false,
 		shell: null
 	});
+	await exec(`chfn -f "${config.fullname}" ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Creating SMB user ${config.username}...` });
 	await setSambaUserPassword(config.username, config.password);
 	await job.updateProgress({ state: await job.getState(), message: `Creating Authelia user ${config.username}...` });
@@ -108,8 +109,8 @@ const createUser = async (job) => {
 				password: bcrypt.hashSync(config.password, cost),
 				displayname: config.fullname,
 				email: config.email,
-				groups: ['user'],
-				disabled: false
+				groups: ['users'],
+				disabled: true
 			};
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
