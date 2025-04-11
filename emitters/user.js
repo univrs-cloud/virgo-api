@@ -80,6 +80,11 @@ const getUsers = (socket) => {
 
 const createUser = async (job) => {
 	let config = job.data.config;
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (user) {
+		throw new Error('User already exists.');
+	}
+
 	await job.updateProgress({ state: await job.getState(), message: `Creating system user ${config.username}...` });
 	await linuxUser.addUser({
 		username: config.username,
@@ -104,7 +109,7 @@ const createUser = async (job) => {
 		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
-			updateAutheliaUserProfile(username, config);
+			updateAutheliaUser(username, config);
 		} else {
 			autheliaUsersConfig.users[username] = {
 				password: bcrypt.hashSync(config.password, cost),
@@ -121,10 +126,15 @@ const createUser = async (job) => {
 
 const updateUser = async (job) => {
 	let config = job.data.config;
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error('User not found.');
+	}
+
 	await job.updateProgress({ state: await job.getState(), message: `Updating system user ${config.username}...` });
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
-	await updateAutheliaUserProfile(config.username, config);
+	await updateAutheliaUser(config.username, config);
 	await getUsers();
 	nsp.sockets.forEach((socket) => {
 		if (socket.isAuthenticated) {
@@ -137,6 +147,10 @@ const updateUser = async (job) => {
 const deleteUser = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error('User not found.');
+	}
+
 	if (user.uid === 1000) {
 		throw new Error('Owner cannot be deleted.');
 	}
@@ -168,10 +182,15 @@ const deleteUser = async (job) => {
 
 const updateProfile = async (job) => {
 	let config = job.data.config;
-	await job.updateProgress({ state: await job.getState(), message: `Updating system user profile...` });
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error('User not found.');
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `Updating system user ${config.username}...` });
 	await exec(`chfn -f "${config.fullname}" ${job.data.user}`);
-	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user profile...` });
-	await updateAutheliaUserProfile(job.data.user, config);
+	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
+	await updateAutheliaUser(job.data.user, config);
 	await getUsers();
 	nsp.sockets.forEach((socket) => {
 		if (socket.isAuthenticated) {
@@ -183,11 +202,21 @@ const updateProfile = async (job) => {
 
 const changePassword = async (job) => {
 	let config = job.data.config;
-	await job.updateProgress({ state: await job.getState(), message: `Changing system user password...` });
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error('User not found.');
+	}
+
+	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
+	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
+		throw new Error('Only the owner can change his own password.');
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `Changing system user password for ${config.username}...` });
 	await linuxUser.setPassword(job.data.user, config.password);
-	await job.updateProgress({ state: await job.getState(), message: `Changing SMB user password...` });
+	await job.updateProgress({ state: await job.getState(), message: `Changing SMB user password for ${config.username}...` });
 	await setSambaUserPassword(job.data.user, config.password);
-	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password...` });
+	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password for ${config.username}...` });
 	await setAutheliaUserPassword(job.data.user, config.password);
 	return `Password changed.`;
 
@@ -202,7 +231,7 @@ const changePassword = async (job) => {
 	}
 };
 
-const updateAutheliaUserProfile = async (username, config) => {
+const updateAutheliaUser = async (username, config) => {
 	const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 	let autheliaUsersConfig = yaml.load(fileContents);
 	if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
