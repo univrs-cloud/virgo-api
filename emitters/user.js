@@ -116,7 +116,7 @@ const createUser = async (job) => {
 				displayname: config.fullname,
 				email: config.email,
 				groups: ['users'],
-				disabled: true
+				disabled: false
 			};
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
