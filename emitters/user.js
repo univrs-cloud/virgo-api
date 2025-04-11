@@ -65,8 +65,12 @@ const getUsers = (socket) => {
 			users = users.filter((user) => { return user.uid >= 1000 && user.uid <= 10000; });
 			users = users.map((user) => {
 				user.isOwner = (user.uid === 1000);
+				user.isDisabled = false;
 				user.groups = groups.filter((group) => { return group.gid === user.gid });
+				user.email = null;
 				if (autheliaUsersConfig.users && autheliaUsersConfig.users[user.username]) {
+					user.isDisabled = autheliaUsersConfig.users[user.username].disabled;
+					user.groups = [...user.groups, ...autheliaUsersConfig.users[user.username].groups];
 					user.email = autheliaUsersConfig.users[user.username].email;
 				}
 				return user;
@@ -218,7 +222,7 @@ const changePassword = async (job) => {
 	await setSambaUserPassword(config.username, config.password);
 	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password for ${config.username}...` });
 	await setAutheliaUserPassword(config.username, config.password);
-	return `Password changed.`;
+	return `${config.username} password changed.`;
 
 	async function setAutheliaUserPassword(username, password) {
 		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
