@@ -135,6 +135,11 @@ const updateUser = async (job) => {
 		throw new Error('User not found.');
 	}
 
+	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
+	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
+		throw new Error('Only the owner can update his own profile.');
+	}
+
 	await job.updateProgress({ state: await job.getState(), message: `Updating system user ${config.username}...` });
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
