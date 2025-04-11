@@ -215,7 +215,7 @@ const changePassword = async (job) => {
 	await job.updateProgress({ state: await job.getState(), message: `Changing system user password for ${config.username}...` });
 	await linuxUser.setPassword(config.username, config.password);
 	await job.updateProgress({ state: await job.getState(), message: `Changing SMB user password for ${config.username}...` });
-	await setSambaUserPassword(jconfig.username, config.password);
+	await setSambaUserPassword(config.username, config.password);
 	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password for ${config.username}...` });
 	await setAutheliaUserPassword(config.username, config.password);
 	return `Password changed.`;
