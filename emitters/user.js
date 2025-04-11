@@ -191,7 +191,7 @@ const deleteUser = async (job) => {
 
 const updateProfile = async (job) => {
 	let config = job.data.config;
-	let user = state.users.find((user) => { return user.username === config.username; });
+	let user = state.users.find((user) => { return user.username === job.data.user; });
 	if (!user) {
 		throw new Error('User not found.');
 	}
