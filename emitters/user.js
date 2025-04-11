@@ -24,9 +24,6 @@ const worker = new Worker(
 		if (job.name === 'deleteUser') {
 			return await deleteUser(job);
 		}
-		if (job.name === 'updateProfile') {
-			return await updateProfile(job);
-		}
 		if (job.name === 'changePassword') {
 			return await changePassword(job);
 		}
@@ -189,26 +186,6 @@ const deleteUser = async (job) => {
 	}
 };
 
-const updateProfile = async (job) => {
-	let config = job.data.config;
-	let user = state.users.find((user) => { return user.username === job.data.user; });
-	if (!user) {
-		throw new Error('User not found.');
-	}
-
-	await job.updateProgress({ state: await job.getState(), message: `Updating system user ${config.username}...` });
-	await exec(`chfn -f "${config.fullname}" ${job.data.user}`);
-	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
-	await updateAutheliaUser(job.data.user, config);
-	await getUsers();
-	nsp.sockets.forEach((socket) => {
-		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('users', state.users);
-		}
-	});
-	return `Profile updated.`;
-};
-
 const changePassword = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
@@ -304,15 +281,6 @@ module.exports = (io) => {
 		socket.on('delete', (config) => {
 			if (socket.isAuthenticated) {
 				queue.add('deleteUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
-		});
-
-		socket.on('profile', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('updateProfile', { config, user: socket.user })
 					.catch((error) => {
 						console.error('Error starting job:', error);
 					});
