@@ -24,6 +24,12 @@ const worker = new Worker(
 		if (job.name === 'deleteUser') {
 			return await deleteUser(job);
 		}
+		if (job.name === 'lockUser') {
+			return await lockUser(job);
+		}
+		if (job.name === 'unlockUser') {
+			return await unlockUser(job);
+		}
 		if (job.name === 'changePassword') {
 			return await changePassword(job);
 		}
@@ -98,12 +104,7 @@ const createUser = async (job) => {
 	await setSambaUserPassword(config.username, config.password);
 	await job.updateProgress({ state: await job.getState(), message: `Creating Authelia user ${config.username}...` });
 	await createAutheliaUser(config.username, config);
-	await getUsers();
-	nsp.sockets.forEach((socket) => {
-		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('users', state.users);
-		}
-	});
+	await emitUsers();
 	return `User ${config.username} created.`
 
 	async function createAutheliaUser(username, config) {
@@ -129,7 +130,7 @@ const updateUser = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
 	if (!user) {
-		throw new Error('User not found.');
+		throw new Error(`User ${config.username} not found.`);
 	}
 
 	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
@@ -141,12 +142,7 @@ const updateUser = async (job) => {
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
 	await updateAutheliaUser(config.username, config);
-	await getUsers();
-	nsp.sockets.forEach((socket) => {
-		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('users', state.users);
-		}
-	});
+	await emitUsers();
 	return `User ${config.username} updated.`
 };
 
@@ -154,7 +150,7 @@ const deleteUser = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
 	if (!user) {
-		throw new Error('User not found.');
+		throw new Error(`User ${config.username} not found.`);
 	}
 
 	if (user.uid === 1000) {
@@ -167,12 +163,7 @@ const deleteUser = async (job) => {
 	await exec(`smbpasswd -s -x ${config.username}`);
 	await job.updateProgress({ state: await job.getState(), message: `Deleting system user ${config.username}...` });
 	await linuxUser.removeUser(config.username);
-	await getUsers();
-	nsp.sockets.forEach((socket) => {
-		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('users', state.users);
-		}
-	});
+	await emitUsers();
 	return `User ${config.username} deleted.`
 
 	async function deleteAutheliaUser(username) {
@@ -186,11 +177,49 @@ const deleteUser = async (job) => {
 	}
 };
 
+const lockUser = async (job) => {
+	let config = job.data.config;
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error(`User ${config.username} not found.`);
+	}
+
+	if (user.uid === 1000) {
+		throw new Error('Owner cannot be locked.');
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `Locking system user ${config.username}...` });
+	await exec(`passwd -l ${config.username}`);
+	await job.updateProgress({ state: await job.getState(), message: `Locking Samba user ${config.username}...` });
+	await exec(`smbpasswd -d ${config.username}`);
+	await job.updateProgress({ state: await job.getState(), message: `Locking Authelia user ${config.username}...` });
+	await toggleAutheliaUserLock(config.username, true);
+	await emitUsers();
+	return `${config.username} locked.`;
+};
+
+const unlockUser = async (job) => {
+	let config = job.data.config;
+	let user = state.users.find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error(`User ${config.username} not found.`);
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `Unlocking system user ${config.username}...` });
+	await exec(`passwd -u ${config.username}`);
+	await job.updateProgress({ state: await job.getState(), message: `Unlocking Samba user ${config.username}...` });
+	await exec(`smbpasswd -e ${config.username}`);
+	await job.updateProgress({ state: await job.getState(), message: `Unlocking Authelia user ${config.username}...` });
+	await toggleAutheliaUserLock(config.username, false);
+	await emitUsers();
+	return `${config.username} unlocked.`;
+};
+
 const changePassword = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
 	if (!user) {
-		throw new Error('User not found.');
+		throw new Error(`User ${config.username} not found.`);
 	}
 
 	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
@@ -228,6 +257,16 @@ const updateAutheliaUser = async (username, config) => {
 	}
 };
 
+const toggleAutheliaUserLock = async (username, status) => {
+	const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+	let autheliaUsersConfig = yaml.load(fileContents);
+	if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
+		autheliaUsersConfig.users[username].disabled = status;
+		const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
+		fs.writeFileSync(autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+	}
+}
+
 const setSambaUserPassword = async (username, password) => {
 	return exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`)
 		.then(() => {
@@ -235,6 +274,15 @@ const setSambaUserPassword = async (username, password) => {
 		.catch((error) => {
 			console.log(error);
 		});
+};
+
+const emitUsers = async () => {
+	await getUsers();
+	nsp.sockets.forEach((socket) => {
+		if (socket.isAuthenticated) {
+			nsp.to(`user:${socket.user}`).emit('users', state.users);
+		}
+	});
 };
 
 module.exports = (io) => {
@@ -281,6 +329,24 @@ module.exports = (io) => {
 		socket.on('delete', (config) => {
 			if (socket.isAuthenticated) {
 				queue.add('deleteUser', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
+
+		socket.on('lock', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('lockUser', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
+
+		socket.on('unlock', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('unlockUser', { config, user: socket.user })
 					.catch((error) => {
 						console.error('Error starting job:', error);
 					});

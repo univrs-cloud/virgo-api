@@ -162,20 +162,21 @@ const install = async (job) => {
 				await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
 			}
 		});
-		let configuration = [...state.configured.configuration];
-		configuration = configuration.filter((configuration) => { return configuration.name !== template.name });
-		configuration.push({
-			name: template.name,
-			type: 'app',
-			canBeRemoved: true,
-			category: template.categories.find((_, index) => { return index === 0; }),
-			title: template.title,
-			icon: template.logo.split('/').pop()
-		});
-		await job.updateProgress({ state: await job.getState(), message: `Updating configuration...` });
-		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
-		return `${template.title} installed.`;
 	}
+
+	let configuration = [...state.configured.configuration];
+	configuration = configuration.filter((configuration) => { return configuration.name !== template.name });
+	configuration.push({
+		name: template.name,
+		type: 'app',
+		canBeRemoved: true,
+		category: template.categories.find((_, index) => { return index === 0; }),
+		title: template.title,
+		icon: template.logo.split('/').pop()
+	});
+	await job.updateProgress({ state: await job.getState(), message: `Updating apps configuration...` });
+	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	return `${template.title} installed.`;
 };
 
 const performAction = async (job) => {
