@@ -24,8 +24,11 @@ const worker = new Worker(
 		if (job.name === 'appInstall') {
 			return await install(job);
 		}
-		if (job.name === 'performAction') {
-			return await performAction(job);
+		if (job.name === 'performAppAction') {
+			return await performAppAction(job);
+		}
+		if (job.name === 'performServiceAction') {
+			return await performServiceAction(job);
 		}
 	},
 	{
@@ -179,7 +182,7 @@ const install = async (job) => {
 	return `${template.title} installed.`;
 };
 
-const performAction = async (job) => {
+const performAppAction = async (job) => {
 	let config = job.data.config;
 	if (!allowedActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
@@ -193,7 +196,7 @@ const performAction = async (job) => {
 		throw new Error(`App not found.`);
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `${app.title} is ${config.action}ing...` });
+	await job.updateProgress({ state: await job.getState(), message: `${app.title} app is ${config.action}ing...` });
 
 	const container = state.containers.find((container) => {
 		return container.names.includes(`/${app.name}`);
@@ -202,15 +205,33 @@ const performAction = async (job) => {
 	if (composeProject !== false) {
 		await exec(`docker compose -p ${composeProject} ${config.action}`)
 	} else {
-		await container[config.action]();
+		await docker.getContainer(container.id)[config.action]();
 	}
 
 	if (config.action === 'remove') {
-		configuration = configuration.filter((configuration) => { return configuration.name !== app.name });
-		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+		// configuration = configuration.filter((configuration) => { return configuration.name !== app.name });
+		// fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	}
 
-	return `${app.title} ${config.action}ed.`;
+	return `${app.title} app ${config.action}ed.`;
+};
+
+const performServiceAction = async (job) => {
+	let config = job.data.config;
+	if (!allowedActions.includes(config?.action)) {
+		throw new Error(`Not allowed to perform ${config?.action} on services.`);
+	}
+
+	const container = state.containers.find((container) => {
+		return container.id === config?.id;
+	});
+	if (!container) {
+		throw new Error(`Service not found.`);
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `${container.name} service is ${config.action}ing...` });
+	await docker.getContainer(container.id)[config.action]();
+	return `${container.name} service ${config.action}ed.`;
 };
 
 const terminalConnect = (socket, id) => {
@@ -322,9 +343,18 @@ module.exports = (io) => {
 			}
 		});
 
-		socket.on('performAction', (config) => {
+		socket.on('performAppAction', (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('performAction', { config, user: socket.user })
+				queue.add('performAppAction', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
+
+		socket.on('performServiceAction', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('performServiceAction', { config, user: socket.user })
 					.catch((error) => {
 						console.error('Error starting job:', error);
 					});
