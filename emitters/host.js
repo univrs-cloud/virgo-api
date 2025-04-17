@@ -6,12 +6,13 @@ const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
 const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
+const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../package.json');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
 	i2c = new I2C();
-} catch (error) {}
+} catch (error) { }
 
 const sequelize = new Sequelize({
 	dialect: 'sqlite',
@@ -264,7 +265,7 @@ const updates = (socket) => {
 
 const pollUpdates = (socket) => {
 	state.updates = [];
-	
+
 	exec('apt-show-versions -u')
 		.then((response) => {
 			let updates = response.stdout.trim();
@@ -305,7 +306,7 @@ const pollProxies = (socket) => {
 			isDeleted: false
 		}
 	})
-	 	.then((proxies) => {
+		.then((proxies) => {
 			state.proxies = proxies;
 		})
 		.catch((error) => {
@@ -380,7 +381,6 @@ const pollStorage = (socket) => {
 		.then(([poolsList, poolsStatus, filesystems]) => {
 			poolsStatus = JSON.parse(poolsStatus.stdout).pools;
 			let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
-
 				return { ...pool, ...poolsStatus[pool.name] };
 			});
 			let filesystem = filesystems.find((filesystem) => {
@@ -409,6 +409,7 @@ const pollStorage = (socket) => {
 				}
 				storage.push(pool);
 			}
+			storage = camelcaseKeys(storage, { deep: true });
 			state.storage = storage;
 		})
 		.catch((error) => {
