@@ -147,7 +147,7 @@ const install = async (job) => {
 
 	if (template.type === 3) {
 		await job.updateProgress({ state: await job.getState(), message: `Downloading ${template.title} project template...` });
-		const response = await axios.get(template.repository.url + template.repository.stackfile);
+		const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 		let stack = response.data;
 		let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 		const composeProjectDir = path.join(composeDir, template.name);
@@ -180,6 +180,17 @@ const install = async (job) => {
 	await job.updateProgress({ state: await job.getState(), message: `Updating apps configuration...` });
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	return `${template.title} installed.`;
+
+	function getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
+		const { hostname, pathname } = new URL(repositoryUrl);
+		const [owner, repository] = pathname.split('/').filter(Boolean);
+		if (hostname.includes('github.com')) {
+			const rawHostname = hostname.replace('github.com', 'raw.githubusercontent.com');
+			return `https://${rawHostname}/${owner}/${repository}/${branch}/${filePath}`;
+		}
+
+		throw new Error(`Unsupported apps repository.`);
+	}
 };
 
 const performAppAction = async (job) => {
@@ -399,7 +410,7 @@ module.exports = (io) => {
 					});
 			}
 		});
-		
+
 		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });
 		socket.on('logsConnect', (id) => { logsConnect(socket, id); });
 
