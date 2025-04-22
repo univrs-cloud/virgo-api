@@ -4,7 +4,6 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
-const { Sequelize, DataTypes } = require('sequelize');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../package.json');
@@ -13,31 +12,6 @@ try {
 	({ I2C } = require('raspi-i2c'));
 	i2c = new I2C();
 } catch (error) { }
-
-const sequelize = new Sequelize({
-	dialect: 'sqlite',
-	storage: '/messier/apps/nginx-proxy-manager/data/database.sqlite',
-	define: {
-		timestamps: false
-	},
-	logging: false
-});
-const ProxyHost = sequelize.define(
-	'ProxyHost',
-	{
-		enabled: DataTypes.BOOLEAN,
-		isDeleted: DataTypes.BOOLEAN,
-		domainNames: DataTypes.JSON,
-		sslForced: DataTypes.BOOLEAN,
-		forwardScheme: DataTypes.STRING,
-		forwardHost: DataTypes.STRING,
-		forwardPort: DataTypes.INTEGER
-	},
-	{
-		tableName: 'proxy_host',
-		underscored: true
-	}
-);
 
 let nsp;
 let state = {};
@@ -290,31 +264,6 @@ const pollUpdates = (socket) => {
 			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
 			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
 			timeouts.updates = setTimeout(pollUpdates.bind(null, socket), 3600000);
-		});
-};
-
-const pollProxies = (socket) => {
-	if (nsp.server.engine.clientsCount === 0) {
-		delete state.proxies;
-		return;
-	}
-
-	state.proxies = [];
-
-	ProxyHost.findAll({
-		where: {
-			isDeleted: false
-		}
-	})
-		.then((proxies) => {
-			state.proxies = proxies;
-		})
-		.catch((error) => {
-			state.proxies = false;
-		})
-		.then(() => {
-			nsp.emit('proxies', state.proxies);
-			setTimeout(pollProxies.bind(null, socket), 3600000);
 		});
 };
 
@@ -581,11 +530,6 @@ module.exports = (io) => {
 			nsp.to(`user:${socket.user}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
 		} else {
 			pollUpdates(socket);
-		}
-		if (state.proxies) {
-			nsp.emit('proxies', state.proxies);
-		} else {
-			pollProxies(socket);
 		}
 		if (state.cpuStats) {
 			nsp.emit('cpuStats', state.cpuStats);
