@@ -24,11 +24,17 @@ const worker = new Worker(
 		if (job.name === 'appInstall') {
 			return await install(job);
 		}
+		if (job.name === 'appUpdate') {
+			return await update(job);
+		}
 		if (job.name === 'performAppAction') {
 			return await performAppAction(job);
 		}
 		if (job.name === 'performServiceAction') {
 			return await performServiceAction(job);
+		}
+		if (job.name === 'checkForUpdates') {
+			return await checkForUpdates(job);
 		}
 	},
 	{
@@ -51,6 +57,22 @@ worker.on('failed', async (job, error) => {
 worker.on('error', (error) => {
 	console.error(error);
 });
+
+const scheduleUpdatesChecker = async () => {
+	const updatesChecker = await queue.getJobScheduler('updatesChecker');
+	if (updatesChecker) {
+		return;
+	}
+
+	queue.upsertJobScheduler(
+		'updatesChecker',
+		{ pattern: '0 0 0 * * *' },
+		{ name: 'checkForUpdates' }
+	)
+		.catch((error) => {
+			console.error('Error starting job:', error);
+		});
+};
 
 const watchData = (socket) => {
 	if (dataFileWatcher !== null) {
@@ -158,7 +180,6 @@ const install = async (job) => {
 		await job.updateProgress({ state: await job.getState(), message: `Writing ${template.title} project configuration...` });
 		fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
 		await job.updateProgress({ state: await job.getState(), message: `Installing ${template.title}...` });
-
 		await dockerCompose.upAll({
 			cwd: composeProjectDir,
 			callback: async (chunk) => {
@@ -193,13 +214,41 @@ const install = async (job) => {
 	}
 };
 
+const update = async (job) => {
+	let config = job.data.config;
+	let app = state.configured.configuration.find((app) => {
+		return app.name === config?.name;
+	});
+	if (!app) {
+		throw new Error(`App not found.`);
+	}
+
+	await job.updateProgress({ state: await job.getState(), message: `${app.title} update starting...` });
+	await job.updateProgress({ state: await job.getState(), message: `Downloading ${app.title} updates...` });
+	const composeProjectDir = path.join(composeDir, app.name);
+	await dockerCompose.pullAll({
+		cwd: composeProjectDir,
+		callback: async (chunk) => {
+			await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+		}
+	});
+	await job.updateProgress({ state: await job.getState(), message: `Installing ${app.title} updates...` });
+	await dockerCompose.upAll({
+		cwd: composeProjectDir,
+		callback: async (chunk) => {
+			await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+		}
+	});
+	return `${app.title} updated.`;
+};
+
 const performAppAction = async (job) => {
 	let config = job.data.config;
 	if (!allowedActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
 
-	let configuration = [...state.configured.configuration];
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 	let app = configuration.find((app) => {
 		return app.name === config?.name;
 	});
@@ -243,6 +292,124 @@ const performServiceAction = async (job) => {
 	await job.updateProgress({ state: await job.getState(), message: `${container.name} service is ${config.action}ing...` });
 	await docker.getContainer(container.id)[config.action]();
 	return `${container.name} service ${config.action}ed.`;
+};
+
+const checkForUpdates = async (job) => {
+	state.updates = [];
+	let images = await docker.listImages({ digests: true });
+	images = camelcaseKeys(images, { deep: true });
+	for (const image of images) {
+		if (image.repoTags.length === 0) {
+			continue;
+		}
+
+		const [imageName, localDigest] = image.repoDigests[0].split('@');
+		const registry = getRegistry(imageName);
+		let remoteDigest = null;
+		switch (registry) {
+			case 'dockerhub':
+				remoteDigest = await getDockerHubDigest(image);
+				break;
+			case 'lscr':
+				remoteDigest = await getLSCRDigest(image);
+				break;
+			case 'ghcr':
+				remoteDigest = await getGHCRDigest(image);
+				break;
+			default:
+				// console.log(`Unknown registry for image ${imageName}`);
+				continue;
+		}
+
+		if (!remoteDigest) {
+			// console.log(`Could not fetch remote digest for ${imageName}`);
+			continue;
+		}
+
+		if (!localDigest) {
+			// console.log(`${imageName} has no local digest (likely built locally).`);
+		} else if (localDigest === remoteDigest) {
+			// console.log(`${imageName} is up to date.`);
+		} else {
+			state.updates.push(imageName);
+			// console.log(`${imageName} has an update available.`);
+		}
+	};
+	nsp.emit('updates', state.updates);
+	return ``;
+
+	function getRegistry(imageName) {
+		if (imageName.startsWith('ghcr.io/')) return 'ghcr';
+		if (imageName.startsWith('lscr.io/')) return 'lscr';
+		return 'dockerhub';
+	}
+
+	function parseDockerHubRepo(imageName) {
+		const [repoPath, tag = 'latest'] = imageName.split(':');
+		if (!repoPath.includes('/')) {
+			return { repoPath: `library/${repoPath}`, tag };
+		}
+		if (repoPath.startsWith('docker.io/')) {
+			return { repoPath: repoPath.replace('docker.io/', ''), tag };
+		}
+		return { repoPath, tag };
+	}
+
+	async function getDockerHubDigest(image) {
+		const { repoPath, tag } = parseDockerHubRepo(image.repoTags[0]);
+		const url = `https://registry.hub.docker.com/v2/repositories/${repoPath}/tags/${tag}`;
+		try {
+			const response = await fetch(url);
+			const data = await response.json();
+			return data.images?.[0]?.digest || null;
+		} catch (err) {
+			console.error(`Error fetching Docker Hub data for ${repoPath}: ${err.message}`);
+			return null;
+		}
+	}
+
+	async function getLSCRDigest(image) {
+		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
+		const repoPath = imageName.replace('lscr.io/', '');
+		const url = `https://lscr.io/v2/${repoPath}/manifests/${tag}`;
+		try {
+			const response = await fetch(url, {
+				headers: {
+					Accept: 'application/vnd.docker.distribution.manifest.v2+json'
+				}
+			});
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+			return response.headers.get('docker-content-digest');
+		} catch (err) {
+			console.error(`Error fetching LSCR.io digest for ${repoPath}: ${err.message}`);
+			return null;
+		}
+	}
+
+	async function getGHCRDigest(image) {
+		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
+		const repoPath = imageName.replace('ghcr.io/', '');
+		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+		const tokenData = await tokenResponse.json();
+		const url = `https://ghcr.io/v2/${repoPath}/manifests/${tag}`;
+		try {
+			const response = await fetch(url, {
+				headers: {
+					'Authorization': `Bearer ${tokenData.token}`,
+					Accept: 'application/vnd.docker.distribution.manifest.v2+json'
+				}
+			});
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+			return response.headers.get('docker-content-digest');
+		} catch (err) {
+			console.error(`Error fetching GHCR digest for ${repoPath}: ${err.message}`);
+			return null;
+		}
+	}
 };
 
 const terminalConnect = (socket, id) => {
@@ -351,10 +518,11 @@ const logsConnect = (socket, id) => {
 			nsp.to(`user:${socket.user}`).emit('logsConnected');
 		})
 		.catch((error) => {
-			console.error(error);
 			nsp.to(`user:${socket.user}`).emit('logsError', 'Failed to start container logs stream.');
 		});
 };
+
+scheduleUpdatesChecker();
 
 module.exports = (io) => {
 	nsp = io.of('/docker');
@@ -376,6 +544,11 @@ module.exports = (io) => {
 		} else {
 			pollContainers(socket);
 		}
+		if (state.updates) {
+			nsp.emit('updates', state.updates);
+		} else {
+			checkForUpdates();
+		}
 		if (state.templates) {
 			if (socket.isAuthenticated) {
 				nsp.to(`user:${socket.user}`).emit('templates', state.templates);
@@ -387,6 +560,15 @@ module.exports = (io) => {
 		socket.on('install', (config) => {
 			if (socket.isAuthenticated) {
 				queue.add('appInstall', { config, user: socket.user })
+					.catch((error) => {
+						console.error('Error starting job:', error);
+					});
+			}
+		});
+
+		socket.on('update', (config) => {
+			if (socket.isAuthenticated) {
+				queue.add('appUpdate', { config, user: socket.user })
 					.catch((error) => {
 						console.error('Error starting job:', error);
 					});
