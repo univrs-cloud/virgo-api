@@ -239,6 +239,7 @@ const update = async (job) => {
 			await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
 		}
 	});
+	await checkForUpdates();
 	return `${app.title} updated.`;
 };
 
