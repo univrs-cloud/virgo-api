@@ -311,11 +311,11 @@ const checkForUpdates = async (job) => {
 			case 'dockerhub':
 				remoteDigest = await getDockerHubDigest(image);
 				break;
-			case 'lscr':
-				remoteDigest = await getLSCRDigest(image);
-				break;
 			case 'ghcr':
 				remoteDigest = await getGHCRDigest(image);
+				break;
+			case 'lscr':
+				remoteDigest = await getLSCRDigest(image);
 				break;
 			default:
 				// console.log(`Unknown registry for image ${imageName}`);
@@ -329,11 +329,8 @@ const checkForUpdates = async (job) => {
 
 		if (!localDigest) {
 			// console.log(`${imageName} has no local digest (likely built locally).`);
-		} else if (localDigest === remoteDigest) {
-			// console.log(`${imageName} is up to date.`);
-		} else {
-			state.updates.push(imageName);
-			// console.log(`${imageName} has an update available.`);
+		} else if (localDigest !== remoteDigest) {
+			state.updates.push(imageName);	
 		}
 	};
 	nsp.emit('updates', state.updates);
@@ -358,33 +355,19 @@ const checkForUpdates = async (job) => {
 
 	async function getDockerHubDigest(image) {
 		const { repoPath, tag } = parseDockerHubRepo(image.repoTags[0]);
-		const url = `https://registry.hub.docker.com/v2/repositories/${repoPath}/tags/${tag}`;
-		try {
-			const response = await fetch(url);
-			const data = await response.json();
-			return data.images?.[0]?.digest || null;
-		} catch (err) {
-			console.error(`Error fetching Docker Hub data for ${repoPath}: ${err.message}`);
-			return null;
-		}
-	}
-
-	async function getLSCRDigest(image) {
-		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
-		const repoPath = imageName.replace('lscr.io/', '');
-		const url = `https://lscr.io/v2/${repoPath}/manifests/${tag}`;
+		const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
+		const tokenData = await tokenResponse.json();
+		const url = `https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`;
 		try {
 			const response = await fetch(url, {
 				headers: {
-					Accept: 'application/vnd.docker.distribution.manifest.v2+json'
+					Authorization: `Bearer ${tokenData.token}`,
+					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
 				}
 			});
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
-			}
 			return response.headers.get('docker-content-digest');
 		} catch (err) {
-			console.error(`Error fetching LSCR.io digest for ${repoPath}: ${err.message}`);
+			console.error(`Error fetching Docker Hub data for ${repoPath}: ${err.message}`);
 			return null;
 		}
 	}
@@ -398,8 +381,31 @@ const checkForUpdates = async (job) => {
 		try {
 			const response = await fetch(url, {
 				headers: {
-					'Authorization': `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.docker.distribution.manifest.v2+json'
+					Authorization: `Bearer ${tokenData.token}`,
+					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
+				}
+			});
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+			return response.headers.get('docker-content-digest');
+		} catch (err) {
+			console.error(`Error fetching GHCR digest for ${repoPath}: ${err.message}`);
+			return null;
+		}
+	}
+
+	async function getLSCRDigest(image) {
+		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
+		const repoPath = imageName.replace('lscr.io/', '');
+		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+		const tokenData = await tokenResponse.json();
+		const url = `https://lscr.io/v2/${repoPath}/manifests/${tag}`;
+		try {
+			const response = await fetch(url, {
+				headers: {
+					Authorization: `Bearer ${tokenData.token}`,
+					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
 				}
 			});
 			if (!response.ok) {
