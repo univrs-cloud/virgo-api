@@ -297,42 +297,45 @@ const performServiceAction = async (job) => {
 
 const checkForUpdates = async (job) => {
 	state.updates = [];
-	let images = await docker.listImages({ digests: true });
+	let images = await docker.listImages({ all: true, digests: true });
 	images = camelcaseKeys(images, { deep: true });
-	for (const image of images) {
-		if (image.repoTags.length === 0) {
-			continue;
-		}
-
-		const [imageName, localDigest] = image.repoDigests[0].split('@');
+	let containers = await docker.listContainers({ all: true });
+	containers = camelcaseKeys(containers, { deep: true });
+	containers.forEach(async ({ id, imageId }) => {
+		const image = images.find((image) => { return image.id === imageId });
+		const container = docker.getContainer(id);
+		let inspect = await container.inspect();
+		inspect = camelcaseKeys(inspect, { deep: true });
+		const imageName = inspect.config.image;
+		const [, localDigest] = image.repoDigests[0].split('@');
 		const registry = getRegistry(imageName);
 		let remoteDigest = null;
 		switch (registry) {
 			case 'dockerhub':
-				remoteDigest = await getDockerHubDigest(image);
+				remoteDigest = await getDockerHubDigest(imageName);
 				break;
 			case 'ghcr':
-				remoteDigest = await getGHCRDigest(image);
+				remoteDigest = await getGHCRDigest(imageName);
 				break;
 			case 'lscr':
-				remoteDigest = await getLSCRDigest(image);
+				remoteDigest = await getLSCRDigest(imageName);
 				break;
 			default:
 				// console.log(`Unknown registry for image ${imageName}`);
-				continue;
+				return;
 		}
 
 		if (!remoteDigest) {
 			// console.log(`Could not fetch remote digest for ${imageName}`);
-			continue;
+			return;
 		}
 
 		if (!localDigest) {
 			// console.log(`${imageName} has no local digest (likely built locally).`);
 		} else if (localDigest !== remoteDigest) {
-			state.updates.push(imageName);	
+			state.updates.push({ imageName: imageName, containerId: id });
 		}
-	};
+	});
 	nsp.emit('updates', state.updates);
 	return ``;
 
@@ -342,38 +345,38 @@ const checkForUpdates = async (job) => {
 		return 'dockerhub';
 	}
 
-	function parseDockerHubRepo(imageName) {
-		const [repoPath, tag = 'latest'] = imageName.split(':');
+	function parseDockerHubRepo(image) {
+		let [repoPath, tag = 'latest'] = image.split(':');
+		if (repoPath.startsWith('docker.io/')) {
+			repoPath = repoPath.replace('docker.io/', '');
+		}
 		if (!repoPath.includes('/')) {
 			return { repoPath: `library/${repoPath}`, tag };
-		}
-		if (repoPath.startsWith('docker.io/')) {
-			return { repoPath: repoPath.replace('docker.io/', ''), tag };
 		}
 		return { repoPath, tag };
 	}
 
 	async function getDockerHubDigest(image) {
-		const { repoPath, tag } = parseDockerHubRepo(image.repoTags[0]);
+		const { repoPath, tag } = parseDockerHubRepo(image);
 		const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
 		const url = `https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`;
 		try {
 			const response = await fetch(url, {
 				headers: {
+					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
+					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
 				}
 			});
 			return response.headers.get('docker-content-digest');
 		} catch (err) {
-			console.error(`Error fetching Docker Hub data for ${repoPath}: ${err.message}`);
 			return null;
 		}
 	}
 
 	async function getGHCRDigest(image) {
-		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
+		const [imageName, tag = 'latest'] = image.split(':');
 		const repoPath = imageName.replace('ghcr.io/', '');
 		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
@@ -381,8 +384,9 @@ const checkForUpdates = async (job) => {
 		try {
 			const response = await fetch(url, {
 				headers: {
+					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
+					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
 				}
 			});
 			if (!response.ok) {
@@ -390,13 +394,12 @@ const checkForUpdates = async (job) => {
 			}
 			return response.headers.get('docker-content-digest');
 		} catch (err) {
-			console.error(`Error fetching GHCR digest for ${repoPath}: ${err.message}`);
 			return null;
 		}
 	}
 
 	async function getLSCRDigest(image) {
-		const [imageName, tag = 'latest'] = image.repoTags[0].split(':');
+		const [imageName, tag = 'latest'] = image.split(':');
 		const repoPath = imageName.replace('lscr.io/', '');
 		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
@@ -404,8 +407,9 @@ const checkForUpdates = async (job) => {
 		try {
 			const response = await fetch(url, {
 				headers: {
+					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
+					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
 				}
 			});
 			if (!response.ok) {
@@ -413,7 +417,6 @@ const checkForUpdates = async (job) => {
 			}
 			return response.headers.get('docker-content-digest');
 		} catch (err) {
-			console.error(`Error fetching GHCR digest for ${repoPath}: ${err.message}`);
 			return null;
 		}
 	}
@@ -551,17 +554,17 @@ module.exports = (io) => {
 		} else {
 			pollContainers(socket);
 		}
-		if (state.updates) {
-			nsp.emit('updates', state.updates);
-		} else {
-			checkForUpdates();
-		}
 		if (state.templates) {
 			if (socket.isAuthenticated) {
 				nsp.to(`user:${socket.user}`).emit('templates', state.templates);
 			}
 		} else {
 			pollTemplates(socket);
+		}
+		if (state.updates) {
+			nsp.emit('updates', state.updates);
+		} else {
+			checkForUpdates();
 		}
 
 		socket.on('install', (config) => {
