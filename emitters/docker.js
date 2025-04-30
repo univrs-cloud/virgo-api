@@ -46,17 +46,22 @@ const worker = new Worker(
 );
 worker.on('completed', async (job, result) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: result });
+		await updateProgress(job, result);
 	}
 });
 worker.on('failed', async (job, error) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: `` });
+		await updateProgress(job, ``);
 	}
 });
 worker.on('error', (error) => {
 	console.error(error);
 });
+
+const updateProgress = async (job, message) => {
+	const state = await job.getState();
+	await job.updateProgress({ state, message });
+};
 
 const scheduleUpdatesChecker = async () => {
 	const updatesChecker = await queue.getJobScheduler('updatesChecker');
@@ -160,7 +165,7 @@ const install = async (job) => {
 		throw new Error('App template not found.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `${template.title} installation starting...` });
+	await updateProgress(job, `${template.title} installation starting...`);
 
 	if (template.type === 1) {
 		// install using docker run
@@ -168,22 +173,22 @@ const install = async (job) => {
 	}
 
 	if (template.type === 3) {
-		await job.updateProgress({ state: await job.getState(), message: `Downloading ${template.title} project template...` });
+		await updateProgress(job, `Downloading ${template.title} project template...`);
 		const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 		let stack = response.data;
 		let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 		const composeProjectDir = path.join(composeDir, template.name);
-		await job.updateProgress({ state: await job.getState(), message: `Making ${template.title} project directory...` });
+		await updateProgress(job, `Making ${template.title} project directory...`);
 		fs.mkdirSync(composeProjectDir, { recursive: true });
-		await job.updateProgress({ state: await job.getState(), message: `Writing ${template.title} project template...` });
+		await updateProgress(job, `Writing ${template.title} project template...`);
 		fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
-		await job.updateProgress({ state: await job.getState(), message: `Writing ${template.title} project configuration...` });
+		await updateProgress(job, `Writing ${template.title} project configuration...`);
 		fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
-		await job.updateProgress({ state: await job.getState(), message: `Installing ${template.title}...` });
+		await updateProgress(job, `Installing ${template.title}...`);
 		await dockerCompose.upAll({
 			cwd: composeProjectDir,
 			callback: async (chunk) => {
-				await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+				await updateProgress(job, chunk.toString());
 			}
 		});
 	}
@@ -198,7 +203,7 @@ const install = async (job) => {
 		title: template.title,
 		icon: template.logo.split('/').pop()
 	});
-	await job.updateProgress({ state: await job.getState(), message: `Updating apps configuration...` });
+	await updateProgress(job, `Updating apps configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	return `${template.title} installed.`;
 
@@ -223,20 +228,20 @@ const update = async (job) => {
 		throw new Error(`App not found.`);
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `${app.title} update starting...` });
-	await job.updateProgress({ state: await job.getState(), message: `Downloading ${app.title} updates...` });
+	await updateProgress(job, `${app.title} update starting...`);
+	await updateProgress(job, `Downloading ${app.title} updates...`);
 	const composeProjectDir = path.join(composeDir, app.name);
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
-			await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+			await updateProgress(job, chunk.toString());
 		}
 	});
-	await job.updateProgress({ state: await job.getState(), message: `Installing ${app.title} updates...` });
+	await updateProgress(job, `Installing ${app.title} updates...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
-			await job.updateProgress({ state: await job.getState(), message: chunk.toString() });
+			await updateProgress(job, chunk.toString());
 		}
 	});
 	await checkForUpdates();
@@ -257,7 +262,7 @@ const performAppAction = async (job) => {
 		throw new Error(`App not found.`);
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `${app.title} app is ${config.action}ing...` });
+	await updateProgress(job, `${app.title} app is ${config.action}ing...`);
 
 	const container = state.containers.find((container) => {
 		return container.names.includes(`/${app.name}`);
@@ -290,7 +295,7 @@ const performServiceAction = async (job) => {
 		throw new Error(`Service not found.`);
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `${container.name} service is ${config.action}ing...` });
+	await updateProgress(job, `${container.name} service is ${config.action}ing...`);
 	await docker.getContainer(container.id)[config.action]();
 	return `${container.name} service ${config.action}ed.`;
 };

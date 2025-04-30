@@ -43,17 +43,22 @@ const worker = new Worker(
 );
 worker.on('completed', async (job, result) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: result });
+		await updateProgress(job, result);
 	}
 });
 worker.on('failed', async (job, error) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: `` });
+		await updateProgress(job, ``);
 	}
 });
 worker.on('error', (error) => {
 	console.error(error);
 });
+
+const updateProgress = async (job, message) => {
+	const state = await job.getState();
+	await job.updateProgress({ state, message });
+};
 
 const getUsers = (socket) => {
 	const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
@@ -92,7 +97,7 @@ const createUser = async (job) => {
 		throw new Error('User already exists.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Creating system user ${config.username}...` });
+	await updateProgress(job, `Creating system user ${config.username}...`);
 	await linuxUser.addUser({
 		username: config.username,
 		create_home: false,
@@ -100,9 +105,9 @@ const createUser = async (job) => {
 	});
 	await linuxUser.setPassword(config.username, config.password);
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Creating SMB user ${config.username}...` });
+	await updateProgress(job, `Creating SMB user ${config.username}...`);
 	await setSambaUserPassword(config.username, config.password);
-	await job.updateProgress({ state: await job.getState(), message: `Creating Authelia user ${config.username}...` });
+	await updateProgress(job, `Creating Authelia user ${config.username}...`);
 	await createAutheliaUser(config.username, config);
 	await emitUsers();
 	return `User ${config.username} created.`
@@ -138,9 +143,9 @@ const updateUser = async (job) => {
 		throw new Error('Only the owner can update his own profile.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Updating system user ${config.username}...` });
+	await updateProgress(job, `Updating system user ${config.username}...`);
 	await exec(`chfn -f "${config.fullname}" ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Updating Authelia user ${config.username}...` });
+	await updateProgress(job, `Updating Authelia user ${config.username}...`);
 	await updateAutheliaUser(config.username, config);
 	await emitUsers();
 	return `User ${config.username} updated.`
@@ -157,11 +162,11 @@ const deleteUser = async (job) => {
 		throw new Error('Owner cannot be deleted.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Deleting Authelia user ${config.username}...` });
+	await updateProgress(job, `Deleting Authelia user ${config.username}...`);
 	await deleteAutheliaUser(config.username);
-	await job.updateProgress({ state: await job.getState(), message: `Deleting SMB user ${config.username}...` });
+	await updateProgress(job, `Deleting SMB user ${config.username}...`);
 	await exec(`smbpasswd -s -x ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Deleting system user ${config.username}...` });
+	await updateProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
 	await emitUsers();
 	return `User ${config.username} deleted.`
@@ -188,11 +193,11 @@ const lockUser = async (job) => {
 		throw new Error('Owner cannot be locked.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Locking system user ${config.username}...` });
+	await updateProgress(job, `Locking system user ${config.username}...`);
 	await exec(`passwd -l ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Locking Samba user ${config.username}...` });
+	await updateProgress(job, `Locking Samba user ${config.username}...`);
 	await exec(`smbpasswd -d ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Locking Authelia user ${config.username}...` });
+	await updateProgress(job, `Locking Authelia user ${config.username}...`);
 	await toggleAutheliaUserLock(config.username, true);
 	await emitUsers();
 	return `${config.username} locked.`;
@@ -205,11 +210,11 @@ const unlockUser = async (job) => {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Unlocking system user ${config.username}...` });
+	await updateProgress(job, `Unlocking system user ${config.username}...`);
 	await exec(`passwd -u ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Unlocking Samba user ${config.username}...` });
+	await updateProgress(job, `Unlocking Samba user ${config.username}...`);
 	await exec(`smbpasswd -e ${config.username}`);
-	await job.updateProgress({ state: await job.getState(), message: `Unlocking Authelia user ${config.username}...` });
+	await updateProgress(job, `Unlocking Authelia user ${config.username}...`);
 	await toggleAutheliaUserLock(config.username, false);
 	await emitUsers();
 	return `${config.username} unlocked.`;
@@ -227,11 +232,11 @@ const changePassword = async (job) => {
 		throw new Error('Only the owner can change his own password.');
 	}
 
-	await job.updateProgress({ state: await job.getState(), message: `Changing system user password for ${config.username}...` });
+	await updateProgress(job, `Changing system user password for ${config.username}...`);
 	await linuxUser.setPassword(config.username, config.password);
-	await job.updateProgress({ state: await job.getState(), message: `Changing SMB user password for ${config.username}...` });
+	await updateProgress(job, `Changing SMB user password for ${config.username}...`);
 	await setSambaUserPassword(config.username, config.password);
-	await job.updateProgress({ state: await job.getState(), message: `Changing Authelia user password for ${config.username}...` });
+	await updateProgress(job, `Changing Authelia user password for ${config.username}...`);
 	await setAutheliaUserPassword(config.username, config.password);
 	return `${config.username} password changed.`;
 

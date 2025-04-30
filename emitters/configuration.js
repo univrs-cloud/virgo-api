@@ -6,7 +6,9 @@ const touch = require('touch');
 const { Queue, Worker } = require('bullmq');
 
 let nsp;
-let state = {};
+let state = {
+	configuration: undefined
+};
 let configurationFileWatcher = null;
 const configurationFile = '/var/www/virgo-api/configuration.json';
 const msmtpConfigurationFile = '/etc/msmtprc';
@@ -31,19 +33,24 @@ const worker = new Worker(
 );
 worker.on('completed', async (job, result) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: result });
+		await updateProgress(job, result);
 	}
 });
 worker.on('failed', async (job, error) => {
 	if (job) {
-		await job.updateProgress({ state: await job.getState(), message: `` });
+		await updateProgress(job, ``);
 	}
 });
 worker.on('error', (error) => {
 	console.error(error);
 });
 
-const watchConfiguration = (socket) => {
+const updateProgress = async (job, message) => {
+	const state = await job.getState();
+	await job.updateProgress({ state, message });
+};
+
+const watchConfiguration = async (socket) => {
 	if (configurationFileWatcher !== null) {
 		return;
 	}
@@ -85,7 +92,7 @@ const watchConfiguration = (socket) => {
 
 const setLocation = async (job) => {
 	let config = job.data.config;
-	await job.updateProgress({ state: await job.getState(), message: `Saving location...` });
+	await updateProgress(job, `Saving location...`);
 	state.configuration.location = config;
 	fs.writeFileSync(configurationFile, JSON.stringify(state.configuration, null, 2), 'utf8', { flag: 'w' });
 	return `Location saved.`;
@@ -93,7 +100,7 @@ const setLocation = async (job) => {
 
 const setSmtp = async (job) => {
 	let config = job.data.config;
-	await job.updateProgress({ state: await job.getState(), message: `Saving sotification server...` });
+	await updateProgress(job, `Saving sotification server...`);
 	if (!config?.recipients) {
 		config.recipients = [];
 	}
@@ -154,23 +161,25 @@ module.exports = (io) => {
 			nsp.to(`user:${socket.user}`).emit('configuration', configuration);
 		}
 
-		socket.on('location', (config) => {
+		socket.on('location', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('setLocation', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+				try {
+					await queue.add('setLocation', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				}
 			}
 		});
 
-		socket.on('smtp', (config) => {
+		socket.on('smtp', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('setSmtp', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+			  try {
+				await queue.add('setSmtp', { config, user: socket.user });
+			  } catch (error) {
+				console.error('Error starting job:', error);
+			  }
 			}
-		});
+		  });
 
 		socket.on('disconnect', () => {
 			//
