@@ -4,9 +4,7 @@ const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
 
 let nsp;
-let state = {
-	shares: []
-};
+let state = {};
 
 const pollShares = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {

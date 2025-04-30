@@ -6,9 +6,7 @@ const touch = require('touch');
 const { Queue, Worker } = require('bullmq');
 
 let nsp;
-let state = {
-	configuration: undefined
-};
+let state = {};
 let configurationFileWatcher = null;
 const configurationFile = '/var/www/virgo-api/configuration.json';
 const msmtpConfigurationFile = '/etc/msmtprc';

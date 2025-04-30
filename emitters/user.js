@@ -60,18 +60,17 @@ const updateProgress = async (job, message) => {
 	await job.updateProgress({ state, message });
 };
 
-const getUsers = (socket) => {
-	const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
-	let autheliaUsersConfig = yaml.load(fileContents);
-	return Promise.all(
-		[
-			linuxUser.getUsers(),
-			linuxUser.getGroups()
-		]
-	)
-		.then(([users, groups]) => {
-			users = users.filter((user) => { return user.uid >= 1000 && user.uid <= 10000; });
-			users = users.map((user) => {
+const getUsers = async () => {
+	try {
+		const fileContents = fs.readFileSync(autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		let autheliaUsersConfig = yaml.load(fileContents);
+		let users = await linuxUser.getUsers();
+		let groups = await linuxUser.getGroups();
+		users = users
+			.filter((user) => {
+				return user.uid >= 1000 && user.uid <= 10000;
+			})
+			.map((user) => {
 				user.isOwner = (user.uid === 1000);
 				user.isDisabled = false;
 				user.groups = groups.filter((group) => { return group.gid === user.gid });
@@ -83,11 +82,10 @@ const getUsers = (socket) => {
 				}
 				return user;
 			});
-			state.users = users;
-		})
-		.catch((error) => {
-			state.users = false;
-		});
+		state.users = users;
+	} catch (error) {
+        state.users = false;
+    }
 };
 
 const createUser = async (job) => {
@@ -290,6 +288,16 @@ const emitUsers = async () => {
 	});
 };
 
+const handleUserAction = async (socket, action, config) => {
+	if (socket.isAuthenticated) {
+		try {
+			await queue.add(action, { config, user: socket.user });
+		} catch (error) {
+			console.error(`Error starting job:`, error);
+		}
+	}
+};
+
 module.exports = (io) => {
 	nsp = io.of('/user');
 	nsp.use((socket, next) => {
@@ -305,66 +313,31 @@ module.exports = (io) => {
 				nsp.to(`user:${socket.user}`).emit('users', state.users);
 			}
 		} else {
-			getUsers()
-				.then(() => {
-					if (socket.isAuthenticated) {
-						nsp.to(`user:${socket.user}`).emit('users', state.users);
-					}		
-				});
+			emitUsers();
 		}
 
-		socket.on('create', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('createUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('create', async (config) => {
+			await handleUserAction(socket, 'createUser', config);
 		});
 
-		socket.on('update', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('updateUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('update', async (config) => {
+			await handleUserAction(socket, 'updateUser', config);
 		});
 
-		socket.on('delete', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('deleteUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('delete', async (config) => {
+			await handleUserAction(socket, 'deleteUser', config);
 		});
 
-		socket.on('lock', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('lockUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('lock', async (config) => {
+			await handleUserAction(socket, 'lockUser', config);
 		});
 
-		socket.on('unlock', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('unlockUser', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('unlock', async (config) => {
+			await handleUserAction(socket, 'unlockUser', config);
 		});
 
-		socket.on('password', (config) => {
-			if (socket.isAuthenticated) {
-				queue.add('changePassword', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
-			}
+		socket.on('password', async (config) => {
+			await handleUserAction(socket, 'changePassword', config);
 		});
 
 		socket.on('disconnect', () => {
