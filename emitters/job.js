@@ -7,13 +7,17 @@ queues.forEach((queueName) => {
 	const queue = new Queue(queueName);
 	const queueEvents = new QueueEvents(queueName);
 	queueEvents.on('progress', async (response) => {
-		let job = await queue.getJob(response.jobId);
-		if (job) {
-			nsp.sockets.forEach((socket) => {
-				if (socket.isAuthenticated) {
-					nsp.to(`user:${socket.user}`).emit('job', job);
-				}
-			});
+		try {
+			let job = await queue.getJob(response.jobId);
+			if (job) {
+				for (const socket of nsp.sockets.values()) {
+					if (socket.isAuthenticated) {
+						nsp.to(`user:${socket.user}`).emit('job', job);
+					}
+				};
+			}
+		} catch (error) {
+			console.error(`Error processing job ${response.jobId}:`, error);
 		}
 	});
 });

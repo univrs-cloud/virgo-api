@@ -4,57 +4,50 @@ const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
 
 let nsp;
-let state = {};
+let state = {
+	shares: []
+};
 
-const pollShares = (socket) => {
+const pollShares = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
-		delete state.shares;
 		return;
 	}
 
-	state.shares = [];
+	try {
+		const response = await exec('testparm -s -l');
+		const shares = ini.parse(response.stdout);
+		delete shares.global;
+		let promises = Object.entries(shares).map(async ([name, value]) => {
+			let share = {
+				name: name,
+				comment: value['comment'],
+				validUsers: value['valid users']?.split(' '),
+				size: 0,
+				free: 0,
+				alloc: 0,
+				cap: 0,
+				isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
+				isTimeMachine: (value['fruit:time machine'] === 'yes')
+			};
 
-	exec('testparm -s -l')
-		.then((response) => {
-			let shares = ini.parse(response.stdout);
-			delete shares.global;
-			let promises = Object.entries(shares).map(([name, value]) => {
-				let share = {
-					name: name,
-					comment: value['comment'],
-					validUsers: value['valid users']?.split(' '),
-					size: 0,
-					free: 0,
-					alloc: 0,
-					cap: 0,
-					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
-					isTimeMachine: (value['fruit:time machine'] === 'yes')
-				};
-				return checkDiskSpace(value['path'])
-					.then((diskSpace) => {
-						share.size = diskSpace.size;
-						share.free = diskSpace.free;
-						share.alloc = share.size - share.free;
-						share.cap = share.alloc / share.size * 100;
-						return share;
-					})
-					.catch(((error) => {
-						return share;
-					}));
-			});
-
-			return Promise.all(promises)
-				.then((shares) => {
-					state.shares = shares;
-				});
-		})
-		.catch((error) => {
-			state.shares = false;
-		})
-		.then(() => {
-			nsp.emit('shares', state.shares);
-			setTimeout(pollShares.bind(null, socket), 60000);
+			try {
+				const diskSpace = await checkDiskSpace(value['path']);
+				share.size = diskSpace.size;
+				share.free = diskSpace.free;
+				share.alloc = share.size - share.free;
+				share.cap = share.alloc / share.size * 100;
+			  } catch (error) {
+				console.error(`Error checking disk space for ${name}:`, error);
+			  }
+			  return share;
 		});
+		state.shares = await Promise.all(promises);
+	} catch (error) {
+		state.shares = false;
+	} finally {
+		nsp.emit('shares', state.shares);
+		setTimeout(() => pollShares(socket), 60000);
+	}
 };
 
 module.exports = (io) => {
