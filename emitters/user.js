@@ -271,12 +271,11 @@ const toggleAutheliaUserLock = async (username, status) => {
 }
 
 const setSambaUserPassword = async (username, password) => {
-	return exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`)
-		.then(() => {
-		})
-		.catch((error) => {
-			console.log(error);
-		});
+    try {
+        await exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`);
+    } catch (error) {
+        console.log(error);
+    }
 };
 
 const emitUsers = async () => {
