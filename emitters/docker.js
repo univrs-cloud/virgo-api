@@ -452,32 +452,38 @@ const terminalConnect = (socket, id) => {
 					stderr: true,
 					hijack: true
 				}
-			);
-		})
-		.then((stream) => {
-			// Pipe container output to the client
-			// Create readable streams for stdout and stderr
-			const stdout = new require('stream').PassThrough();
-			const stderr = new require('stream').PassThrough();
-			docker.modem.demuxStream(stream, stdout, stderr);
-			stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
-			stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
-			// Pipe client input to the container
-			socket.on('terminalInput', (data) => {
-				stream.write(data);
+			)
+			.then((stream) => {
+				// Pipe container output to the client
+				// Create readable streams for stdout and stderr
+				const stdout = new require('stream').PassThrough();
+				const stderr = new require('stream').PassThrough();
+				docker.modem.demuxStream(stream, stdout, stderr);
+				stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
+				stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
+				// Pipe client input to the container
+				socket.on('terminalInput', (data) => {
+					stream.write(data);
+				});
+				socket.on('terminalResize', (size) => {
+					exec.resize({
+						h: size.rows,
+						w: size.cols
+					});
+				});
+				// Client terminated the connection
+				socket.on('terminalDisconnect', () => {
+					stream.destroy();
+				});
+				socket.on('disconnect', () => {
+					stream.destroy();
+				});
+				nsp.to(`user:${socket.user}`).emit('terminalConnected');
+			})
+			.catch((error) => {
+				console.error(error);
+				nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
 			});
-			// Client terminated the connection
-			socket.on('terminalDisconnect', () => {
-				stream.destroy();
-			});
-			socket.on('disconnect', () => {
-				stream.destroy();
-			});
-			nsp.to(`user:${socket.user}`).emit('terminalConnected');
-		})
-		.catch((error) => {
-			console.error(error);
-			nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
 		});
 
 	function findContainerShell(id) {
