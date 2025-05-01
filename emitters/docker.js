@@ -69,14 +69,15 @@ const scheduleUpdatesChecker = async () => {
 		return;
 	}
 
-	queue.upsertJobScheduler(
-		'updatesChecker',
-		{ pattern: '0 0 0 * * *' },
-		{ name: 'checkForUpdates' }
-	)
-		.catch((error) => {
-			console.error('Error starting job:', error);
-		});
+	try {
+		await queue.upsertJobScheduler(
+			'updatesChecker',
+			{ pattern: '0 0 0 * * *' },
+			{ name: 'checkForUpdates' }
+		);
+	} catch (error) {
+		console.error('Error starting job:', error);
+	};
 };
 
 const watchData = (socket) => {
@@ -107,31 +108,29 @@ const watchData = (socket) => {
 	};
 }
 
-const pollContainers = (socket) => {
+const pollContainers = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.containers;
 		return;
 	}
 
-	docker.listContainers({ all: true })
-		.then((containers) => {
-			containers = camelcaseKeys(containers, { deep: true });
-			containers = containers.map((container) => {
-				container.name = container.names[0].replace('/', '');
-				return container;
-			});
-			state.containers = containers;
-		})
-		.catch((error) => {
-			state.containers = false;
-		})
-		.then(() => {
-			nsp.emit('containers', state.containers);
-			setTimeout(pollContainers.bind(null, socket), 2000);
+	try {
+		let containers = await docker.listContainers({ all: true });
+		containers = camelcaseKeys(containers, { deep: true });
+		containers = containers.map((container) => {
+			container.name = container.names[0].replace('/', '');
+			return container;
 		});
+		state.containers = containers;
+	} catch (error) {
+		state.containers = false;
+	}
+
+	nsp.emit('containers', state.containers);
+	setTimeout(() => { pollContainers(socket); }, 2000);
 };
 
-const pollTemplates = (socket) => {
+const pollTemplates = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.templates;
 		return;
@@ -141,19 +140,15 @@ const pollTemplates = (socket) => {
 		return;
 	}
 
-	state.templates = [];
+	try {
+		const response = await axios.get('https://apps.univrs.cloud/template.json');
+		state.templates = response.data.templates;
+	} catch (error) {
+		state.templates = false;
+	}
 
-	axios.get('https://apps.univrs.cloud/template.json')
-		.then((response) => {
-			state.templates = response.data.templates;
-		})
-		.catch((error) => {
-			state.templates = false;
-		})
-		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
-			setTimeout(pollTemplates.bind(null, socket), 3600000);
-		});
+	nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+	setTimeout(() => { pollTemplates(socket); }, 3600000);
 };
 
 const install = async (job) => {
@@ -167,31 +162,29 @@ const install = async (job) => {
 
 	await updateProgress(job, `${template.title} installation starting...`);
 
-	if (template.type === 1) {
+	if (template.type !== 3) {
 		// install using docker run
 		throw new Error('Installing this app type not yet supported.');
 	}
 
-	if (template.type === 3) {
-		await updateProgress(job, `Downloading ${template.title} project template...`);
-		const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-		let stack = response.data;
-		let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
-		const composeProjectDir = path.join(composeDir, template.name);
-		await updateProgress(job, `Making ${template.title} project directory...`);
-		fs.mkdirSync(composeProjectDir, { recursive: true });
-		await updateProgress(job, `Writing ${template.title} project template...`);
-		fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
-		await updateProgress(job, `Writing ${template.title} project configuration...`);
-		fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
-		await updateProgress(job, `Installing ${template.title}...`);
-		await dockerCompose.upAll({
-			cwd: composeProjectDir,
-			callback: async (chunk) => {
-				await updateProgress(job, chunk.toString());
-			}
-		});
-	}
+	await updateProgress(job, `Downloading ${template.title} project template...`);
+	const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+	let stack = response.data;
+	let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
+	const composeProjectDir = path.join(composeDir, template.name);
+	await updateProgress(job, `Making ${template.title} project directory...`);
+	fs.mkdirSync(composeProjectDir, { recursive: true });
+	await updateProgress(job, `Writing ${template.title} project template...`);
+	fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+	await updateProgress(job, `Writing ${template.title} project configuration...`);
+	fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
+	await updateProgress(job, `Installing ${template.title}...`);
+	await dockerCompose.upAll({
+		cwd: composeProjectDir,
+		callback: async (chunk) => {
+			await updateProgress(job, chunk.toString());
+		}
+	});
 
 	let configuration = [...state.configured.configuration];
 	configuration = configuration.filter((configuration) => { return configuration.name !== template.name });
@@ -427,7 +420,7 @@ const checkForUpdates = async (job) => {
 	}
 };
 
-const terminalConnect = (socket, id) => {
+const terminalConnect = async (socket, id) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -438,58 +431,59 @@ const terminalConnect = (socket, id) => {
 	}
 
 	let shell = findContainerShell(id);
+	if (!shell) {
+        nsp.to(`user:${socket.user}`).emit('terminalError', 'No compatible shell found in container.');
+        return;
+    }
 
-	container.exec(
-		{
-			Cmd: [`/bin/${shell}`],
-			AttachStdin: true,
-			AttachStdout: true,
-			AttachStderr: true,
-			Tty: true
-		}
-	)
-		.then((exec) => {
-			return exec.start(
-				{
-					stream: true,
-					stdin: true,
-					stdout: true,
-					stderr: true,
-					hijack: true
-				}
-			)
-			.then((stream) => {
-				// Pipe container output to the client
-				// Create readable streams for stdout and stderr
-				const stdout = new require('stream').PassThrough();
-				const stderr = new require('stream').PassThrough();
-				docker.modem.demuxStream(stream, stdout, stderr);
-				stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
-				stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
-				// Pipe client input to the container
-				socket.on('terminalInput', (data) => {
-					stream.write(data);
-				});
-				socket.on('terminalResize', (size) => {
-					exec.resize({
-						h: size.rows,
-						w: size.cols
-					});
-				});
-				// Client terminated the connection
-				socket.on('terminalDisconnect', () => {
-					stream.destroy();
-				});
-				socket.on('disconnect', () => {
-					stream.destroy();
-				});
-				nsp.to(`user:${socket.user}`).emit('terminalConnected');
-			})
-			.catch((error) => {
-				console.error(error);
-				nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
+	try {
+		const exec = await container.exec(
+			{
+				Cmd: [`/bin/${shell}`],
+				AttachStdin: true,
+				AttachStdout: true,
+				AttachStderr: true,
+				Tty: true
+			}
+		);
+		const stream = await exec.start(
+			{
+				stream: true,
+				stdin: true,
+				stdout: true,
+				stderr: true,
+				hijack: true
+			}
+		);
+		// Pipe container output to the client
+		// Create readable streams for stdout and stderr
+		const stdout = new require('stream').PassThrough();
+		const stderr = new require('stream').PassThrough();
+		docker.modem.demuxStream(stream, stdout, stderr);
+		stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
+		stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
+		// Pipe client input to the container
+		socket.on('terminalInput', (data) => {
+			stream.write(data);
+		});
+		socket.on('terminalResize', (size) => {
+			exec.resize({
+				h: size.rows,
+				w: size.cols
 			});
 		});
+		// Client terminated the connection
+		socket.on('terminalDisconnect', () => {
+			stream.destroy();
+		});
+		socket.on('disconnect', () => {
+			stream.destroy();
+		});
+		nsp.to(`user:${socket.user}`).emit('terminalConnected');
+	} catch (error) {		
+		console.error(error);
+		nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
+	}
 
 	function findContainerShell(id) {
 		const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
@@ -505,7 +499,7 @@ const terminalConnect = (socket, id) => {
 	}
 };
 
-const logsConnect = (socket, id) => {
+const logsConnect = async (socket, id) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -515,32 +509,33 @@ const logsConnect = (socket, id) => {
 		return;
 	}
 
-	container.logs({
-		follow: true,
-		stdout: true,
-		stderr: true,
-		tail: 100
-	})
-		.then((stream) => {
-			// Pipe container output to the client
-			// Create readable streams for stdout and stderr
-			const stdout = new require('stream').PassThrough();
-			const stderr = new require('stream').PassThrough();
-			docker.modem.demuxStream(stream, stdout, stderr);
-			stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
-			stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
-			// Client terminated the connection
-			socket.on('logslDisconnect', () => {
-				stream.destroy();
-			});
-			socket.on('disconnect', () => {
-				stream.destroy();
-			});
-			nsp.to(`user:${socket.user}`).emit('logsConnected');
-		})
-		.catch((error) => {
-			nsp.to(`user:${socket.user}`).emit('logsError', 'Failed to start container logs stream.');
+	try {
+		const stream = await container.logs(
+			{
+				follow: true,
+				stdout: true,
+				stderr: true,
+				tail: 100
+			}
+		);
+		// Pipe container output to the client
+		// Create readable streams for stdout and stderr
+		const stdout = new require('stream').PassThrough();
+		const stderr = new require('stream').PassThrough();
+		docker.modem.demuxStream(stream, stdout, stderr);
+		stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
+		stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
+		// Client terminated the connection
+		socket.on('logslDisconnect', () => {
+			stream.destroy();
 		});
+		socket.on('disconnect', () => {
+			stream.destroy();
+		});
+		nsp.to(`user:${socket.user}`).emit('logsConnected');
+	} catch (error) {
+		nsp.to(`user:${socket.user}`).emit('logsError', 'Failed to start container logs stream.');
+	}
 };
 
 scheduleUpdatesChecker();
@@ -578,39 +573,43 @@ module.exports = (io) => {
 			checkForUpdates();
 		}
 
-		socket.on('install', (config) => {
+		socket.on('install', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('appInstall', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+				try {
+					await queue.add('appInstall', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
 			}
 		});
 
-		socket.on('update', (config) => {
+		socket.on('update', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('appUpdate', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+				try {
+					await queue.add('appUpdate', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
 			}
 		});
 
-		socket.on('performAppAction', (config) => {
+		socket.on('performAppAction', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('performAppAction', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+				try {
+					await queue.add('performAppAction', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
 			}
 		});
 
-		socket.on('performServiceAction', (config) => {
+		socket.on('performServiceAction', async (config) => {
 			if (socket.isAuthenticated) {
-				queue.add('performServiceAction', { config, user: socket.user })
-					.catch((error) => {
-						console.error('Error starting job:', error);
-					});
+				try {
+					await queue.add('performServiceAction', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
 			}
 		});
 

@@ -46,7 +46,7 @@ si.networkInterfaces((networkInterface) => {
 	state.system.networkInterface = networkInterface;
 }, null, 'default');
 
-const reboot = (socket) => {
+const reboot = async (socket) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -55,19 +55,17 @@ const reboot = (socket) => {
 		return;
 	}
 
-	exec('reboot')
-		.then((response) => {
-			state.reboot = true;
-		})
-		.catch((error) => {
-			state.reboot = false;
-		})
-		.then(() => {
-			nsp.emit('reboot', state.reboot);
-		});
+	try {
+		await exec('reboot');
+		state.reboot = true;
+	} catch (error) {
+		state.reboot = false;
+	}
+		
+	nsp.emit('reboot', state.reboot);
 };
 
-const shutdown = (socket) => {
+const shutdown = async (socket) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -76,19 +74,17 @@ const shutdown = (socket) => {
 		return;
 	}
 
-	exec('shutdown -h now')
-		.then((response) => {
-			state.shutdown = true;
-		})
-		.catch((error) => {
-			state.shutdown = false;
-		})
-		.then(() => {
-			nsp.emit('shutdown', state.shutdown);
-		});
+	try {
+		await exec('shutdown -h now');
+		state.shutdown = true;
+	} catch (error) {
+		state.shutdown = false;
+	}
+	
+	nsp.emit('shutdown', state.shutdown);
 };
 
-const checkUpdates = (socket) => {
+const checkUpdates = async (socket) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -99,11 +95,14 @@ const checkUpdates = (socket) => {
 
 	state.checkUpdates = true;
 	nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
-	exec('apt update --allow-releaseinfo-change')
-		.then(() => {
-			state.checkUpdates = false;
-			updates(socket);
-		});
+	try {
+		await exec('apt update --allow-releaseinfo-change');
+		state.checkUpdates = false;
+		updates(socket);
+	} catch (error) {
+		state.checkUpdates = false;
+		nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+	}
 };
 
 const isUpgradeInProgress = (socket) => {
@@ -180,7 +179,7 @@ const checkUpgrade = (socket) => {
 	}, 1000);
 };
 
-const upgrade = (socket) => {
+const upgrade = async (socket) => {
 	if (!socket.isAuthenticated) {
 		return;
 	}
@@ -196,19 +195,18 @@ const upgrade = (socket) => {
 
 	watchUpgradeLog();
 
-	exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get dist-upgrade -o Dpkg::Options::='--force-confold' -y -q > /var/www/virgo-api/upgrade.log 2>&1"`)
-		.then(() => {
-			checkUpgrade(socket);
-		})
-		.catch((error) => {
-			upgradeLogsWatcher?.close();
-			upgradeLogsWatcher = null;
-			clearInterval(checkUpgeadeIntervalId);
-			checkUpgeadeIntervalId = null;
-			state.upgrade.state = 'failed';
-			nsp.emit('upgrade', state.upgrade);
-			updates(socket);
-		});
+	try {
+		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get dist-upgrade -o Dpkg::Options::='--force-confold' -y -q > /var/www/virgo-api/upgrade.log 2>&1"`);
+		checkUpgrade(socket);
+	} catch (error) {
+		upgradeLogsWatcher?.close();
+		upgradeLogsWatcher = null;
+		clearInterval(checkUpgeadeIntervalId);
+		checkUpgeadeIntervalId = null;
+		state.upgrade.state = 'failed';
+		nsp.emit('upgrade', state.upgrade);
+		updates(socket);
+	};
 };
 
 const completeUpgrade = (socket) => {
@@ -237,15 +235,11 @@ const updates = (socket) => {
 	pollUpdates(socket);
 };
 
-const pollUpdates = (socket) => {
-	state.updates = [];
-
-	exec('apt-show-versions -u')
-		.then((response) => {
-			let updates = response.stdout.trim();
-			if (updates === '') {
-				return;
-			}
+const pollUpdates = async (socket) => {
+	try {
+		const response = await exec('apt-show-versions -u');
+		let updates = response.stdout.trim();
+		if (updates !== '') {
 			state.updates = updates.split('\n').map((line) => {
 				let parts = line.split(' ');
 				return {
@@ -256,181 +250,156 @@ const pollUpdates = (socket) => {
 					}
 				};
 			});
-		})
-		.catch((error) => {
-			state.updates = false;
-		})
-		.then(() => {
-			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
-			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
-			timeouts.updates = setTimeout(pollUpdates.bind(null, socket), 3600000);
-		});
+		} else {
+			state.updates = [];
+		}
+	} catch (error) {
+		state.updates = false;
+	}
+
+	nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+	nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+	timeouts.updates = setTimeout(() => { pollUpdates(socket); }, 3600000);
 };
 
-const pollCpuStats = (socket) => {
+const pollCpuStats = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.cpuStats;
 		return;
 	}
 
-	state.cpuStats = {};
-
-	Promise.all([
-		si.currentLoad(),
-		si.cpuTemperature(),
-		exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true')
-	])
-		.then(([currentLoad, cpuTemperature, fan]) => {
-			state.cpuStats = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
-
-		})
-		.catch((error) => {
-			state.cpuStats = false;
-		})
-		.then(() => {
-			nsp.emit('cpuStats', state.cpuStats);
-			setTimeout(pollCpuStats.bind(null, socket), 5000);
-		});
+	try {
+		const currentLoad = await si.currentLoad();
+		const cpuTemperature = await si.cpuTemperature();
+		const fan = await exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true');
+		state.cpuStats = { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') };
+	} catch (error) {
+		state.cpuStats = false;
+	}
+	
+	nsp.emit('cpuStats', state.cpuStats);
+	setTimeout(() => { pollCpuStats(socket); }, 5000);
 };
 
-const pollMemory = (socket) => {
+const pollMemory = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.memory;
 		return;
 	}
 
-	state.memory = {};
-
-	si.mem()
-		.then((memory) => {
-			state.memory = memory;
-		})
-		.catch((error) => {
-			state.memory = false;
-		})
-		.then(() => {
-			nsp.emit('memory', state.memory);
-			setTimeout(pollMemory.bind(null, socket), 10000);
-		});
+	try {
+		const memory = await si.mem();
+		state.memory = memory;
+	} catch (error) {
+		state.memory = false;
+	}
+	
+	nsp.emit('memory', state.memory);
+	setTimeout(() => { pollMemory(socket); }, 10000);
 };
 
-const pollStorage = (socket) => {
+const pollStorage = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.storage;
 		return;
 	}
 
-	state.storage = [];
-
-	Promise.all([
-		exec('zpool list -jp --json-int | jq'),
-		exec('zpool status -jp --json-int | jq'),
-		si.fsSize()
-	])
-		.then(([poolsList, poolsStatus, filesystems]) => {
-			poolsStatus = JSON.parse(poolsStatus.stdout).pools;
-			let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
-				return { ...pool, ...poolsStatus[pool.name] };
-			});
-			let filesystem = filesystems.find((filesystem) => {
-				return filesystem.mount === '/';
-			});
-			if (filesystem) {
-				let pool = {
-					name: 'system',
-					properties: {
-						health: {
-							value: 'ONLINE'
-						},
-						size: {
-							value: filesystem.size
-						},
-						allocated: {
-							value: filesystem.used
-						},
-						free: {
-							value: filesystem.available
-						},
-						capacity: {
-							value: filesystem.use
-						}
+	try {
+		const poolsList = await exec('zpool list -jp --json-int | jq');
+		const poolsStatus = await exec('zpool status -jp --json-int | jq');
+		const filesystems = await si.fsSize();
+		const pools = JSON.parse(poolsStatus.stdout).pools;
+		let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
+			return { ...pool, ...pools[pool.name] };
+		});
+		let filesystem = filesystems.find((filesystem) => {
+			return filesystem.mount === '/';
+		});
+		if (filesystem) {
+			let pool = {
+				name: 'system',
+				properties: {
+					health: {
+						value: 'ONLINE'
+					},
+					size: {
+						value: filesystem.size
+					},
+					allocated: {
+						value: filesystem.used
+					},
+					free: {
+						value: filesystem.available
+					},
+					capacity: {
+						value: filesystem.use
 					}
 				}
-				storage.push(pool);
 			}
-			storage = camelcaseKeys(storage, { deep: true });
-			state.storage = storage;
-		})
-		.catch((error) => {
-			state.storage = false;
-		})
-		.then(() => {
-			nsp.emit('storage', state.storage);
-			setTimeout(pollStorage.bind(null, socket), 60000);
-		});
+			storage.push(pool);
+		}
+		storage = camelcaseKeys(storage, { deep: true });
+		state.storage = storage;
+	} catch (error) {
+		state.storage = false;
+	}
+	
+	nsp.emit('storage', state.storage);
+	setTimeout(() => { pollStorage(socket); }, 60000);
 };
 
-const pollDrives = (socket) => {
+const pollDrives = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.drives;
 		return;
 	}
 
-	state.drives = [];
-	Promise.all([
-		exec(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`),
-		exec(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`)
-	])
-		.then(([responseSmartctl, responseNvme]) => {
-			let drives = JSON.parse(responseSmartctl.stdout);
-			let nvme = JSON.parse(responseNvme.stdout);
-			state.drives = drives.map((drive, index) => {
-				return {
-					name: drive.device.name,
-					model: drive.model_name,
-					serialNumber: drive.serial_number,
-					capcity: drive.user_capacity,
-					temperature: drive.temperature.current,
-					temperatureWarningThreshold: nvme[index].wctemp,
-					temperatureCriticalThreshold: nvme[index].cctemp
-				};
-			});
-		})
-		.catch((error) => {
-			state.drives = false;
-		})
-		.then(() => {
-			nsp.emit('drives', state.drives);
-			setTimeout(pollDrives.bind(null, socket), 60000);
+	try {
+		const responseSmartctl = await exec(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`);
+		const responseNvme = await exec(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`);
+		let drives = JSON.parse(responseSmartctl.stdout);
+		let nvme = JSON.parse(responseNvme.stdout);
+		state.drives = drives.map((drive, index) => {
+			return {
+				name: drive.device.name,
+				model: drive.model_name,
+				serialNumber: drive.serial_number,
+				capcity: drive.user_capacity,
+				temperature: drive.temperature.current,
+				temperatureWarningThreshold: nvme[index].wctemp,
+				temperatureCriticalThreshold: nvme[index].cctemp
+			};
 		});
+	} catch (error) {
+		state.drives = false;
+	}
+	
+	nsp.emit('drives', state.drives);
+	setTimeout(() => { pollDrives(socket); }, 60000);
 };
 
-const pollNetworkStats = (socket) => {
+const pollNetworkStats = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
 		delete state.networkStats;
 		return;
 	}
 
-	state.networkStats = {};
-
-	si.networkStats()
-		.then((networkStats) => {
-			let networkInterfaceStats = networkStats[0];
-			if (networkInterfaceStats.rx_sec === null) {
-				networkInterfaceStats.rx_sec = 0;
-			}
-			if (networkInterfaceStats.tx_sec === null) {
-				networkInterfaceStats.tx_sec = 0;
-			}
-			state.networkStats = networkInterfaceStats;
-		})
-		.catch((error) => {
-			state.networkStats = false;
-		})
-		.then(() => {
-			nsp.emit('networkStats', state.networkStats);
-			setTimeout(pollNetworkStats.bind(null, socket), 2000);
-		});
+	try {
+		const networkStats = await si.networkStats();
+		let networkInterfaceStats = networkStats[0];
+		if (networkInterfaceStats.rx_sec === null) {
+			networkInterfaceStats.rx_sec = 0;
+		}
+		if (networkInterfaceStats.tx_sec === null) {
+			networkInterfaceStats.tx_sec = 0;
+		}
+		state.networkStats = networkInterfaceStats;
+	} catch (error) {
+		state.networkStats = false;
+	}
+	
+	nsp.emit('networkStats', state.networkStats);
+	setTimeout(() => { pollNetworkStats(socket); }, 2000);
 };
 
 const watchPowerSource = () => {
@@ -489,7 +458,7 @@ const pollUps = (socket) => {
 
 	state.ups.batteryCharge = batteryCharge;
 	nsp.emit('ups', state.ups);
-	setTimeout(pollUps.bind(null, socket), 60000);
+	setTimeout(() => { pollUps(socket); }, 60000);
 };
 
 const pollTime = (socket) => {
@@ -500,7 +469,7 @@ const pollTime = (socket) => {
 
 	state.time = si.time();
 	nsp.emit('time', state.time);
-	setTimeout(pollTime.bind(null, socket), 60000);
+	setTimeout(() => { pollTime(socket); }, 60000);
 };
 
 module.exports = (io) => {

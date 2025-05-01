@@ -8,6 +8,7 @@ let state = {};
 
 const pollShares = async (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
+		delete state.shares;
 		return;
 	}
 
