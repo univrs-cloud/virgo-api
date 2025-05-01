@@ -157,16 +157,15 @@ const install = async (job) => {
 		return template.id === config.id;
 	});
 	if (!template) {
-		throw new Error('App template not found.');
+		throw new Error(`App template not found.`);
+	}
+
+	if (template.type !== 3) {
+		// only docker compose is supported
+		throw new Error(`Installing this app type is not supported.`);
 	}
 
 	await updateProgress(job, `${template.title} installation starting...`);
-
-	if (template.type !== 3) {
-		// install using docker run
-		throw new Error('Installing this app type not yet supported.');
-	}
-
 	await updateProgress(job, `Downloading ${template.title} project template...`);
 	const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 	let stack = response.data;
@@ -221,24 +220,36 @@ const update = async (job) => {
 		throw new Error(`App not found.`);
 	}
 
+	const container = state.containers.find((container) => { return container.name === app.name });
+	const composeProject = container.labels.comDockerComposeProject;
+	const composeProjectDir = container.labels.comDockerComposeProjectWorkingDir;
+	const composeProjectContainers = state.containers.filter((container) => {
+		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
+	});
 	await updateProgress(job, `${app.title} update starting...`);
-	await updateProgress(job, `Downloading ${app.title} updates...`);
-	const composeProjectDir = path.join(composeDir, app.name);
-	await dockerCompose.pullAll({
-		cwd: composeProjectDir,
-		callback: async (chunk) => {
-			await updateProgress(job, chunk.toString());
-		}
-	});
-	await updateProgress(job, `Installing ${app.title} updates...`);
-	await dockerCompose.upAll({
-		cwd: composeProjectDir,
-		callback: async (chunk) => {
-			await updateProgress(job, chunk.toString());
-		}
-	});
-	await checkForUpdates();
-	return `${app.title} updated.`;
+	try {
+		await updateProgress(job, `Downloading ${app.title} updates...`);
+		await dockerCompose.pullAll({
+			cwd: composeProjectDir,
+			callback: async (chunk) => {
+				await updateProgress(job, chunk.toString());
+			}
+		});
+		await updateProgress(job, `Installing ${app.title} updates...`);
+		await dockerCompose.upAll({
+			cwd: composeProjectDir,
+			callback: async (chunk) => {
+				await updateProgress(job, chunk.toString());
+			}
+		});
+		state.updates = state.updates.filter((update) => {
+			return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
+		});
+		nsp.emit('updates', state.updates);
+		return `${app.title} updated.`;
+	} catch (error) {
+		return `${app.title} could not be updated.`;
+	}	
 };
 
 const performAppAction = async (job) => {

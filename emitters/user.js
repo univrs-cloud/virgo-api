@@ -92,7 +92,7 @@ const createUser = async (job) => {
 	let config = job.data.config;
 	let user = state.users.find((user) => { return user.username === config.username; });
 	if (user) {
-		throw new Error('User already exists.');
+		throw new Error(`User already exists.`);
 	}
 
 	await updateProgress(job, `Creating system user ${config.username}...`);
@@ -138,7 +138,7 @@ const updateUser = async (job) => {
 
 	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
-		throw new Error('Only the owner can update his own profile.');
+		throw new Error(`Only the owner can update his own profile.`);
 	}
 
 	await updateProgress(job, `Updating system user ${config.username}...`);
@@ -157,7 +157,7 @@ const deleteUser = async (job) => {
 	}
 
 	if (user.uid === 1000) {
-		throw new Error('Owner cannot be deleted.');
+		throw new Error(`Owner cannot be deleted.`);
 	}
 
 	await updateProgress(job, `Deleting Authelia user ${config.username}...`);
@@ -188,7 +188,7 @@ const lockUser = async (job) => {
 	}
 
 	if (user.uid === 1000) {
-		throw new Error('Owner cannot be locked.');
+		throw new Error(`Owner cannot be locked.`);
 	}
 
 	await updateProgress(job, `Locking system user ${config.username}...`);
@@ -227,7 +227,7 @@ const changePassword = async (job) => {
 
 	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
-		throw new Error('Only the owner can change his own password.');
+		throw new Error(`Only the owner can change his own password.`);
 	}
 
 	await updateProgress(job, `Changing system user password for ${config.username}...`);
