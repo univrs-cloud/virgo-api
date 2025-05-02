@@ -249,7 +249,7 @@ const update = async (job) => {
 		return `${app.title} updated.`;
 	} catch (error) {
 		return `${app.title} could not be updated.`;
-	}	
+	}
 };
 
 const performAppAction = async (job) => {
@@ -443,9 +443,9 @@ const terminalConnect = async (socket, id) => {
 
 	let shell = findContainerShell(id);
 	if (!shell) {
-        nsp.to(`user:${socket.user}`).emit('terminalError', 'No compatible shell found in container.');
-        return;
-    }
+		nsp.to(`user:${socket.user}`).emit('terminalError', 'No compatible shell found in container.');
+		return;
+	}
 
 	try {
 		const exec = await container.exec(
@@ -491,7 +491,7 @@ const terminalConnect = async (socket, id) => {
 			stream.destroy();
 		});
 		nsp.to(`user:${socket.user}`).emit('terminalConnected');
-	} catch (error) {		
+	} catch (error) {
 		console.error(error);
 		nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
 	}

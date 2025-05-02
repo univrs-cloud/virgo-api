@@ -84,8 +84,8 @@ const getUsers = async () => {
 			});
 		state.users = users;
 	} catch (error) {
-        state.users = false;
-    }
+		state.users = false;
+	}
 };
 
 const createUser = async (job) => {
@@ -271,11 +271,11 @@ const toggleAutheliaUserLock = async (username, status) => {
 }
 
 const setSambaUserPassword = async (username, password) => {
-    try {
-        await exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`);
-    } catch (error) {
-        console.log(error);
-    }
+	try {
+		await exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`);
+	} catch (error) {
+		console.log(error);
+	}
 };
 
 const emitUsers = async () => {

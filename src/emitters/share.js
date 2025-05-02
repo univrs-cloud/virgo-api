@@ -35,10 +35,10 @@ const pollShares = async (socket) => {
 				share.free = diskSpace.free;
 				share.alloc = share.size - share.free;
 				share.cap = share.alloc / share.size * 100;
-			  } catch (error) {
+			} catch (error) {
 				console.error(`Error checking disk space for ${name}:`, error);
-			  }
-			  return share;
+			}
+			return share;
 		});
 		state.shares = await Promise.all(promises);
 	} catch (error) {

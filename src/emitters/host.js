@@ -61,7 +61,7 @@ const reboot = async (socket) => {
 	} catch (error) {
 		state.reboot = false;
 	}
-		
+
 	nsp.emit('reboot', state.reboot);
 };
 
@@ -80,7 +80,7 @@ const shutdown = async (socket) => {
 	} catch (error) {
 		state.shutdown = false;
 	}
-	
+
 	nsp.emit('shutdown', state.shutdown);
 };
 
@@ -276,7 +276,7 @@ const pollCpuStats = async (socket) => {
 	} catch (error) {
 		state.cpuStats = false;
 	}
-	
+
 	nsp.emit('cpuStats', state.cpuStats);
 	setTimeout(() => { pollCpuStats(socket); }, 5000);
 };
@@ -293,7 +293,7 @@ const pollMemory = async (socket) => {
 	} catch (error) {
 		state.memory = false;
 	}
-	
+
 	nsp.emit('memory', state.memory);
 	setTimeout(() => { pollMemory(socket); }, 10000);
 };
@@ -343,7 +343,7 @@ const pollStorage = async (socket) => {
 	} catch (error) {
 		state.storage = false;
 	}
-	
+
 	nsp.emit('storage', state.storage);
 	setTimeout(() => { pollStorage(socket); }, 60000);
 };
@@ -373,7 +373,7 @@ const pollDrives = async (socket) => {
 	} catch (error) {
 		state.drives = false;
 	}
-	
+
 	nsp.emit('drives', state.drives);
 	setTimeout(() => { pollDrives(socket); }, 60000);
 };
@@ -397,7 +397,7 @@ const pollNetworkStats = async (socket) => {
 	} catch (error) {
 		state.networkStats = false;
 	}
-	
+
 	nsp.emit('networkStats', state.networkStats);
 	setTimeout(() => { pollNetworkStats(socket); }, 2000);
 };

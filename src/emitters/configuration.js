@@ -171,13 +171,13 @@ module.exports = (io) => {
 
 		socket.on('smtp', async (config) => {
 			if (socket.isAuthenticated) {
-			  try {
-				await queue.add('setSmtp', { config, user: socket.user });
-			  } catch (error) {
-				console.error('Error starting job:', error);
-			  }
+				try {
+					await queue.add('setSmtp', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				}
 			}
-		  });
+		});
 
 		socket.on('disconnect', () => {
 			//
