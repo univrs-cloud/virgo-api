@@ -3,11 +3,12 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
+const chokidar = require('chokidar');
 const { Queue, Worker } = require('bullmq');
 
 let nsp;
 let state = {};
-let configurationFileWatcher = null;
+let configurationWatcher;
 const configurationFile = '/var/www/virgo-api/configuration.json';
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
@@ -49,7 +50,7 @@ const updateProgress = async (job, message) => {
 };
 
 const watchConfiguration = async (socket) => {
-	if (configurationFileWatcher !== null) {
+	if (configurationWatcher) {
 		return;
 	}
 
@@ -60,11 +61,17 @@ const watchConfiguration = async (socket) => {
 		readFile();
 	}
 
-	configurationFileWatcher = fs.watch(configurationFile, (eventType) => {
-		if (eventType === 'change') {
-			readFile();
-		}
+	configurationWatcher = chokidar.watch(configurationFile, {
+		persistent: true,
+		ignoreInitial: true
 	});
+	configurationWatcher
+		.on('all', (event, path) => {
+			readFile();
+		})
+		.on('error', (error) => {
+			console.error(`Watcher error: ${error}`);
+		});
 
 	function readFile() {
 		let data = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });

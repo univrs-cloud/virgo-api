@@ -7,6 +7,7 @@ const touch = require('touch');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../../package.json');
+const chokidar = require('chokidar');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
@@ -17,9 +18,9 @@ let nsp;
 let state = {};
 let timeouts = {};
 let upgradePid = null;
-let upgradeLogsWatcher = null;
 let checkUpgeadeIntervalId = null;
-let powerSourceWatcher = null;
+let upgradeLogsWatcher;
+let powerSourceWatcher;
 const upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 const upgradeFile = '/var/www/virgo-api/upgrade.log';
 
@@ -115,7 +116,7 @@ const isUpgradeInProgress = (socket) => {
 };
 
 const watchUpgradeLog = () => {
-	if (upgradeLogsWatcher !== null) {
+	if (upgradeLogsWatcher) {
 		return;
 	}
 
@@ -129,11 +130,17 @@ const watchUpgradeLog = () => {
 		readUpgradeLog();
 	}
 
-	upgradeLogsWatcher = fs.watch(upgradeFile, (eventType) => {
-		if (eventType === 'change') {
-			readUpgradeLog();
-		}
+	upgradeLogsWatcher = chokidar.watch(upgradeFile, {
+		persistent: true,
+		ignoreInitial: true
 	});
+	upgradeLogsWatcher
+		.on('all', (event, path) => {
+			readUpgradeLog();
+		})
+		.on('error', (error) => {
+			console.error(`Watcher error: ${error}`);
+		});
 
 	function readUpgradeLog() {
 		let data = fs.readFileSync(upgradeFile, { encoding: 'utf8', flag: 'r' });
@@ -164,15 +171,15 @@ const checkUpgrade = (socket) => {
 		return;
 	}
 
-	checkUpgeadeIntervalId = setInterval(() => {
+	checkUpgeadeIntervalId = setInterval(async () => {
 		if (isUpgradeInProgress()) {
 			return;
 		}
 
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
-		upgradeLogsWatcher?.close();
-		upgradeLogsWatcher = null;
+		await upgradeLogsWatcher?.close();
+		upgradeLogsWatcher = undefined;
 		state.upgrade.state = 'succeeded';
 		nsp.emit('upgrade', state.upgrade);
 		updates(socket);
@@ -199,8 +206,8 @@ const upgrade = async (socket) => {
 		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get dist-upgrade -o Dpkg::Options::='--force-confold' -y -q > /var/www/virgo-api/upgrade.log 2>&1"`);
 		checkUpgrade(socket);
 	} catch (error) {
-		upgradeLogsWatcher?.close();
-		upgradeLogsWatcher = null;
+		await upgradeLogsWatcher?.close();
+		upgradeLogsWatcher = undefined;
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
 		state.upgrade.state = 'failed';
@@ -403,7 +410,7 @@ const pollNetworkStats = async (socket) => {
 };
 
 const watchPowerSource = () => {
-	if (powerSourceWatcher !== null) {
+	if (powerSourceWatcher) {
 		return;
 	}
 
@@ -411,11 +418,17 @@ const watchPowerSource = () => {
 
 	readPowerSource();
 
-	powerSourceWatcher = fs.watch('/tmp/ups_power_source', (eventType) => {
-		if (eventType === 'change') {
-			readPowerSource();
-		}
+	powerSourceWatcher = chokidar.watch('/tmp/ups_power_source', {
+		persistent: true,
+		ignoreInitial: true
 	});
+	powerSourceWatcher
+		.on('all', (event, path) => {
+			readPowerSource();
+		})
+		.on('error', (error) => {
+			console.error(`Watcher error: ${error}`);
+		});
 
 	function readPowerSource() {
 		let data = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
@@ -429,8 +442,6 @@ const watchPowerSource = () => {
 
 const pollUps = (socket) => {
 	if (nsp.server.engine.clientsCount === 0) {
-		powerSourceWatcher?.close();
-		powerSourceWatcher = null;
 		delete state.ups;
 		return;
 	}

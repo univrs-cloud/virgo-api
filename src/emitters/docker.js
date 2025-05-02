@@ -8,11 +8,12 @@ const axios = require('axios');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
+const chokidar = require('chokidar');
 const { Queue, Worker } = require('bullmq');
 
 let nsp;
 let state = {};
-let dataFileWatcher = null;
+let dataFileWatcher;
 const docker = new dockerode();
 const composeDir = '/opt/docker';
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
@@ -81,7 +82,7 @@ const scheduleUpdatesChecker = async () => {
 };
 
 const watchData = (socket) => {
-	if (dataFileWatcher !== null) {
+	if (dataFileWatcher) {
 		return;
 	}
 
@@ -92,11 +93,17 @@ const watchData = (socket) => {
 		readFile();
 	}
 
-	dataFileWatcher = fs.watch(dataFile, (eventType) => {
-		if (eventType === 'change') {
-			readFile();
-		}
+	dataFileWatcher = chokidar.watch(dataFile, {
+		persistent: true,
+		ignoreInitial: true
 	});
+	dataFileWatcher
+		.on('all', (event, path) => {
+			readFile();
+		})
+		.on('error', (error) => {
+			console.error(`Watcher error: ${error}`);
+		});
 
 	function readFile() {
 		let data = fs.readFileSync(dataFile, { encoding: 'utf8', flag: 'r' });
