@@ -6,7 +6,7 @@ const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
-const { version } = require('../package.json');
+const { version } = require('../../package.json');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
