@@ -35,7 +35,7 @@ const worker = new Worker(
 			return await performServiceAction(job);
 		}
 		if (job.name === 'checkForUpdates') {
-			return await checkForUpdates(job);
+			return await checkForUpdates();
 		}
 	},
 	{
@@ -311,7 +311,7 @@ const performServiceAction = async (job) => {
 	return `${container.name} service ${config.action}ed.`;
 };
 
-const checkForUpdates = async (job) => {
+const checkForUpdates = async () => {
 	state.updates = [];
 	let images = await docker.listImages({ all: true, digests: true });
 	images = camelcaseKeys(images, { deep: true });

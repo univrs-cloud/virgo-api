@@ -1,6 +1,6 @@
 const { Queue, QueueEvents } = require('bullmq');
 
-const queues = ['configuration-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
+const queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
 let nsp;
 
 queues.forEach((queueName) => {

@@ -8,6 +8,7 @@ const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../../package.json');
 const chokidar = require('chokidar');
+const { Queue, Worker } = require('bullmq');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
@@ -16,13 +17,62 @@ try {
 
 let nsp;
 let state = {};
-let timeouts = {};
 let upgradePid = null;
 let checkUpgeadeIntervalId = null;
 let upgradeLogsWatcher;
 let powerSourceWatcher;
 const upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 const upgradeFile = '/var/www/virgo-api/upgrade.log';
+const queue = new Queue('host-jobs');
+const worker = new Worker(
+	'host-jobs',
+	async (job) => {
+		if (job.name === 'checkForUpdates') {
+			return await checkForUpdates();
+		}
+	},
+	{
+		connection: {
+			host: 'localhost',
+			port: 6379,
+		}
+	}
+);
+worker.on('completed', async (job, result) => {
+	if (job) {
+		await updateProgress(job, result);
+	}
+});
+worker.on('failed', async (job, error) => {
+	if (job) {
+		await updateProgress(job, ``);
+	}
+});
+worker.on('error', (error) => {
+	console.error(error);
+});
+
+const updateProgress = async (job, message) => {
+	const state = await job.getState();
+	await job.updateProgress({ state, message });
+};
+
+const scheduleUpdatesChecker = async () => {
+	const updatesChecker = await queue.getJobScheduler('updatesChecker');
+	if (updatesChecker) {
+		return;
+	}
+
+	try {
+		await queue.upsertJobScheduler(
+			'updatesChecker',
+			{ pattern: '0 0 0 * * *' },
+			{ name: 'checkForUpdates' }
+		);
+	} catch (error) {
+		console.error('Error starting job:', error);
+	};
+};
 
 state.system = {
 	api: {
@@ -237,12 +287,10 @@ const updates = (socket) => {
 	if (upgradePid === null) {
 		nsp.emit('upgrade', null);
 	}
-	clearTimeout(timeouts.updates);
-	delete timeouts.updates;
-	pollUpdates(socket);
+	checkForUpdates();
 };
 
-const pollUpdates = async (socket) => {
+const checkForUpdates = async () => {
 	try {
 		const response = await exec('apt-show-versions -u');
 		let updates = response.stdout.trim();
@@ -264,9 +312,13 @@ const pollUpdates = async (socket) => {
 		state.updates = false;
 	}
 
-	nsp.to(`user:${socket.user}`).emit('updates', state.updates);
-	nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
-	timeouts.updates = setTimeout(() => { pollUpdates(socket); }, 3600000);
+	for (const socket of nsp.sockets.values()) {
+		if (socket.isAuthenticated) {
+			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+		}
+	};
+	return ``;
 };
 
 const pollCpuStats = async (socket) => {
@@ -483,6 +535,8 @@ const pollTime = (socket) => {
 	setTimeout(() => { pollTime(socket); }, 60000);
 };
 
+scheduleUpdatesChecker();
+
 module.exports = (io) => {
 	nsp = io.of('/host');
 	nsp.use((socket, next) => {
@@ -509,7 +563,7 @@ module.exports = (io) => {
 		if (state.updates) {
 			nsp.to(`user:${socket.user}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
 		} else {
-			pollUpdates(socket);
+			checkForUpdates();
 		}
 		if (state.cpuStats) {
 			nsp.emit('cpuStats', state.cpuStats);
