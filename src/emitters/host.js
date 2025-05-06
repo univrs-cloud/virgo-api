@@ -58,11 +58,6 @@ const updateProgress = async (job, message) => {
 };
 
 const scheduleUpdatesChecker = async () => {
-	const updatesChecker = await queue.getJobScheduler('updatesChecker');
-	if (updatesChecker) {
-		return;
-	}
-
 	try {
 		await queue.upsertJobScheduler(
 			'updatesChecker',
