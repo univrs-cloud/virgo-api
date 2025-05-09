@@ -4,6 +4,7 @@ const host = require('./host');
 const user = require('./user');
 const docker = require('./docker');
 const share = require('./share');
+const weather = require('./weather');
 
 module.exports = (io) => {
 	job(io);
@@ -12,4 +13,5 @@ module.exports = (io) => {
 	user(io);
 	docker(io);
 	share(io);
+	weather(io);
 };
