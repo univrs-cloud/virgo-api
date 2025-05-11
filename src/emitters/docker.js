@@ -244,6 +244,8 @@ const update = async (job) => {
 				await updateProgress(job, chunk.toString());
 			}
 		});
+		await updateProgress(job, `Cleaning up...`);
+		await docker.pruneImages();
 		state.updates = state.updates.filter((update) => {
 			return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
 		});
