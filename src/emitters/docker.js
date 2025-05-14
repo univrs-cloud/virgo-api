@@ -4,7 +4,6 @@ const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const path = require('path');
 const touch = require('touch');
-const axios = require('axios');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
@@ -143,8 +142,9 @@ const pollTemplates = async (socket) => {
 	}
 
 	try {
-		const response = await axios.get('https://apps.univrs.cloud/template.json');
-		state.templates = response.data.templates;
+		const response = await fetch(`https://apps.univrs.cloud/template.json`);
+		const data = await response.json();
+		state.templates = data.templates;
 	} catch (error) {
 		state.templates = false;
 	}
@@ -169,8 +169,8 @@ const install = async (job) => {
 
 	await updateProgress(job, `${template.title} installation starting...`);
 	await updateProgress(job, `Downloading ${template.title} project template...`);
-	const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-	let stack = response.data;
+	const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+	const stack = await response.json();
 	let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 	const composeProjectDir = path.join(composeDir, template.name);
 	await updateProgress(job, `Making ${template.title} project directory...`);
@@ -221,37 +221,36 @@ const update = async (job) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});
 	await updateProgress(job, `${app.title} update starting...`);
-	try {
-		if (template) {
-			const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-			let stack = response.data;
+	if (template) {
+		try {
+			const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+			const stack = await response.json();
 			await updateProgress(job, `Writing ${template.title} project template...`);
 			fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
-		}
-		await updateProgress(job, `Downloading ${app.title} updates...`);
-		await dockerCompose.pullAll({
-			cwd: composeProjectDir,
-			callback: async (chunk) => {
-				await updateProgress(job, chunk.toString());
-			}
-		});
-		await updateProgress(job, `Installing ${app.title} updates...`);
-		await dockerCompose.upAll({
-			cwd: composeProjectDir,
-			callback: async (chunk) => {
-				await updateProgress(job, chunk.toString());
-			}
-		});
-		await updateProgress(job, `Cleaning up...`);
-		await docker.pruneImages();
-		state.updates = state.updates.filter((update) => {
-			return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
-		});
-		nsp.emit('updates', state.updates);
-		return `${app.title} updated.`;
-	} catch (error) {
-		return `${app.title} could not be updated.`;
+		} catch (error) {}
 	}
+
+	await updateProgress(job, `Downloading ${app.title} updates...`);
+	await dockerCompose.pullAll({
+		cwd: composeProjectDir,
+		callback: async (chunk) => {
+			await updateProgress(job, chunk.toString());
+		}
+	});
+	await updateProgress(job, `Installing ${app.title} updates...`);
+	await dockerCompose.upAll({
+		cwd: composeProjectDir,
+		callback: async (chunk) => {
+			await updateProgress(job, chunk.toString());
+		}
+	});
+	await updateProgress(job, `Cleaning up...`);
+	await docker.pruneImages();
+	state.updates = state.updates.filter((update) => {
+		return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
+	});
+	nsp.emit('updates', state.updates);
+	return `${app.title} updated.`;
 };
 
 const getRawGitHubUrl = (repositoryUrl, filePath, branch = 'main') => {
@@ -382,9 +381,8 @@ const checkForUpdates = async () => {
 		const { repoPath, tag } = parseDockerHubRepo(image);
 		const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
-		const url = `https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`;
 		try {
-			const response = await fetch(url, {
+			const response = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, {
 				headers: {
 					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
@@ -402,9 +400,8 @@ const checkForUpdates = async () => {
 		const repoPath = imageName.replace('ghcr.io/', '');
 		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
-		const url = `https://ghcr.io/v2/${repoPath}/manifests/${tag}`;
 		try {
-			const response = await fetch(url, {
+			const response = await fetch(`https://ghcr.io/v2/${repoPath}/manifests/${tag}`, {
 				headers: {
 					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
@@ -425,9 +422,8 @@ const checkForUpdates = async () => {
 		const repoPath = imageName.replace('lscr.io/', '');
 		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
 		const tokenData = await tokenResponse.json();
-		const url = `https://lscr.io/v2/${repoPath}/manifests/${tag}`;
 		try {
-			const response = await fetch(url, {
+			const response = await fetch(`https://lscr.io/v2/${repoPath}/manifests/${tag}`, {
 				headers: {
 					method: 'HEAD',
 					Authorization: `Bearer ${tokenData.token}`,
