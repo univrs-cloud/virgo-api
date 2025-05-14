@@ -200,17 +200,6 @@ const install = async (job) => {
 	await updateProgress(job, `Updating apps configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	return `${template.title} installed.`;
-
-	function getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
-		const { hostname, pathname } = new URL(repositoryUrl);
-		const [owner, repository] = pathname.split('/').filter(Boolean);
-		if (hostname.includes('github.com')) {
-			const rawHostname = hostname.replace('github.com', 'raw.githubusercontent.com');
-			return `https://${rawHostname}/${owner}/${repository}/${branch}/${filePath}`;
-		}
-
-		throw new Error(`Unsupported apps repository.`);
-	}
 };
 
 const update = async (job) => {
@@ -221,6 +210,9 @@ const update = async (job) => {
 	if (!app) {
 		throw new Error(`App not found.`);
 	}
+	let template = state.templates.find((template) => {
+		return template.name === app.name;
+	});
 
 	const container = state.containers.find((container) => { return container.name === app.name });
 	const composeProject = container.labels.comDockerComposeProject;
@@ -230,6 +222,12 @@ const update = async (job) => {
 	});
 	await updateProgress(job, `${app.title} update starting...`);
 	try {
+		if (template) {
+			const response = await axios.get(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+			let stack = response.data;
+			await updateProgress(job, `Writing ${template.title} project template...`);
+			fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+		}
 		await updateProgress(job, `Downloading ${app.title} updates...`);
 		await dockerCompose.pullAll({
 			cwd: composeProjectDir,
@@ -254,6 +252,17 @@ const update = async (job) => {
 	} catch (error) {
 		return `${app.title} could not be updated.`;
 	}
+};
+
+const getRawGitHubUrl = (repositoryUrl, filePath, branch = 'main') => {
+	const { hostname, pathname } = new URL(repositoryUrl);
+	const [owner, repository] = pathname.split('/').filter(Boolean);
+	if (hostname.includes('github.com')) {
+		const rawHostname = hostname.replace('github.com', 'raw.githubusercontent.com');
+		return `https://${rawHostname}/${owner}/${repository}/${branch}/${filePath}`;
+	}
+
+	throw new Error(`Unsupported apps repository.`);
 };
 
 const performAppAction = async (job) => {
