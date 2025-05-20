@@ -36,6 +36,9 @@ const worker = new Worker(
 		if (job.name === 'checkForUpdates') {
 			return await checkForUpdates();
 		}
+		if (job.name === 'fetchTemplates') {
+			return await fetchTemplates();
+		}
 	},
 	{
 		connection: {
@@ -69,6 +72,18 @@ const scheduleUpdatesChecker = async () => {
 			'updatesChecker',
 			{ pattern: '0 0 0 * * *' },
 			{ name: 'checkForUpdates' }
+		);
+	} catch (error) {
+		console.error('Error starting job:', error);
+	};
+};
+
+const scheduleTemplatesFetcher = async () => {
+	try {
+		await queue.upsertJobScheduler(
+			'templatesFetcher',
+			{ pattern: '0 1 * * * *' },
+			{ name: 'fetchTemplates' }
 		);
 	} catch (error) {
 		console.error('Error starting job:', error);
@@ -131,16 +146,7 @@ const pollContainers = async (socket) => {
 	setTimeout(() => { pollContainers(socket); }, 2000);
 };
 
-const pollTemplates = async (socket) => {
-	if (nsp.server.engine.clientsCount === 0) {
-		delete state.templates;
-		return;
-	}
-
-	if (!socket.isAuthenticated) {
-		return;
-	}
-
+const fetchTemplates = async () => {
 	try {
 		const response = await fetch(`https://apps.univrs.cloud/template.json`);
 		const data = await response.json();
@@ -149,8 +155,11 @@ const pollTemplates = async (socket) => {
 		state.templates = false;
 	}
 
-	nsp.to(`user:${socket.user}`).emit('templates', state.templates);
-	setTimeout(() => { pollTemplates(socket); }, 3600000);
+	for (const socket of nsp.sockets.values()) {
+		if (socket.isAuthenticated) {
+			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+		}
+	};
 };
 
 const install = async (job) => {
@@ -559,6 +568,7 @@ const logsConnect = async (socket, id) => {
 };
 
 scheduleUpdatesChecker();
+scheduleTemplatesFetcher();
 
 module.exports = (io) => {
 	nsp = io.of('/docker');
@@ -585,7 +595,7 @@ module.exports = (io) => {
 				nsp.to(`user:${socket.user}`).emit('templates', state.templates);
 			}
 		} else {
-			pollTemplates(socket);
+			fetchTemplates();
 		}
 		if (state.updates) {
 			nsp.emit('updates', state.updates);
