@@ -65,7 +65,7 @@ const scheduleUpdatesChecker = async () => {
 			{
 				name: 'checkForUpdates',
 				opts: {
-					removeOnComplete: true
+					removeOnComplete: 1
 				}
 			}
 		);

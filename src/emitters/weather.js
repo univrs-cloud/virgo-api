@@ -37,7 +37,7 @@ const scheduleWeatherFetcher = async () => {
 			{
 				name: 'fetchWeather',
 				opts: {
-					removeOnComplete: true
+					removeOnComplete: 1
 				}
 			}
 		);

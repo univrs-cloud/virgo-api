@@ -74,7 +74,7 @@ const scheduleUpdatesChecker = async () => {
 			{
 				name: 'checkForUpdates',
 				opts: {
-					removeOnComplete: true
+					removeOnComplete: 1
 				}
 			}
 		);
@@ -91,7 +91,7 @@ const scheduleTemplatesFetcher = async () => {
 			{
 				name: 'fetchTemplates',
 				opts: {
-					removeOnComplete: true
+					removeOnComplete: 1
 				}
 			}
 		);
