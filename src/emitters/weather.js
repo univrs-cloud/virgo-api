@@ -34,7 +34,12 @@ const scheduleWeatherFetcher = async () => {
 		await queue.upsertJobScheduler(
 			'weatherFetcher',
 			{ pattern: '0 1 * * * *' },
-			{ name: 'fetchWeather' }
+			{
+				name: 'fetchWeather',
+				opts: {
+					removeOnComplete: true
+				}
+			}
 		);
 	} catch (error) {
 		console.error('Error starting job:', error);

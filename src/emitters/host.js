@@ -62,7 +62,12 @@ const scheduleUpdatesChecker = async () => {
 		await queue.upsertJobScheduler(
 			'updatesChecker',
 			{ pattern: '0 0 0 * * *' },
-			{ name: 'checkForUpdates' }
+			{
+				name: 'checkForUpdates',
+				opts: {
+					removeOnComplete: true
+				}
+			}
 		);
 	} catch (error) {
 		console.error('Error starting job:', error);

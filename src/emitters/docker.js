@@ -71,7 +71,12 @@ const scheduleUpdatesChecker = async () => {
 		await queue.upsertJobScheduler(
 			'updatesChecker',
 			{ pattern: '0 0 0 * * *' },
-			{ name: 'checkForUpdates' }
+			{
+				name: 'checkForUpdates',
+				opts: {
+					removeOnComplete: true
+				}
+			}
 		);
 	} catch (error) {
 		console.error('Error starting job:', error);
@@ -83,7 +88,12 @@ const scheduleTemplatesFetcher = async () => {
 		await queue.upsertJobScheduler(
 			'templatesFetcher',
 			{ pattern: '0 1 * * * *' },
-			{ name: 'fetchTemplates' }
+			{
+				name: 'fetchTemplates',
+				opts: {
+					removeOnComplete: true
+				}
+			}
 		);
 	} catch (error) {
 		console.error('Error starting job:', error);
