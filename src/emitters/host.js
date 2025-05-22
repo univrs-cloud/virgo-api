@@ -493,11 +493,6 @@ const watchPowerSource = () => {
 };
 
 const pollUps = (socket) => {
-	if (nsp.server.engine.clientsCount === 0) {
-		delete state.ups;
-		return;
-	}
-
 	if (i2c === false) {
 		state.ups = 'remote i/o error';
 		nsp.emit('ups', state.ups);
