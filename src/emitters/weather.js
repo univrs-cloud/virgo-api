@@ -46,7 +46,7 @@ const scheduleWeatherFetcher = async () => {
 	};
 };
 
-const watchConfiguration = async () => {
+const watchConfiguration = () => {
 	if (configurationWatcher) {
 		return;
 	}
@@ -119,7 +119,6 @@ const fetchWeather = async () => {
 };
 
 scheduleWeatherFetcher();
-watchConfiguration();
 
 module.exports = (io) => {
 	nsp = io.of('/weather');
@@ -139,4 +138,6 @@ module.exports = (io) => {
 			//
 		});
 	});
+
+	watchConfiguration();
 };

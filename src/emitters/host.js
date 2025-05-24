@@ -30,6 +30,9 @@ const worker = new Worker(
 		if (job.name === 'checkForUpdates') {
 			return await checkForUpdates();
 		}
+		if (job.name === 'checkUps') {
+			return await checkUps();
+		}
 	},
 	{
 		connection: {
@@ -64,6 +67,23 @@ const scheduleUpdatesChecker = async () => {
 			{ pattern: '0 0 0 * * *' },
 			{
 				name: 'checkForUpdates',
+				opts: {
+					removeOnComplete: 1
+				}
+			}
+		);
+	} catch (error) {
+		console.error('Error starting job:', error);
+	};
+};
+
+const scheduleUpsChecker = async () => {
+	try {
+		await queue.upsertJobScheduler(
+			'upsChecker',
+			{ pattern: '0 * * * * *' },
+			{
+				name: 'checkUps',
 				opts: {
 					removeOnComplete: 1
 				}
@@ -462,6 +482,10 @@ const pollNetworkStats = async (socket) => {
 };
 
 const watchPowerSource = () => {
+	if (i2c === false) {
+		return;
+	}
+
 	if (powerSourceWatcher) {
 		return;
 	}
@@ -486,13 +510,16 @@ const watchPowerSource = () => {
 		let data = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
+			if (state.ups === undefined) {
+				state.ups = {};
+			}
 			state.ups.powerSource = data;
 			nsp.emit('ups', state.ups);
 		}
 	}
 };
 
-const pollUps = (socket) => {
+const checkUps = async () => {
 	if (i2c === false) {
 		state.ups = 'remote i/o error';
 		nsp.emit('ups', state.ups);
@@ -503,20 +530,13 @@ const pollUps = (socket) => {
 		state.ups = {};
 	}
 
-	let batteryCharge;
 	try {
-		batteryCharge = i2c.readByteSync(0x36, 4);
+		state.ups.batteryCharge = i2c.readByteSync(0x36, 4);
 	} catch (error) {
 		state.ups.batteryCharge = false;
-		nsp.emit('ups', state.ups);
-		return;
 	}
-
-	watchPowerSource();
-
-	state.ups.batteryCharge = batteryCharge;
+	
 	nsp.emit('ups', state.ups);
-	setTimeout(() => { pollUps(socket); }, 60000);
 };
 
 const pollTime = (socket) => {
@@ -531,6 +551,7 @@ const pollTime = (socket) => {
 };
 
 scheduleUpdatesChecker();
+scheduleUpsChecker();
 
 module.exports = (io) => {
 	nsp = io.of('/host');
@@ -543,6 +564,7 @@ module.exports = (io) => {
 		socket.join(`user:${socket.user}`);
 
 		checkUpgrade(socket);
+
 		nsp.emit('system', state.system);
 		if (state.reboot === undefined) {
 			nsp.emit('reboot', false);
@@ -587,8 +609,6 @@ module.exports = (io) => {
 		}
 		if (state.ups) {
 			nsp.emit('ups', state.ups);
-		} else {
-			pollUps(socket);
 		}
 		if (state.time) {
 			nsp.emit('time', state.time);
@@ -606,4 +626,7 @@ module.exports = (io) => {
 			//
 		});
 	});
+
+	watchPowerSource();
+	checkUps();
 };

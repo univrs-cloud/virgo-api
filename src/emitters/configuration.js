@@ -49,7 +49,7 @@ const updateProgress = async (job, message) => {
 	await job.updateProgress({ state, message });
 };
 
-const watchConfiguration = async (socket) => {
+const watchConfiguration = () => {
 	if (configurationWatcher) {
 		return;
 	}
@@ -88,10 +88,12 @@ const watchConfiguration = async (socket) => {
 			state.configuration = JSON.parse(data);
 		}
 		let configuration = { ...state.configuration };
-		if (!socket.isAuthenticated) {
-			delete configuration.smtp;
-		}
-		nsp.to(`user:${socket.user}`).emit('configuration', configuration);
+		for (const socket of nsp.sockets.values()) {
+			if (!socket.isAuthenticated) {
+				delete configuration.smtp;
+			}
+			nsp.to(`user:${socket.user}`).emit('configuration', configuration);
+		};
 	};
 }
 
@@ -156,8 +158,6 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
-		watchConfiguration(socket);
-
 		if (state.configuration) {
 			let configuration = { ...state.configuration };
 			if (!socket.isAuthenticated) {
@@ -190,4 +190,6 @@ module.exports = (io) => {
 			//
 		});
 	});
+
+	watchConfiguration();
 };

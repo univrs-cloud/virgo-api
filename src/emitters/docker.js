@@ -100,7 +100,7 @@ const scheduleTemplatesFetcher = async () => {
 	};
 };
 
-const watchData = (socket) => {
+const watchData = () => {
 	if (dataFileWatcher) {
 		return;
 	}
@@ -590,8 +590,6 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
-		watchData(socket);
-
 		if (state.configured) {
 			nsp.emit('configured', state.configured);
 		}
@@ -660,4 +658,6 @@ module.exports = (io) => {
 			//
 		});
 	});
+
+	watchData();
 };

@@ -190,8 +190,6 @@ module.exports = (io) => {
 	nsp.on('connection', (socket) => {
 		socket.join(`user:${socket.user}`);
 
-		watchConfigurations();
-
 		if (state.shares) {
 			nsp.emit('shares', state.shares);
 		}
@@ -212,4 +210,6 @@ module.exports = (io) => {
 			//
 		});
 	});
+
+	watchConfigurations();
 };
