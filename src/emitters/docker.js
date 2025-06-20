@@ -189,7 +189,7 @@ const install = async (job) => {
 	await updateProgress(job, `${template.title} installation starting...`);
 	await updateProgress(job, `Downloading ${template.title} project template...`);
 	const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-	const stack = await response.json();
+	const stack = await response.text();
 	let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 	const composeProjectDir = path.join(composeDir, template.name);
 	await updateProgress(job, `Making ${template.title} project directory...`);
@@ -243,7 +243,7 @@ const update = async (job) => {
 	if (template) {
 		try {
 			const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-			const stack = await response.json();
+			const stack = await response.text();
 			await updateProgress(job, `Writing ${template.title} project template...`);
 			fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
 		} catch (error) {}
