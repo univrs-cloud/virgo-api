@@ -97,14 +97,20 @@ const scheduleUpsChecker = async () => {
 state.system = {
 	api: {
 		version
+	},
+	zfs: {
+		version: ''
 	}
 };
 si.system((system) => {
+	let stdout = childProcess.execSync('zfs version -j 2>/dev/null');
+	let zfs = JSON.parse(stdout);
+	state.system.zfs.version = zfs.zfs_version.kernel.replace('zfs-kmod-', '');
 	state.system = { ...state.system, ...system };
 });
 si.osInfo((osInfo) => {
 	let stdout = childProcess.execSync('hostname -f 2>/dev/null');
-	osInfo.fqdn = stdout.toString().split(os.EOL)[0]
+	osInfo.fqdn = stdout.toString().split(os.EOL)[0];
 	state.system.osInfo = osInfo;
 });
 si.cpu((cpu) => {
