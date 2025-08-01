@@ -451,8 +451,8 @@ const pollDrives = async (socket) => {
 				serialNumber: drive.serial_number,
 				capcity: drive.user_capacity,
 				temperature: drive.temperature.current,
-				temperatureWarningThreshold: nvme[index].wctemp,
-				temperatureCriticalThreshold: nvme[index].cctemp
+				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
+				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp: 99)
 			};
 		});
 	} catch (error) {
