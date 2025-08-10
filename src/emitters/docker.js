@@ -4,6 +4,7 @@ const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const path = require('path');
 const touch = require('touch');
+const changeCase = require('change-case');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
@@ -27,11 +28,20 @@ const worker = new Worker(
 		if (job.name === 'appUpdate') {
 			return await update(job);
 		}
-		if (job.name === 'performAppAction') {
+		if (job.name === 'appPerformAction') {
 			return await performAppAction(job);
 		}
-		if (job.name === 'performServiceAction') {
+		if (job.name === 'servicePerformAction') {
 			return await performServiceAction(job);
+		}
+		if (job.name === 'bookmarkCreate') {
+			return await createBookmark(job);
+		}
+		if (job.name === 'bookmarkUpdate') {
+			return await updateBookmark(job);
+		}
+		if (job.name === 'bookmarkDelete') {
+			return await deleteBookmark(job);
 		}
 		if (job.name === 'checkForUpdates') {
 			return await checkForUpdates();
@@ -186,6 +196,12 @@ const install = async (job) => {
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
+	let configuration = [...state.configured.configuration];
+	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
+	if (app) {
+		throw new Error(`App already installed.`);
+	}
+
 	await updateProgress(job, `${template.title} installation starting...`);
 	await updateProgress(job, `Downloading ${template.title} project template...`);
 	const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
@@ -206,8 +222,7 @@ const install = async (job) => {
 		}
 	});
 
-	let configuration = [...state.configured.configuration];
-	configuration = configuration.filter((configuration) => { return configuration.name !== template.name });
+	configuration = configuration.filter((entity) => { return entity.name !== template?.name });
 	configuration.push({
 		name: template.name,
 		type: 'app',
@@ -223,12 +238,11 @@ const install = async (job) => {
 
 const update = async (job) => {
 	let config = job.data.config;
-	let app = state.configured.configuration.find((app) => {
-		return app.name === config?.name;
-	});
+	let app = state.configured.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
 	if (!app) {
 		throw new Error(`App not found.`);
 	}
+
 	let template = state.templates.find((template) => {
 		return template.name === app.name;
 	});
@@ -290,9 +304,7 @@ const performAppAction = async (job) => {
 	}
 
 	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
-	let app = configuration.find((app) => {
-		return app.name === config?.name;
-	});
+	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
 	if (!app) {
 		throw new Error(`App not found.`);
 	}
@@ -310,7 +322,7 @@ const performAppAction = async (job) => {
 	}
 
 	if (config.action === 'remove') {
-		// configuration = configuration.filter((configuration) => { return configuration.name !== app.name });
+		// configuration = configuration.filter((entity) => { return entity.name !== config.name });
 		// fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	}
 
@@ -333,6 +345,64 @@ const performServiceAction = async (job) => {
 	await updateProgress(job, `${container.name} service is ${config.action}ing...`);
 	await docker.getContainer(container.id)[config.action]();
 	return `${container.name} service ${config.action}ed.`;
+};
+
+const createBookmark = async (job) => {
+	let config = job.data.config;
+	await updateProgress(job, `${config?.title} bookmark is creating...`);
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	configuration = configuration.filter((entity) => { return entity.url !== config?.url });
+	configuration.push({
+		name: changeCase.kebabCase(config.title),
+		type: 'bookmark',
+		canBeRemoved: true,
+		category: 'Productivity',
+		title: config.title,
+		icon: '',
+		url: config.url
+	});
+	await updateProgress(job, `Updating bookmarks configuration...`);
+	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	return `${config.title} bookmark created.`;
+};
+
+const updateBookmark = async (job) => {
+	let config = job.data.config;
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	let bookmark = configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
+	if (!bookmark) {
+		throw new Error(`Bookmark not found.`);
+	}
+
+	await updateProgress(job, `${bookmark.title} bookmark is updating...`);
+	configuration = configuration.filter((entity) => { return entity.name !== config?.name; });
+	configuration.push({
+		name: changeCase.kebabCase(config.title),
+		type: 'bookmark',
+		canBeRemoved: true,
+		category: 'Productivity',
+		title: config.title,
+		icon: '',
+		url: config.url
+	});
+	await updateProgress(job, `Updating bookmarks configuration...`);
+	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	return `${bookmark.title} bookmark updated.`;
+};
+
+const deleteBookmark = async (job) => {
+	let config = job.data.config;
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	let bookmark = configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
+	if (!bookmark) {
+		throw new Error(`Bookmark not found.`);
+	}
+
+	await updateProgress(job, `${bookmark.title} bookmark is deleting...`);
+	configuration = configuration.filter((entity) => { return entity.name !== config?.name });
+	await updateProgress(job, `Updating bookmarks configuration...`);
+	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	return `${bookmark.title} bookmark deleted.`;
 };
 
 const checkForUpdates = async () => {
@@ -634,7 +704,7 @@ module.exports = (io) => {
 		socket.on('performAppAction', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('performAppAction', { config, user: socket.user });
+					await queue.add('appPerformAction', { config, user: socket.user });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -644,7 +714,37 @@ module.exports = (io) => {
 		socket.on('performServiceAction', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('performServiceAction', { config, user: socket.user });
+					await queue.add('servicePerformAction', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
+			}
+		});
+
+		socket.on('createBookmark', async (config) => {
+			if (socket.isAuthenticated) {
+				try {
+					await queue.add('bookmarkCreate', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
+			}
+		});
+
+		socket.on('updateBookmark', async (config) => {
+			if (socket.isAuthenticated) {
+				try {
+					await queue.add('bookmarkUpdate', { config, user: socket.user });
+				} catch (error) {
+					console.error('Error starting job:', error);
+				};
+			}
+		});
+
+		socket.on('deleteBookmark', async (config) => {
+			if (socket.isAuthenticated) {
+				try {
+					await queue.add('bookmarkDelete', { config, user: socket.user });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
