@@ -1,24 +1,27 @@
 const { Queue, QueueEvents } = require('bullmq');
 
 const queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
+const eventsToListen = ['waiting', 'progress'];
 let nsp;
 
 queues.forEach((queueName) => {
 	const queue = new Queue(queueName);
 	const queueEvents = new QueueEvents(queueName);
-	queueEvents.on('progress', async (response) => {
-		try {
-			let job = await queue.getJob(response.jobId);
-			if (job) {
-				for (const socket of nsp.sockets.values()) {
-					if (socket.isAuthenticated) {
-						nsp.to(`user:${socket.user}`).emit('job', job);
-					}
-				};
+	eventsToListen.forEach((event) => {
+		queueEvents.on(event, async (response) => {
+			try {
+				let job = await queue.getJob(response.jobId);
+				if (job) {
+					for (const socket of nsp.sockets.values()) {
+						if (socket.isAuthenticated) {
+							nsp.to(`user:${socket.user}`).emit('job', job);
+						}
+					};
+				}
+			} catch (error) {
+				console.error(`Error processing job ${response.jobId}:`, error);
 			}
-		} catch (error) {
-			console.error(`Error processing job ${response.jobId}:`, error);
-		}
+		});
 	});
 });
 
