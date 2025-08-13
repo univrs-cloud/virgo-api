@@ -350,13 +350,14 @@ const performServiceAction = async (job) => {
 const createBookmark = async (job) => {
 	let config = job.data.config;
 	await updateProgress(job, `${config?.title} bookmark is creating...`);
+	
 	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 	configuration = configuration.filter((entity) => { return entity.url !== config?.url });
 	configuration.push({
 		name: changeCase.kebabCase(config.title),
 		type: 'bookmark',
 		canBeRemoved: true,
-		category: 'Productivity',
+		category: config.category,
 		title: config.title,
 		icon: '',
 		url: config.url
@@ -380,7 +381,7 @@ const updateBookmark = async (job) => {
 		name: changeCase.kebabCase(config.title),
 		type: 'bookmark',
 		canBeRemoved: true,
-		category: 'Productivity',
+		category: config.category,
 		title: config.title,
 		icon: '',
 		url: config.url
