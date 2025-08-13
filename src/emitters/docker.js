@@ -228,8 +228,8 @@ const install = async (job) => {
 		type: 'app',
 		canBeRemoved: true,
 		category: template.categories.find((_, index) => { return index === 0; }),
-		title: template.title,
-		icon: template.logo.split('/').pop()
+		icon: template.logo.split('/').pop(),
+		title: template.title
 	});
 	await updateProgress(job, `Updating apps configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
@@ -350,7 +350,6 @@ const performServiceAction = async (job) => {
 const createBookmark = async (job) => {
 	let config = job.data.config;
 	await updateProgress(job, `${config?.title} bookmark is creating...`);
-	
 	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 	configuration = configuration.filter((entity) => { return entity.url !== config?.url });
 	configuration.push({
@@ -358,8 +357,8 @@ const createBookmark = async (job) => {
 		type: 'bookmark',
 		canBeRemoved: true,
 		category: config.category,
-		title: config.title,
 		icon: '',
+		title: config.title,
 		url: config.url
 	});
 	await updateProgress(job, `Updating bookmarks configuration...`);
@@ -382,8 +381,8 @@ const updateBookmark = async (job) => {
 		type: 'bookmark',
 		canBeRemoved: true,
 		category: config.category,
-		title: config.title,
 		icon: '',
+		title: config.title,
 		url: config.url
 	});
 	await updateProgress(job, `Updating bookmarks configuration...`);
