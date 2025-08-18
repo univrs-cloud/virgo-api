@@ -413,11 +413,16 @@ const checkForUpdates = async () => {
 	containers = camelcaseKeys(containers, { deep: true });
 	containers.forEach(async ({ id, imageId }) => {
 		const image = images.find((image) => { return image.id === imageId });
+		if (image.repoDigests.length === 0) {
+			// console.log(`${imageName} has no local digest (likely built locally).`);
+			return;
+		}
+
+		const [, localDigest] = image.repoDigests[(image.repoDigests.length === 1 ? 0 : 1)].split('@');
 		const container = docker.getContainer(id);
 		let inspect = await container.inspect();
 		inspect = camelcaseKeys(inspect, { deep: true });
 		const imageName = inspect.config.image;
-		const [, localDigest] = image.repoDigests[0].split('@');
 		const registry = getRegistry(imageName);
 		let remoteDigest = null;
 		switch (registry) {
@@ -439,10 +444,8 @@ const checkForUpdates = async () => {
 			// console.log(`Could not fetch remote digest for ${imageName}`);
 			return;
 		}
-
-		if (!localDigest) {
-			// console.log(`${imageName} has no local digest (likely built locally).`);
-		} else if (localDigest !== remoteDigest) {
+		
+		if (localDigest !== remoteDigest) {
 			state.updates.push({ imageName: imageName, containerId: id });
 		}
 	});
