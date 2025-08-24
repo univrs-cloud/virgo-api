@@ -54,7 +54,9 @@ const watchConfiguration = () => {
 		return;
 	}
 
-	touch.sync(configurationFile);
+	if (!fs.existsSync(configurationFile)) {
+		touch.sync(configurationFile);
+	}
 
 	if (state.configuration === undefined) {
 		state.configuration = {};

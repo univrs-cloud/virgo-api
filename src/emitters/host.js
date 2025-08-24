@@ -196,7 +196,9 @@ const watchUpgradeLog = () => {
 		return;
 	}
 
-	touch.sync(upgradeFile);
+	if (!fs.existsSync(upgradeFile)) {
+		touch.sync(upgradeFile);
+	}
 
 	if (state.upgrade === undefined) {
 		state.upgrade = {
@@ -229,7 +231,9 @@ const watchUpgradeLog = () => {
 }
 
 const checkUpgrade = (socket) => {
-	touch.sync(upgradePidFile);
+	if (!fs.existsSync(upgradePidFile)) {
+		touch.sync(upgradePidFile);
+	}
 	let data = fs.readFileSync(upgradePidFile, { encoding: 'utf8', flag: 'r' });
 	data = data.trim();
 	if (data === '') {
@@ -496,7 +500,9 @@ const watchPowerSource = () => {
 		return;
 	}
 
-	touch.sync('/tmp/ups_power_source');
+	if (!fs.existsSync('/tmp/ups_power_source')) {
+		touch.sync('/tmp/ups_power_source');
+	}
 
 	readPowerSource();
 

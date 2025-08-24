@@ -115,7 +115,9 @@ const watchData = () => {
 		return;
 	}
 
-	touch.sync(dataFile);
+	if (!fs.existsSync(dataFile)) {
+		touch.sync(dataFile);
+	}
 
 	if (state.configured === undefined) {
 		state.configured = {};
