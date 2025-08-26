@@ -2,6 +2,8 @@ const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
+const stream = require('stream');
+const streamPipeline = util.promisify(stream.pipeline);
 const path = require('path');
 const touch = require('touch');
 const changeCase = require('change-case');
@@ -193,8 +195,7 @@ const install = async (job) => {
 		throw new Error(`App template not found.`);
 	}
 
-	if (template.type !== 3) {
-		// only docker compose is supported
+	if (template.type !== 3) { // only docker compose is supported
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
@@ -224,15 +225,19 @@ const install = async (job) => {
 		}
 	});
 
+	const icon = template.logo.split('/').pop();
+	const responseIcon = await fetch(template.logo);
+	await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
 	configuration = configuration.filter((entity) => { return entity.name !== template?.name });
-	configuration.push({
+	app = {
 		name: template.name,
 		type: 'app',
 		canBeRemoved: true,
 		category: template.categories.find((_, index) => { return index === 0; }),
-		icon: template.logo.split('/').pop(),
+		icon: icon,
 		title: template.title
-	});
+	};
+	configuration.push(app);
 	await updateProgress(job, `Updating apps configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	return `${template.title} installed.`;
@@ -262,6 +267,17 @@ const update = async (job) => {
 			const stack = await response.text();
 			await updateProgress(job, `Writing ${template.title} project template...`);
 			fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+			const icon = template.logo.split('/').pop();
+			const responseIcon = await fetch(template.logo);
+			await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
+			let configuration = [...state.configured.configuration];
+			configuration = configuration.map((entity) => {
+				if (entity.type === 'app' && entity.name === app.name) {
+					entity.icon = icon;
+				}
+				return entity;
+			});
+			fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 		} catch (error) {}
 	}
 
