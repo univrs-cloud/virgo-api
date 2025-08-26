@@ -18,7 +18,7 @@ let state = {};
 let dataFileWatcher;
 const docker = new dockerode();
 const composeDir = '/opt/docker';
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'remove'];
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'down'];
 const dataFile = '/var/www/virgo-api/data.json';
 const queue = new Queue('docker-jobs');
 const worker = new Worker(
@@ -199,7 +199,7 @@ const install = async (job) => {
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
-	let configuration = [...state.configured.configuration];
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
 	if (app) {
 		throw new Error(`App already installed.`);
@@ -270,7 +270,7 @@ const update = async (job) => {
 			const icon = template.logo.split('/').pop();
 			const responseIcon = await fetch(template.logo);
 			await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
-			let configuration = [...state.configured.configuration];
+			let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 			configuration = configuration.map((entity) => {
 				if (entity.type === 'app' && entity.name === app.name) {
 					entity.icon = icon;
@@ -333,16 +333,18 @@ const performAppAction = async (job) => {
 		return container.names.includes(`/${app.name}`);
 	});
 	composeProject = container.labels.comDockerComposeProject ?? false;
-	if (composeProject !== false) {
-		await exec(`docker compose -p ${composeProject} ${config.action}`)
-	} else {
-		await docker.getContainer(container.id)[config.action]();
+	if (composeProject === false) {
+		throw new Error(`${app.title} app is not set up perform ${config.action}.`);
 	}
 
-	if (config.action === 'remove') {
-		// configuration = configuration.filter((entity) => { return entity.name !== config.name });
-		// fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	await exec(`docker compose -p ${composeProject} ${config.action}`)
+	if (config.action === 'down') {
+		configuration = configuration.filter((entity) => { return entity.name !== config.name });
+		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	}
+	// } else {
+	// 	await docker.getContainer(container.id)[config.action]();
+	// }
 
 	return `${app.title} app ${config.action}ed.`;
 };
