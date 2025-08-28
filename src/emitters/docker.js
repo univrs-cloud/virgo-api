@@ -199,7 +199,7 @@ const install = async (job) => {
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
-	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	let configuration = [...state.configured?.configuration ?? []]; // need to clone so we don't modify the reference
 	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
 	if (app) {
 		throw new Error(`App already installed.`);
@@ -370,7 +370,7 @@ const performServiceAction = async (job) => {
 const createBookmark = async (job) => {
 	let config = job.data.config;
 	await updateProgress(job, `${config?.title} bookmark is creating...`);
-	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	let configuration = [...state.configured?.configuration ?? []]; // need to clone so we don't modify the reference
 	configuration = configuration.filter((entity) => { return entity.url !== config?.url });
 	configuration.push({
 		name: changeCase.kebabCase(config.title),
