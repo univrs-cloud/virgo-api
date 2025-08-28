@@ -199,9 +199,8 @@ const install = async (job) => {
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
-	let configuration = [...state.configured?.configuration ?? []]; // need to clone so we don't modify the reference
-	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
-	if (app) {
+	const existingApp = state.configured?.configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
+	if (existingApp) {
 		throw new Error(`App already installed.`);
 	}
 
@@ -228,8 +227,9 @@ const install = async (job) => {
 	const icon = template.logo.split('/').pop();
 	const responseIcon = await fetch(template.logo);
 	await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
-	configuration = configuration.filter((entity) => { return entity.name !== template?.name });
-	app = {
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	// configuration = configuration.filter((entity) => { return entity.name !== template?.name });
+	const app = {
 		name: template.name,
 		type: 'app',
 		canBeRemoved: true,
@@ -245,22 +245,22 @@ const install = async (job) => {
 
 const update = async (job) => {
 	let config = job.data.config;
-	let app = state.configured.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
-	if (!app) {
+	const existingApp = state.configured.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
+	if (!existingApp) {
 		throw new Error(`App not found.`);
 	}
 
 	let template = state.templates.find((template) => {
-		return template.name === app.name;
+		return template.name === config.name;
 	});
 
-	const container = state.containers.find((container) => { return container.name === app.name });
+	const container = state.containers.find((container) => { return container.name === config.name });
 	const composeProject = container.labels.comDockerComposeProject;
 	const composeProjectDir = container.labels.comDockerComposeProjectWorkingDir;
 	const composeProjectContainers = state.containers.filter((container) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});
-	await updateProgress(job, `${app.title} update starting...`);
+	await updateProgress(job, `${existingApp.title} update starting...`);
 	if (template) {
 		try {
 			const response = await fetch(getRawGitHubUrl(template.repository.url, template.repository.stackfile));
@@ -272,7 +272,7 @@ const update = async (job) => {
 			await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
 			let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 			configuration = configuration.map((entity) => {
-				if (entity.type === 'app' && entity.name === app.name) {
+				if (entity.type === 'app' && entity.name === config.name) {
 					entity.icon = icon;
 				}
 				return entity;
@@ -281,14 +281,14 @@ const update = async (job) => {
 		} catch (error) {}
 	}
 
-	await updateProgress(job, `Downloading ${app.title} updates...`);
+	await updateProgress(job, `Downloading ${existingApp.title} updates...`);
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
 			await updateProgress(job, chunk.toString());
 		}
 	});
-	await updateProgress(job, `Installing ${app.title} updates...`);
+	await updateProgress(job, `Installing ${existingApp.title} updates...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
@@ -301,7 +301,7 @@ const update = async (job) => {
 		return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
 	});
 	nsp.emit('updates', state.updates);
-	return `${app.title} updated.`;
+	return `${existingApp.title} updated.`;
 };
 
 const getRawGitHubUrl = (repositoryUrl, filePath, branch = 'main') => {
@@ -321,24 +321,24 @@ const performAppAction = async (job) => {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
 
-	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
-	let app = configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
-	if (!app) {
+	const existingApp = state.configured.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
+	if (!existingApp) {
 		throw new Error(`App not found.`);
 	}
 
-	await updateProgress(job, `${app.title} app is ${config.action}ing...`);
+	await updateProgress(job, `${existingApp.title} app is ${config.action}ing...`);
 
 	const container = state.containers.find((container) => {
-		return container.names.includes(`/${app.name}`);
+		return container.names.includes(`/${config.name}`);
 	});
 	composeProject = container.labels.comDockerComposeProject ?? false;
 	if (composeProject === false) {
-		throw new Error(`${app.title} app is not set up perform ${config.action}.`);
+		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
 	}
 
-	await exec(`docker compose -p ${composeProject} ${config.action}`)
+	await exec(`docker compose -p ${composeProject} ${config.action}`);
 	if (config.action === 'down') {
+		let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
 		configuration = configuration.filter((entity) => { return entity.name !== config.name });
 		fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	}
@@ -346,7 +346,7 @@ const performAppAction = async (job) => {
 	// 	await docker.getContainer(container.id)[config.action]();
 	// }
 
-	return `${app.title} app ${config.action}ed.`;
+	return `${existingApp.title} app ${config.action}ed.`;
 };
 
 const performServiceAction = async (job) => {
@@ -381,21 +381,20 @@ const createBookmark = async (job) => {
 		title: config.title,
 		url: config.url
 	});
-	await updateProgress(job, `Updating bookmarks configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
 	return `${config.title} bookmark created.`;
 };
 
 const updateBookmark = async (job) => {
 	let config = job.data.config;
-	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
-	let bookmark = configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
-	if (!bookmark) {
+	const existingBookmark = state.configured.configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
+	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);
 	}
 
-	await updateProgress(job, `${bookmark.title} bookmark is updating...`);
-	configuration = configuration.filter((entity) => { return entity.name !== config?.name; });
+	await updateProgress(job, `${existingBookmark.title} bookmark is updating...`);
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	configuration = configuration.filter((entity) => { return entity.name !== config.name; });
 	configuration.push({
 		name: changeCase.kebabCase(config.title),
 		type: 'bookmark',
@@ -405,24 +404,22 @@ const updateBookmark = async (job) => {
 		title: config.title,
 		url: config.url
 	});
-	await updateProgress(job, `Updating bookmarks configuration...`);
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
-	return `${bookmark.title} bookmark updated.`;
+	return `${existingBookmark.title} bookmark updated.`;
 };
 
 const deleteBookmark = async (job) => {
 	let config = job.data.config;
-	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
-	let bookmark = configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
-	if (!bookmark) {
+	const existingBookmark = state.configured.configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
+	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);
 	}
 
-	await updateProgress(job, `${bookmark.title} bookmark is deleting...`);
-	configuration = configuration.filter((entity) => { return entity.name !== config?.name });
-	await updateProgress(job, `Updating bookmarks configuration...`);
+	await updateProgress(job, `${existingBookmark.title} bookmark is deleting...`);
+	let configuration = [...state.configured.configuration]; // need to clone so we don't modify the reference
+	configuration = configuration.filter((entity) => { return entity.name !== config.name });
 	fs.writeFileSync(dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
-	return `${bookmark.title} bookmark deleted.`;
+	return `${existingBookmark.title} bookmark deleted.`;
 };
 
 const checkForUpdates = async () => {
