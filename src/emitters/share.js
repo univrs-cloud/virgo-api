@@ -173,7 +173,7 @@ const deleteShare = async (job) => {
 const handleShareAction = async (socket, action, config) => {
 	if (socket.isAuthenticated) {
 		try {
-			await queue.add(action, { config, user: socket.user });
+			await queue.add(action, { config, username: socket.username });
 		} catch (error) {
 			console.error(`Error starting job:`, error);
 		}
@@ -184,11 +184,11 @@ module.exports = (io) => {
 	nsp = io.of('/share');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		if (state.shares) {
 			nsp.emit('shares', state.shares);

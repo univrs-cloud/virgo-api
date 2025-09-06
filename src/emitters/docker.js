@@ -181,7 +181,7 @@ const fetchTemplates = async () => {
 
 	for (const socket of nsp.sockets.values()) {
 		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+			nsp.to(`user:${socket.username}`).emit('templates', state.templates);
 		}
 	};
 };
@@ -561,7 +561,7 @@ const terminalConnect = async (socket, id) => {
 
 	let shell = findContainerShell(id);
 	if (!shell) {
-		nsp.to(`user:${socket.user}`).emit('terminalError', 'No compatible shell found in container.');
+		nsp.to(`user:${socket.username}`).emit('terminalError', 'No compatible shell found in container.');
 		return;
 	}
 
@@ -589,8 +589,8 @@ const terminalConnect = async (socket, id) => {
 		const stdout = new require('stream').PassThrough();
 		const stderr = new require('stream').PassThrough();
 		docker.modem.demuxStream(stream, stdout, stderr);
-		stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
-		stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('terminalOutput', data.toString('utf8')) });
+		stdout.on('data', (data) => { nsp.to(`user:${socket.username}`).emit('terminalOutput', data.toString('utf8')) });
+		stderr.on('data', (data) => { nsp.to(`user:${socket.username}`).emit('terminalOutput', data.toString('utf8')) });
 		// Pipe client input to the container
 		socket.on('terminalInput', (data) => {
 			stream.write(data);
@@ -608,10 +608,10 @@ const terminalConnect = async (socket, id) => {
 		socket.on('disconnect', () => {
 			stream.destroy();
 		});
-		nsp.to(`user:${socket.user}`).emit('terminalConnected');
+		nsp.to(`user:${socket.username}`).emit('terminalConnected');
 	} catch (error) {
 		console.error(error);
-		nsp.to(`user:${socket.user}`).emit('terminalError', 'Failed to start container terminal stream.');
+		nsp.to(`user:${socket.username}`).emit('terminalError', 'Failed to start container terminal stream.');
 	}
 
 	function findContainerShell(id) {
@@ -652,8 +652,8 @@ const logsConnect = async (socket, id) => {
 		const stdout = new require('stream').PassThrough();
 		const stderr = new require('stream').PassThrough();
 		docker.modem.demuxStream(stream, stdout, stderr);
-		stdout.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
-		stderr.on('data', (data) => { nsp.to(`user:${socket.user}`).emit('logsOutput', data.toString('utf8')) });
+		stdout.on('data', (data) => { nsp.to(`user:${socket.username}`).emit('logsOutput', data.toString('utf8')) });
+		stderr.on('data', (data) => { nsp.to(`user:${socket.username}`).emit('logsOutput', data.toString('utf8')) });
 		// Client terminated the connection
 		socket.on('logslDisconnect', () => {
 			stream.destroy();
@@ -661,9 +661,9 @@ const logsConnect = async (socket, id) => {
 		socket.on('disconnect', () => {
 			stream.destroy();
 		});
-		nsp.to(`user:${socket.user}`).emit('logsConnected');
+		nsp.to(`user:${socket.username}`).emit('logsConnected');
 	} catch (error) {
-		nsp.to(`user:${socket.user}`).emit('logsError', 'Failed to start container logs stream.');
+		nsp.to(`user:${socket.username}`).emit('logsError', 'Failed to start container logs stream.');
 	}
 };
 
@@ -674,11 +674,11 @@ module.exports = (io) => {
 	nsp = io.of('/docker');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		if (state.configured) {
 			nsp.emit('configured', state.configured);
@@ -690,7 +690,7 @@ module.exports = (io) => {
 		}
 		if (state.templates) {
 			if (socket.isAuthenticated) {
-				nsp.to(`user:${socket.user}`).emit('templates', state.templates);
+				nsp.to(`user:${socket.username}`).emit('templates', state.templates);
 			}
 		} else {
 			fetchTemplates();
@@ -704,7 +704,7 @@ module.exports = (io) => {
 		socket.on('install', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('appInstall', { config, user: socket.user });
+					await queue.add('appInstall', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -714,7 +714,7 @@ module.exports = (io) => {
 		socket.on('update', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('appUpdate', { config, user: socket.user });
+					await queue.add('appUpdate', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -724,7 +724,7 @@ module.exports = (io) => {
 		socket.on('performAppAction', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('appPerformAction', { config, user: socket.user });
+					await queue.add('appPerformAction', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -734,7 +734,7 @@ module.exports = (io) => {
 		socket.on('performServiceAction', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('servicePerformAction', { config, user: socket.user });
+					await queue.add('servicePerformAction', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -744,7 +744,7 @@ module.exports = (io) => {
 		socket.on('createBookmark', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('bookmarkCreate', { config, user: socket.user });
+					await queue.add('bookmarkCreate', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -754,7 +754,7 @@ module.exports = (io) => {
 		socket.on('updateBookmark', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('bookmarkUpdate', { config, user: socket.user });
+					await queue.add('bookmarkUpdate', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};
@@ -764,7 +764,7 @@ module.exports = (io) => {
 		socket.on('deleteBookmark', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('bookmarkDelete', { config, user: socket.user });
+					await queue.add('bookmarkDelete', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				};

@@ -151,11 +151,11 @@ module.exports = (io) => {
 	nsp = io.of('/weather');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		if (state.weather) {
 			nsp.emit('weather', state.weather);

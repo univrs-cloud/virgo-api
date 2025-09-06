@@ -136,7 +136,7 @@ const updateUser = async (job) => {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
+	let authenticatedUser = state.users.find((user) => { return user.username === job.data.username; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
 		throw new Error(`Only the owner can update his own profile.`);
 	}
@@ -225,7 +225,7 @@ const changePassword = async (job) => {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	let authenticatedUser = state.users.find((user) => { return user.username === job.data.user; });
+	let authenticatedUser = state.users.find((user) => { return user.username === job.data.username; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
 		throw new Error(`Only the owner can change his own password.`);
 	}
@@ -282,15 +282,25 @@ const emitUsers = async () => {
 	await getUsers();
 	nsp.sockets.forEach((socket) => {
 		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('users', state.users);
+			if (!socket.isAdmin) {
+				nsp.to(`user:${socket.username}`).emit('users', state.users.filter((user) => { return user.username === socket.username; }));
+			} else {
+				nsp.to(`user:${socket.username}`).emit('users', state.users);
+			}
 		}
 	});
 };
 
 const handleUserAction = async (socket, action, config) => {
 	if (socket.isAuthenticated) {
+		if (!socket.isAdmin && ['createUser', 'deleteUser', 'lockUser', 'unlockUser'].includes(action)) {
+			return;
+		}
+		if (!socket.isAdmin && ['updateUser', 'changePassword'].includes(action) && socket.username !== config.username) {
+			return;
+		}
 		try {
-			await queue.add(action, { config, user: socket.user });
+			await queue.add(action, { config, username: socket.username });
 		} catch (error) {
 			console.error(`Error starting job:`, error);
 		}
@@ -301,15 +311,20 @@ module.exports = (io) => {
 	nsp = io.of('/user');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		if (state.users) {
 			if (socket.isAuthenticated) {
-				nsp.to(`user:${socket.user}`).emit('users', state.users);
+				if (!socket.isAdmin) {
+					nsp.to(`user:${socket.username}`).emit('users', state.users.filter((user) => { return user.username === socket.username; }));
+				} else {
+					nsp.to(`user:${socket.username}`).emit('users', state.users);
+				}
 			}
 		} else {
 			emitUsers();

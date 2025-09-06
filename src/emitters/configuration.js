@@ -94,7 +94,7 @@ const watchConfiguration = () => {
 			if (!socket.isAuthenticated) {
 				delete configuration.smtp;
 			}
-			nsp.to(`user:${socket.user}`).emit('configuration', configuration);
+			nsp.to(`user:${socket.username}`).emit('configuration', configuration);
 		};
 	};
 }
@@ -154,24 +154,24 @@ module.exports = (io) => {
 	nsp = io.of('/configuration');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		if (state.configuration) {
 			let configuration = { ...state.configuration };
 			if (!socket.isAuthenticated) {
 				delete configuration.smtp;
 			}
-			nsp.to(`user:${socket.user}`).emit('configuration', configuration);
+			nsp.to(`user:${socket.username}`).emit('configuration', configuration);
 		}
 
 		socket.on('location', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('setLocation', { config, user: socket.user });
+					await queue.add('setLocation', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				}
@@ -181,7 +181,7 @@ module.exports = (io) => {
 		socket.on('smtp', async (config) => {
 			if (socket.isAuthenticated) {
 				try {
-					await queue.add('setSmtp', { config, user: socket.user });
+					await queue.add('setSmtp', { config, username: socket.username });
 				} catch (error) {
 					console.error('Error starting job:', error);
 				}

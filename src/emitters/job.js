@@ -14,7 +14,7 @@ queues.forEach((queueName) => {
 				if (job) {
 					for (const socket of nsp.sockets.values()) {
 						if (socket.isAuthenticated) {
-							nsp.to(`user:${socket.user}`).emit('job', job);
+							nsp.to(`user:${socket.username}`).emit('job', job);
 						}
 					};
 				}
@@ -29,11 +29,11 @@ module.exports = (io) => {
 	nsp = io.of('/job');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		socket.on('disconnect', () => {
 			//

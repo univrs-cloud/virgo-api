@@ -171,14 +171,14 @@ const checkUpdates = async (socket) => {
 	}
 
 	state.checkUpdates = true;
-	nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+	nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
 	try {
 		await exec('apt update --allow-releaseinfo-change');
 		state.checkUpdates = false;
 		updates(socket);
 	} catch (error) {
 		state.checkUpdates = false;
-		nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+		nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
 	}
 };
 
@@ -310,7 +310,7 @@ const completeUpgrade = (socket) => {
 
 const updates = (socket) => {
 	if (!socket.isAuthenticated) {
-		nsp.to(`user:${socket.user}`).emit('updates', false);
+		nsp.to(`user:${socket.username}`).emit('updates', false);
 		return;
 	}
 
@@ -344,8 +344,8 @@ const checkForUpdates = async () => {
 
 	for (const socket of nsp.sockets.values()) {
 		if (socket.isAuthenticated) {
-			nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
-			nsp.to(`user:${socket.user}`).emit('updates', state.updates);
+			nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
+			nsp.to(`user:${socket.username}`).emit('updates', state.updates);
 		}
 	};
 	return ``;
@@ -569,11 +569,11 @@ module.exports = (io) => {
 	nsp = io.of('/host');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.user = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
 	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.user}`);
+		socket.join(`user:${socket.username}`);
 
 		checkUpgrade(socket);
 
@@ -586,11 +586,11 @@ module.exports = (io) => {
 		}
 		if (state.checkUpdates) {
 			if (socket.isAuthenticated) {
-				nsp.to(`user:${socket.user}`).emit('checkUpdates', state.checkUpdates);
+				nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
 			}
 		}
 		if (state.updates) {
-			nsp.to(`user:${socket.user}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
+			nsp.to(`user:${socket.username}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
 		} else {
 			checkForUpdates();
 		}
