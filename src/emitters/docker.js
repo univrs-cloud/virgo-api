@@ -550,7 +550,7 @@ const checkForUpdates = async () => {
 };
 
 const terminalConnect = async (socket, id) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -629,7 +629,7 @@ const terminalConnect = async (socket, id) => {
 };
 
 const logsConnect = async (socket, id) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -674,6 +674,7 @@ module.exports = (io) => {
 	nsp = io.of('/docker');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
 		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
@@ -702,73 +703,87 @@ module.exports = (io) => {
 		}
 
 		socket.on('install', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('appInstall', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('appInstall', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('update', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('appUpdate', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('appUpdate', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('performAppAction', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('appPerformAction', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('appPerformAction', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('performServiceAction', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('servicePerformAction', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('servicePerformAction', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('createBookmark', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('bookmarkCreate', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('bookmarkCreate', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('updateBookmark', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('bookmarkUpdate', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('bookmarkUpdate', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('deleteBookmark', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('bookmarkDelete', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				};
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
 			}
+
+			try {
+				await queue.add('bookmarkDelete', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
+			};
 		});
 
 		socket.on('terminalConnect', (id) => { terminalConnect(socket, id); });

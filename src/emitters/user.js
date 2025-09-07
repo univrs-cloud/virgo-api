@@ -292,18 +292,22 @@ const emitUsers = async () => {
 };
 
 const handleUserAction = async (socket, action, config) => {
-	if (socket.isAuthenticated) {
-		if (!socket.isAdmin && ['createUser', 'deleteUser', 'lockUser', 'unlockUser'].includes(action)) {
-			return;
-		}
-		if (!socket.isAdmin && ['updateUser', 'changePassword'].includes(action) && socket.username !== config.username) {
-			return;
-		}
-		try {
-			await queue.add(action, { config, username: socket.username });
-		} catch (error) {
-			console.error(`Error starting job:`, error);
-		}
+	if (!socket.isAuthenticated) {
+		return;
+	}
+
+	if (!socket.isAdmin && ['createUser', 'deleteUser', 'lockUser', 'unlockUser'].includes(action)) {
+		return;
+	}
+
+	if (!socket.isAdmin && ['updateUser', 'changePassword'].includes(action) && socket.username !== config.username) {
+		return;
+	}
+	
+	try {
+		await queue.add(action, { config, username: socket.username });
+	} catch (error) {
+		console.error(`Error starting job:`, error);
 	}
 };
 
