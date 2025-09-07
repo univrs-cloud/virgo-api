@@ -124,7 +124,7 @@ si.networkInterfaces((networkInterface) => {
 }, null, 'default');
 
 const reboot = async (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -143,7 +143,7 @@ const reboot = async (socket) => {
 };
 
 const shutdown = async (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -162,7 +162,7 @@ const shutdown = async (socket) => {
 };
 
 const checkUpdates = async (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -267,7 +267,7 @@ const checkUpgrade = (socket) => {
 };
 
 const upgrade = async (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -297,7 +297,7 @@ const upgrade = async (socket) => {
 };
 
 const completeUpgrade = (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
@@ -309,7 +309,7 @@ const completeUpgrade = (socket) => {
 };
 
 const updates = (socket) => {
-	if (!socket.isAuthenticated) {
+	if (!socket.isAuthenticated || !socket.isAdmin) {
 		nsp.to(`user:${socket.username}`).emit('updates', false);
 		return;
 	}
@@ -343,7 +343,7 @@ const checkForUpdates = async () => {
 	}
 
 	for (const socket of nsp.sockets.values()) {
-		if (socket.isAuthenticated) {
+		if (socket.isAuthenticated && socket.isAdmin) {
 			nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
 			nsp.to(`user:${socket.username}`).emit('updates', state.updates);
 		}
@@ -569,6 +569,7 @@ module.exports = (io) => {
 	nsp = io.of('/host');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
 		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
@@ -585,12 +586,12 @@ module.exports = (io) => {
 			nsp.emit('shutdown', false);
 		}
 		if (state.checkUpdates) {
-			if (socket.isAuthenticated) {
+			if (socket.isAuthenticated && socket.isAdmin) {
 				nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
 			}
 		}
 		if (state.updates) {
-			nsp.to(`user:${socket.username}`).emit('updates', (socket.isAuthenticated ? state.updates : []));
+			nsp.to(`user:${socket.username}`).emit('updates', (socket.isAuthenticated && socket.isAdmin ? state.updates : []));
 		} else {
 			checkForUpdates();
 		}

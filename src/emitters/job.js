@@ -13,7 +13,7 @@ queues.forEach((queueName) => {
 				let job = await queue.getJob(response.jobId);
 				if (job) {
 					for (const socket of nsp.sockets.values()) {
-						if (socket.isAuthenticated) {
+						if (socket.isAuthenticated && socket.isAdmin) {
 							nsp.to(`user:${socket.username}`).emit('job', job);
 						}
 					};
@@ -29,6 +29,7 @@ module.exports = (io) => {
 	nsp = io.of('/job');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
 		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});

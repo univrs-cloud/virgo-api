@@ -91,7 +91,7 @@ const watchConfiguration = () => {
 		}
 		let configuration = { ...state.configuration };
 		for (const socket of nsp.sockets.values()) {
-			if (!socket.isAuthenticated) {
+			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;
 			}
 			nsp.to(`user:${socket.username}`).emit('configuration', configuration);
@@ -154,6 +154,7 @@ module.exports = (io) => {
 	nsp = io.of('/configuration');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
 		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
@@ -162,29 +163,33 @@ module.exports = (io) => {
 
 		if (state.configuration) {
 			let configuration = { ...state.configuration };
-			if (!socket.isAuthenticated) {
+			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;
 			}
 			nsp.to(`user:${socket.username}`).emit('configuration', configuration);
 		}
 
 		socket.on('location', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('setLocation', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				}
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			try {
+				await queue.add('setLocation', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
 			}
 		});
 
 		socket.on('smtp', async (config) => {
-			if (socket.isAuthenticated) {
-				try {
-					await queue.add('setSmtp', { config, username: socket.username });
-				} catch (error) {
-					console.error('Error starting job:', error);
-				}
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			try {
+				await queue.add('setSmtp', { config, username: socket.username });
+			} catch (error) {
+				console.error('Error starting job:', error);
 			}
 		});
 

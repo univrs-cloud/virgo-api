@@ -151,6 +151,7 @@ module.exports = (io) => {
 	nsp = io.of('/weather');
 	nsp.use((socket, next) => {
 		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
+		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
 		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
 		next();
 	});
