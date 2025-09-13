@@ -1,43 +1,39 @@
 const { Queue, QueueEvents } = require('bullmq');
+const BaseEmitter = require('./base');
 
-const queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
-const eventsToListen = ['waiting', 'progress'];
-let nsp;
+class JobEmitter extends BaseEmitter {
+	#queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
 
-queues.forEach((queueName) => {
-	const queue = new Queue(queueName);
-	const queueEvents = new QueueEvents(queueName);
-	eventsToListen.forEach((event) => {
-		queueEvents.on(event, async (response) => {
-			try {
-				let job = await queue.getJob(response.jobId);
-				if (job) {
-					for (const socket of nsp.sockets.values()) {
-						if (socket.isAuthenticated && socket.isAdmin) {
-							nsp.to(`user:${socket.username}`).emit('job', job);
+	constructor(io) {
+		super(io, 'job');
+		this.#watchQueues();
+	}
+
+	#watchQueues() {
+		const eventsToListen = ['waiting', 'progress'];
+		this.#queues.forEach((queueName) => {
+			const queue = new Queue(queueName);
+			const queueEvents = new QueueEvents(queueName);
+			eventsToListen.forEach((event) => {
+				queueEvents.on(event, async (response) => {
+					try {
+						let job = await queue.getJob(response.jobId);
+						if (job) {
+							for (const socket of this.getNsp().sockets.values()) {
+								if (socket.isAuthenticated && socket.isAdmin) {
+									this.getNsp().to(`user:${socket.username}`).emit('job', job);
+								}
+							};
 						}
-					};
-				}
-			} catch (error) {
-				console.error(`Error processing job ${response.jobId}:`, error);
-			}
-		});
-	});
-});
+					} catch (error) {
+						console.error(`Error processing job ${response.jobId}:`, error);
+					}
+				});
+			});
+		});	
+	}
+}
 
 module.exports = (io) => {
-	nsp = io.of('/job');
-	nsp.use((socket, next) => {
-		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
-		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
-		next();
-	});
-	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.username}`);
-
-		socket.on('disconnect', () => {
-			//
-		});
-	});
+	return new JobEmitter(io);
 };
