@@ -57,13 +57,16 @@ class ConfigurationEmitter extends BaseEmitter {
 			let data = fs.readFileSync(this.#configurationFile, { encoding: 'utf8', flag: 'r' });
 			data = data.trim();
 			if (data === '') {
-				this.setState('configuration', {
-					location: {
-						latitude: '45.749',
-						longitude: '21.227'
-					},
-					smtp: null
-				});
+				this.setState(
+					'configuration',
+					{
+						location: {
+							latitude: '45.749',
+							longitude: '21.227'
+						},
+						smtp: null
+					}
+				);
 			} else {
 				this.setState('configuration', JSON.parse(data));
 			}

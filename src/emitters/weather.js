@@ -1,165 +1,138 @@
 const fs = require('fs');
 const touch = require('touch');
-const { Queue, Worker } = require('bullmq');
+const BaseEmitter = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 
-let nsp;
-let state = {};
-let configurationWatcher;
-let request = null;
-let fetchRetries = 3;
-const fetchDelay = 10000;
-const configurationFile = '/var/www/virgo-api/configuration.json';
-const queue = new Queue('weather-jobs');
-const worker = new Worker(
-	'weather-jobs',
-	async (job) => {
+class WeatherEmitter extends BaseEmitter {
+	#configurationWatcher;
+	#configurationFile = '/var/www/virgo-api/configuration.json';
+	#request = null;
+	#fetchRetries = 3;
+	#fetchDelay = 10000;
+
+	constructor(io) {
+		super(io, 'weather');
+		this.#watchConfiguration();
+		this.#scheduleWeatherFetcher();
+	}
+
+	onConnection(socket) {
+		if (this.getState('weather')) {
+			this.getNsp().emit('weather', this.getState('weather'));
+		}
+	}
+
+	async processJob(job) {
 		if (job.name === 'fetchWeather') {
-			return await fetchWeather();
-		}
-	},
-	{
-		connection: {
-			host: 'localhost',
-			port: 6379,
+			this.#fetchRetries = 3;
+			return await this.#fetchWeather();
 		}
 	}
-);
-worker.on('error', (error) => {
-	console.error(error);
-});
 
-const scheduleWeatherFetcher = async () => {
-	try {
-		await queue.upsertJobScheduler(
-			'weatherFetcher',
-			{ pattern: '0 1 * * * *' },
-			{
-				name: 'fetchWeather',
-				opts: {
-					removeOnComplete: 1
-				}
+	#watchConfiguration() {
+		const readFile = () => {
+			let data = fs.readFileSync(this.#configurationFile, { encoding: 'utf8', flag: 'r' });
+			data = data.trim();
+			if (data === '') {
+				this.setState(
+					'configuration',
+					{
+						location: {
+							latitude: '45.749',
+							longitude: '21.227'
+						}
+					}
+				);
+			} else {
+				this.setState('configuration', JSON.parse(data));
 			}
-		);
-	} catch (error) {
-		console.error('Error starting job:', error);
-	};
-};
+			this.#fetchWeather();
+		};
 
-const watchConfiguration = () => {
-	if (configurationWatcher) {
-		return;
-	}
-
-	if (!fs.existsSync(configurationFile)) {
-		touch.sync(configurationFile);
-	}
-
-	if (state.configuration === undefined) {
-		state.configuration = {};
-		readFile();
-	}
-
-	configurationWatcher = new FileWatcher(configurationFile);
-	configurationWatcher
-		.onChange((event, path) => {
-			readFile();
-		});
-
-	function readFile() {
-		let data = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
-		data = data.trim();
-		if (data === '') {
-			state.configuration = {
-				location: {
-					latitude: '45.749',
-					longitude: '21.227'
-				}
-			};
-		} else {
-			state.configuration = JSON.parse(data);
-		}
-		fetchWeather();
-	};
-}
-
-const fetchWeather = async () => {
-	if (request || state.configuration === null) {
-		return;
-	}
-
-	const latitude = state.configuration.location.latitude;
-	const longitude = state.configuration.location.longitude;
-	let weather;
-	try {
-		request = true;
-		fetchRetries = 3;
-		
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => { controller.abort(); }, 30000); // 30 second timeout
-		const weatherResponse = await fetch(
-			`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=sunrise,sunset&hourly=temperature_2m,precipitation_probability&current_weather=true&temperature_unit=celsius&timezone=auto`,
-			{
-				signal: controller.signal
-			}
-		);
-		
-		clearTimeout(timeoutId);
-		
-		if (!weatherResponse.ok) {
-			throw new Error(`HTTP error! status: ${weatherResponse.status}`);
-		}
-		
-		weather = await weatherResponse.json();
-	} catch (error) {
-		console.error('Weather fetch error:', error.message);
-		if (error.name === 'AbortError') {
-			console.error('Request timed out after 30 seconds');
-		}
-		fetchRetries--;
-		weather = false;
-	} finally {
-		request = null;
-		if (weather === false && fetchRetries > 0) {
-			console.log(`Retrying weather fetch in ${fetchDelay}ms. Attempts remaining: ${fetchRetries}`);
-			setTimeout(() => {
-				fetchWeather();
-			}, fetchDelay);
+		if (this.#configurationWatcher) {
 			return;
 		}
-	};
 	
-	if (weather) {
-		state.weather = weather;
-		nsp.emit('weather', state.weather);
-	} else {
-		console.error('Failed to fetch weather data after all retry attempts');
+		if (!fs.existsSync(this.#configurationFile)) {
+			touch.sync(this.#configurationFile);
+		}
+	
+		if (this.getState('configuration') === undefined) {
+			this.setState('configuration', {});
+			readFile();
+		}
+	
+		this.#configurationWatcher = new FileWatcher(this.#configurationFile);
+		this.#configurationWatcher
+			.onChange((event, path) => {
+				readFile();
+			});
 	}
-	
-	return ``;
-};
 
-scheduleWeatherFetcher();
+	async #scheduleWeatherFetcher() {
+		this.addJobSchedule(
+			'fetchWeather',
+			{ pattern: '0 1 * * * *' }
+		);
+	}	
+
+	async #fetchWeather() {
+		if (this.#request || this.getState('configuration') === undefined) {
+			return;
+		}
+	
+		let configuration = this.getState('configuration');
+		const latitude = configuration.location.latitude;
+		const longitude = configuration.location.longitude;
+		let weather;
+		try {
+			this.#request = true;
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => { controller.abort(); }, 30000); // 30 second timeout
+			const weatherResponse = await fetch(
+				`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=sunrise,sunset&hourly=temperature_2m,precipitation_probability&current_weather=true&temperature_unit=celsius&timezone=auto`,
+				{
+					signal: controller.signal
+				}
+			);
+			
+			clearTimeout(timeoutId);
+			
+			if (!weatherResponse.ok) {
+				throw new Error(`HTTP error! status: ${weatherResponse.status}`);
+			}
+			
+			weather = await weatherResponse.json();
+		} catch (error) {
+			console.error('Weather fetch error:', error.message);
+			if (error.name === 'AbortError') {
+				console.error('Request timed out after 30 seconds');
+			}
+			weather = false;
+			this.#fetchRetries--;
+		} finally {
+			this.#request = null;
+			if (weather === false && this.#fetchRetries >= 0) {
+				console.log(`Retrying weather fetch in ${this.#fetchDelay}ms. Attempts remaining: ${this.#fetchRetries}`);
+				setTimeout(() => {
+					this.#fetchWeather();
+				}, this.#fetchDelay);
+				return;
+			}
+		};
+		
+		if (weather) {
+			this.#fetchRetries = 3;
+			this.setState('weather', weather);
+			this.getNsp().emit('weather', this.getState('weather'));
+		} else {
+			console.error('Failed to fetch weather data after all retry attempts');
+		}
+		
+		return ``;
+	}
+}
 
 module.exports = (io) => {
-	nsp = io.of('/weather');
-	nsp.use((socket, next) => {
-		socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-		socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
-		socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
-		next();
-	});
-	nsp.on('connection', (socket) => {
-		socket.join(`user:${socket.username}`);
-
-		if (state.weather) {
-			nsp.emit('weather', state.weather);
-		}
-
-		socket.on('disconnect', () => {
-			//
-		});
-	});
-
-	watchConfiguration();
+	return new WeatherEmitter(io);
 };

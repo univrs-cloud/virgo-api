@@ -37,6 +37,22 @@ class BaseEmitter {
 		}
 	}
 
+	async addJobSchedule(name, pattern) {
+		try {
+			await this.#queue.upsertJobScheduler(
+				name,
+				pattern,
+				{
+					opts: {
+						removeOnComplete: 1
+					}
+				}
+			);
+		} catch (error) {
+			console.error('Error starting job:', error);
+		};
+	}
+
 	async processJob(job) {
 		throw new Error('processJob must be implemented by subclasses');
 	}

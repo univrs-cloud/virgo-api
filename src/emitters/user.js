@@ -13,7 +13,6 @@ class UserEmitter extends BaseEmitter {
 
 	constructor(io) {
 		super(io, 'user');
-		
 	}
 
 	onConnection(socket) {
