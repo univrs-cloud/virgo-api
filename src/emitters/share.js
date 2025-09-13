@@ -3,13 +3,13 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
-const chokidar = require('chokidar');
+const FileWatcher = require('../utils/file_watcher');
 const { Queue, Worker } = require('bullmq');
 
 let nsp;
 let state = {};
 let configurationWatcher;
-const configurations = [
+const configurationFiles = [
 	'/etc/samba/smb.conf',
 	'/messier/.shares'
 ];
@@ -63,20 +63,14 @@ const watchConfigurations = async () => {
 		getShares();
 	}
 
-	configurationWatcher = chokidar.watch([], {
-		persistent: true,
-		ignoreInitial: true
-	});
+	configurationWatcher = new FileWatcher([]);
 	configurationWatcher
-		.on('all', async (event, path) => {
+		.onChange(async (event, path) => {
 			await exec(`smbcontrol all reload-config`);
 			getShares();
-		})
-		.on('error', (error) => {
-			console.error(`Watcher error: ${error}`);
 		});
 
-	configurations.forEach(configurationPath => {
+	configurationFiles.forEach(configurationPath => {
 		try {
 			fs.accessSync(configurationPath);
 			configurationWatcher.add(configurationPath);
@@ -87,7 +81,7 @@ const watchConfigurations = async () => {
 
 	const retryInterval = setInterval(() => {
 		let allWatched = true;
-		configurations.forEach(configurationPath => {
+		configurationFiles.forEach(configurationPath => {
 			try {
 				fs.accessSync(configurationPath);
 				// If path exists but not being watched, add it
