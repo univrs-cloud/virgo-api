@@ -17,12 +17,12 @@ class FileWatcher {
 			...this.#options,
 			...options
 		};
-		this.start();
+		return this.start();
 	}
 
 	start() {
 		if (this.#watcher) {
-			return;
+			return this;
 		}
 
 		this.#watcher = chokidar.watch(this.#toWatch, this.options);
@@ -36,9 +36,9 @@ class FileWatcher {
 		return this;
 	}
 
-	stop() {
+	async stop() {
 		if (this.#watcher) {
-			this.#watcher.close();
+			await this.#watcher.close();
 			this.#watcher = null;
 		}
 		return this;

@@ -10,8 +10,8 @@ const changeCase = require('change-case');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
-const chokidar = require('chokidar');
 const { Queue, Worker } = require('bullmq');
+const FileWatcher = require('../utils/file_watcher');
 
 let nsp;
 let state = {};
@@ -126,16 +126,10 @@ const watchData = () => {
 		readFile();
 	}
 
-	dataFileWatcher = chokidar.watch(dataFile, {
-		persistent: true,
-		ignoreInitial: true
-	});
+	dataFileWatcher = new FileWatcher(dataFile);
 	dataFileWatcher
-		.on('all', (event, path) => {
+		.onChange((event, path) => {
 			readFile();
-		})
-		.on('error', (error) => {
-			console.error(`Watcher error: ${error}`);
 		});
 
 	function readFile() {

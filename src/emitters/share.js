@@ -3,8 +3,8 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
-const FileWatcher = require('../utils/file_watcher');
 const { Queue, Worker } = require('bullmq');
+const FileWatcher = require('../utils/file_watcher');
 
 let nsp;
 let state = {};

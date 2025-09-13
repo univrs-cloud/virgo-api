@@ -7,8 +7,8 @@ const touch = require('touch');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../../package.json');
-const chokidar = require('chokidar');
 const { Queue, Worker } = require('bullmq');
+const FileWatcher = require('../utils/file_watcher');
 let i2c = false;
 try {
 	({ I2C } = require('raspi-i2c'));
@@ -208,16 +208,10 @@ const watchUpgradeLog = () => {
 		readUpgradeLog();
 	}
 
-	upgradeLogsWatcher = chokidar.watch(upgradeFile, {
-		persistent: true,
-		ignoreInitial: true
-	});
+	upgradeLogsWatcher = new FileWatcher(upgradeFile);
 	upgradeLogsWatcher
-		.on('all', (event, path) => {
+		.onChange((event, path) => {
 			readUpgradeLog();
-		})
-		.on('error', (error) => {
-			console.error(`Watcher error: ${error}`);
 		});
 
 	function readUpgradeLog() {
@@ -258,7 +252,7 @@ const checkUpgrade = (socket) => {
 
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
-		await upgradeLogsWatcher?.close();
+		await upgradeLogsWatcher?.stop();
 		upgradeLogsWatcher = undefined;
 		state.upgrade.state = 'succeeded';
 		nsp.emit('upgrade', state.upgrade);
@@ -286,7 +280,7 @@ const upgrade = async (socket) => {
 		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove > /var/www/virgo-api/upgrade.log 2>&1"`);
 		checkUpgrade(socket);
 	} catch (error) {
-		await upgradeLogsWatcher?.close();
+		await upgradeLogsWatcher?.stop();
 		upgradeLogsWatcher = undefined;
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
@@ -506,16 +500,10 @@ const watchPowerSource = () => {
 
 	readPowerSource();
 
-	powerSourceWatcher = chokidar.watch('/tmp/ups_power_source', {
-		persistent: true,
-		ignoreInitial: true
-	});
+	powerSourceWatcher = new FileWatcher('/tmp/ups_power_source');
 	powerSourceWatcher
-		.on('all', (event, path) => {
+		.onChange((event, path) => {
 			readPowerSource();
-		})
-		.on('error', (error) => {
-			console.error(`Watcher error: ${error}`);
 		});
 
 	function readPowerSource() {

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const touch = require('touch');
-const chokidar = require('chokidar');
 const { Queue, Worker } = require('bullmq');
+const FileWatcher = require('../utils/file_watcher');
 
 let nsp;
 let state = {};
@@ -60,16 +60,10 @@ const watchConfiguration = () => {
 		readFile();
 	}
 
-	configurationWatcher = chokidar.watch(configurationFile, {
-		persistent: true,
-		ignoreInitial: true
-	});
+	configurationWatcher = new FileWatcher(configurationFile);
 	configurationWatcher
-		.on('all', (event, path) => {
+		.onChange((event, path) => {
 			readFile();
-		})
-		.on('error', (error) => {
-			console.error(`Watcher error: ${error}`);
 		});
 
 	function readFile() {
