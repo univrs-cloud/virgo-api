@@ -18,7 +18,7 @@ class ConfigurationEmitter extends BaseEmitter {
 	}
 
 	onConnection(socket) {
-		if (this.getState('configuration') !== undefined) {
+		if (this.getState('configuration')) {
 			let configuration = { ...this.getState('configuration') };
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;

@@ -1,5 +1,4 @@
 const fs = require('fs');
-const touch = require('touch');
 const chokidar = require('chokidar');
 
 class FileWatcher {
