@@ -76,7 +76,7 @@ class ConfigurationEmitter extends BaseEmitter {
 					delete configuration.smtp;
 				}
 				this.getNsp().to(`user:${socket.username}`).emit('configuration', configuration);
-			};
+			}
 		};
 		
 		if (this.#configurationWatcher) {
@@ -153,7 +153,7 @@ class ConfigurationEmitter extends BaseEmitter {
 	ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"\n`;
 		}
 	}
-};
+}
 
 module.exports = (io) => {
 	return new ConfigurationEmitter(io);

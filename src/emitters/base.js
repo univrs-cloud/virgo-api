@@ -50,7 +50,7 @@ class BaseEmitter {
 			);
 		} catch (error) {
 			console.error('Error starting job:', error);
-		};
+		}
 	}
 
 	async processJob(job) {

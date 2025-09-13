@@ -119,7 +119,7 @@ class WeatherEmitter extends BaseEmitter {
 				}, this.#fetchDelay);
 				return;
 			}
-		};
+		}
 		
 		if (weather) {
 			this.#fetchRetries = 3;

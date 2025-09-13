@@ -23,7 +23,7 @@ class JobEmitter extends BaseEmitter {
 								if (socket.isAuthenticated && socket.isAdmin) {
 									this.getNsp().to(`user:${socket.username}`).emit('job', job);
 								}
-							};
+							}
 						}
 					} catch (error) {
 						console.error(`Error processing job ${response.jobId}:`, error);
