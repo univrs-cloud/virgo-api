@@ -2,7 +2,6 @@ const { Queue, Worker } = require('bullmq');
 
 class BaseEmitter {
 	#name;
-	#namespace;
 	#io;
 	#nsp;
 	#state = {};
@@ -11,9 +10,8 @@ class BaseEmitter {
 
 	constructor(io, name, options = {}) {
 		this.#name = name;
-		this.#namespace = `/${this.#name}`;
 		this.#io = io;
-		this.#nsp = this.#io.of(this.#namespace);
+		this.#nsp = this.#io.of(`/${this.#name}`);
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		this.#setupQueues();
