@@ -44,27 +44,27 @@ class UserEmitter extends BaseEmitter {
 			this.#emitUsers();
 		}
 
-		socket.on('create', async (config) => {
+		socket.on('user:create', async (config) => {
 			await handleUserAction(socket, 'createUser', config);
 		});
 
-		socket.on('update', async (config) => {
+		socket.on('user:update', async (config) => {
 			await handleUserAction(socket, 'updateUser', config);
 		});
 
-		socket.on('delete', async (config) => {
+		socket.on('user:delete', async (config) => {
 			await handleUserAction(socket, 'deleteUser', config);
 		});
 
-		socket.on('lock', async (config) => {
+		socket.on('user:lock', async (config) => {
 			await handleUserAction(socket, 'lockUser', config);
 		});
 
-		socket.on('unlock', async (config) => {
+		socket.on('user:unlock', async (config) => {
 			await handleUserAction(socket, 'unlockUser', config);
 		});
 
-		socket.on('password', async (config) => {
+		socket.on('user:password', async (config) => {
 			await handleUserAction(socket, 'changePassword', config);
 		});
 	}

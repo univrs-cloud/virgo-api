@@ -26,7 +26,7 @@ class ConfigurationEmitter extends BaseEmitter {
 			this.getNsp().to(`user:${socket.username}`).emit('configuration', configuration);
 		}
 
-		socket.on('location', async (config) => {
+		socket.on('configuration:location:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -34,7 +34,7 @@ class ConfigurationEmitter extends BaseEmitter {
 			await this.addJob('setLocation', { config, username: socket.username });
 		});
 
-		socket.on('smtp', async (config) => {
+		socket.on('configuration:smtp:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}

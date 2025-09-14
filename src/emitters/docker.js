@@ -30,27 +30,27 @@ class DockerEmitter extends BaseEmitter {
 
 	onConnection(socket) {
 		if (this.getState('configured')) {
-			this.getNsp().emit('configured', this.getState('configured'));
+			this.getNsp().emit('app:configured', this.getState('configured'));
 		}
 		if (this.getState('containers')) {
-			this.getNsp().emit('containers', this.getState('containers'));
+			this.getNsp().emit('app:containers', this.getState('containers'));
 		} else {
 			this.#pollContainers(socket);
 		}
 		if (this.getState('templates')) {
 			if (socket.isAuthenticated) {
-				this.getNsp().to(`user:${socket.username}`).emit('templates', this.getState('templates'));
+				this.getNsp().to(`user:${socket.username}`).emit('app:templates', this.getState('templates'));
 			}
 		} else {
 			this.#fetchTemplates();
 		}
 		if (this.getState('updates')) {
-			this.getNsp().emit('updates', this.getState('updates'));
+			this.getNsp().emit('app:updates', this.getState('updates'));
 		} else {
 			this.#checkForUpdates();
 		}
 
-		socket.on('install', async (config) => {
+		socket.on('app:install', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -58,7 +58,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('appInstall', { config, username: socket.username });
 		});
 
-		socket.on('update', async (config) => {
+		socket.on('app:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -66,7 +66,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('appUpdate', { config, username: socket.username });
 		});
 
-		socket.on('performAppAction', async (config) => {
+		socket.on('app:performAction', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -74,7 +74,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('appPerformAction', { config, username: socket.username });
 		});
 
-		socket.on('performServiceAction', async (config) => {
+		socket.on('service:performAction', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -82,7 +82,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('servicePerformAction', { config, username: socket.username });
 		});
 
-		socket.on('createBookmark', async (config) => {
+		socket.on('bookmark:create', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -90,7 +90,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('bookmarkCreate', { config, username: socket.username });
 		});
 
-		socket.on('updateBookmark', async (config) => {
+		socket.on('bookmark:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -98,7 +98,7 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('bookmarkUpdate', { config, username: socket.username });
 		});
 
-		socket.on('deleteBookmark', async (config) => {
+		socket.on('bookmark:delete', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
@@ -106,8 +106,8 @@ class DockerEmitter extends BaseEmitter {
 			await this.addJob('bookmarkDelete', { config, username: socket.username });
 		});
 
-		socket.on('terminalConnect', (id) => { this.#terminalConnect(socket, id); });
-		socket.on('logsConnect', (id) => { this.#logsConnect(socket, id); });
+		socket.on('terminal:connect', (id) => { this.#terminalConnect(socket, id); });
+		socket.on('logs:connect', (id) => { this.#logsConnect(socket, id); });
 	}
 
 	async processJob(job) {
@@ -146,7 +146,7 @@ class DockerEmitter extends BaseEmitter {
 			data = data.trim();
 			if (data !== '') {
 				this.setState('configured', JSON.parse(data));
-				this.getNsp().emit('configured', this.getState('configured'));
+				this.getNsp().emit('app:configured', this.getState('configured'));
 			}
 		};
 
@@ -230,7 +230,7 @@ class DockerEmitter extends BaseEmitter {
 				this.setState('updates', updates);
 			}
 		});
-		this.getNsp().emit('updates', this.getState('updates'));
+		this.getNsp().emit('app:updates', this.getState('updates'));
 		return ``;
 	
 		function getRegistry(imageName) {
@@ -324,7 +324,7 @@ class DockerEmitter extends BaseEmitter {
 	
 		for (const socket of this.getNsp().sockets.values()) {
 			if (socket.isAuthenticated) {
-				this.getNsp().to(`user:${socket.username}`).emit('templates', this.getState('templates'));
+				this.getNsp().to(`user:${socket.username}`).emit('app:templates', this.getState('templates'));
 			}
 		}
 	}
@@ -347,7 +347,7 @@ class DockerEmitter extends BaseEmitter {
 			this.setState('containers', false);
 		}
 	
-		this.getNsp().emit('containers', this.getState('containers'));
+		this.getNsp().emit('app:containers', this.getState('containers'));
 		setTimeout(() => { this.#pollContainers(socket); }, 2000);
 	}
 
@@ -461,7 +461,7 @@ class DockerEmitter extends BaseEmitter {
 			return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
 		});
 		this.setState('updates', updates);
-		this.getNsp().emit('updates', this.getState('updates'));
+		this.getNsp().emit('app:updates', this.getState('updates'));
 		return `${existingApp.title} updated.`;
 	}
 
@@ -584,7 +584,7 @@ class DockerEmitter extends BaseEmitter {
 	
 		let shell = findContainerShell(id);
 		if (!shell) {
-			this.getNsp().to(`user:${socket.username}`).emit('terminalError', 'No compatible shell found in container.');
+			this.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'No compatible shell found in container.');
 			return;
 		}
 	
@@ -612,29 +612,29 @@ class DockerEmitter extends BaseEmitter {
 			const stdout = new require('stream').PassThrough();
 			const stderr = new require('stream').PassThrough();
 			docker.modem.demuxStream(stream, stdout, stderr);
-			stdout.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('terminalOutput', data.toString('utf8')) });
-			stderr.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('terminalOutput', data.toString('utf8')) });
+			stdout.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
+			stderr.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
 			// Pipe client input to the container
-			socket.on('terminalInput', (data) => {
+			socket.on('terminal:input', (data) => {
 				stream.write(data);
 			});
-			socket.on('terminalResize', (size) => {
+			socket.on('terminal:resize', (size) => {
 				exec.resize({
 					h: size.rows,
 					w: size.cols
 				});
 			});
 			// Client terminated the connection
-			socket.on('terminalDisconnect', () => {
+			socket.on('terminal:disconnect', () => {
 				stream.destroy();
 			});
 			socket.on('disconnect', () => {
 				stream.destroy();
 			});
-			this.getNsp().to(`user:${socket.username}`).emit('terminalConnected');
+			this.getNsp().to(`user:${socket.username}`).emit('terminal:connected');
 		} catch (error) {
 			console.error(error);
-			this.getNsp().to(`user:${socket.username}`).emit('terminalError', 'Failed to start container terminal stream.');
+			this.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'Failed to start container terminal stream.');
 		}
 	
 		function findContainerShell(id) {
@@ -675,18 +675,18 @@ class DockerEmitter extends BaseEmitter {
 			const stdout = new require('stream').PassThrough();
 			const stderr = new require('stream').PassThrough();
 			docker.modem.demuxStream(stream, stdout, stderr);
-			stdout.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('logsOutput', data.toString('utf8')) });
-			stderr.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('logsOutput', data.toString('utf8')) });
+			stdout.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
+			stderr.on('data', (data) => { this.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
 			// Client terminated the connection
-			socket.on('logsDisconnect', () => {
+			socket.on('logs:disconnect', () => {
 				stream.destroy();
 			});
 			socket.on('disconnect', () => {
 				stream.destroy();
 			});
-			this.getNsp().to(`user:${socket.username}`).emit('logsConnected');
+			this.getNsp().to(`user:${socket.username}`).emit('logs:connected');
 		} catch (error) {
-			this.getNsp().to(`user:${socket.username}`).emit('logsError', 'Failed to start container logs stream.');
+			this.getNsp().to(`user:${socket.username}`).emit('logs:error', 'Failed to start container logs stream.');
 		}
 	}
 

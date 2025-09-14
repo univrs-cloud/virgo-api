@@ -139,7 +139,7 @@ const reboot = async (socket) => {
 		state.reboot = false;
 	}
 
-	nsp.emit('reboot', state.reboot);
+	nsp.emit('host:reboot', state.reboot);
 };
 
 const shutdown = async (socket) => {
@@ -158,7 +158,7 @@ const shutdown = async (socket) => {
 		state.shutdown = false;
 	}
 
-	nsp.emit('shutdown', state.shutdown);
+	nsp.emit('host:shutdown', state.shutdown);
 };
 
 const checkUpdates = async (socket) => {
@@ -171,14 +171,14 @@ const checkUpdates = async (socket) => {
 	}
 
 	state.checkUpdates = true;
-	nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
+	nsp.to(`user:${socket.username}`).emit('host:updates:check', state.checkUpdates);
 	try {
 		await exec('apt update --allow-releaseinfo-change');
 		state.checkUpdates = false;
 		updates(socket);
 	} catch (error) {
 		state.checkUpdates = false;
-		nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
+		nsp.to(`user:${socket.username}`).emit('host:updates:check', state.checkUpdates);
 	}
 };
 
@@ -219,7 +219,7 @@ const watchUpgradeLog = () => {
 		data = data.trim();
 		if (data !== '') {
 			state.upgrade.steps = data.split('\n');
-			nsp.emit('upgrade', state.upgrade);
+			nsp.emit('host:upgrade', state.upgrade);
 		}
 	}
 }
@@ -233,7 +233,7 @@ const checkUpgrade = (socket) => {
 	if (data === '') {
 		upgradePid = null;
 		delete state.upgrade;
-		nsp.emit('upgrade', null);
+		nsp.emit('host:upgrade', null);
 		return;
 	}
 
@@ -255,7 +255,7 @@ const checkUpgrade = (socket) => {
 		await upgradeLogsWatcher?.stop();
 		upgradeLogsWatcher = undefined;
 		state.upgrade.state = 'succeeded';
-		nsp.emit('upgrade', state.upgrade);
+		nsp.emit('host:upgrade', state.upgrade);
 		updates(socket);
 	}, 1000);
 };
@@ -285,7 +285,7 @@ const upgrade = async (socket) => {
 		clearInterval(checkUpgeadeIntervalId);
 		checkUpgeadeIntervalId = null;
 		state.upgrade.state = 'failed';
-		nsp.emit('upgrade', state.upgrade);
+		nsp.emit('host:upgrade', state.upgrade);
 		updates(socket);
 	};
 };
@@ -299,17 +299,17 @@ const completeUpgrade = (socket) => {
 	upgradePid = null;
 	fs.closeSync(fs.openSync(upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync(upgradeFile, 'w'));
-	nsp.emit('upgrade', null);
+	nsp.emit('host:upgrade', null);
 };
 
 const updates = (socket) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
-		nsp.to(`user:${socket.username}`).emit('updates', false);
+		nsp.to(`user:${socket.username}`).emit('host:updates', false);
 		return;
 	}
 
 	if (upgradePid === null) {
-		nsp.emit('upgrade', null);
+		nsp.emit('host:upgrade', null);
 	}
 	checkForUpdates();
 };
@@ -338,8 +338,8 @@ const checkForUpdates = async () => {
 
 	for (const socket of nsp.sockets.values()) {
 		if (socket.isAuthenticated && socket.isAdmin) {
-			nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
-			nsp.to(`user:${socket.username}`).emit('updates', state.updates);
+			nsp.to(`user:${socket.username}`).emit('host:updates:check', state.checkUpdates);
+			nsp.to(`user:${socket.username}`).emit('host:updates', state.updates);
 		}
 	};
 	return ``;
@@ -360,7 +360,7 @@ const pollCpuStats = async (socket) => {
 		state.cpuStats = false;
 	}
 
-	nsp.emit('cpuStats', state.cpuStats);
+	nsp.emit('host:cpu:stats', state.cpuStats);
 	setTimeout(() => { pollCpuStats(socket); }, 5000);
 };
 
@@ -377,7 +377,7 @@ const pollMemory = async (socket) => {
 		state.memory = false;
 	}
 
-	nsp.emit('memory', state.memory);
+	nsp.emit('host:memory', state.memory);
 	setTimeout(() => { pollMemory(socket); }, 10000);
 };
 
@@ -427,7 +427,7 @@ const pollStorage = async (socket) => {
 		state.storage = false;
 	}
 
-	nsp.emit('storage', state.storage);
+	nsp.emit('host:storage', state.storage);
 	setTimeout(() => { pollStorage(socket); }, 60000);
 };
 
@@ -457,7 +457,7 @@ const pollDrives = async (socket) => {
 		state.drives = false;
 	}
 
-	nsp.emit('drives', state.drives);
+	nsp.emit('host:drives', state.drives);
 	setTimeout(() => { pollDrives(socket); }, 60000);
 };
 
@@ -481,7 +481,7 @@ const pollNetworkStats = async (socket) => {
 		state.networkStats = false;
 	}
 
-	nsp.emit('networkStats', state.networkStats);
+	nsp.emit('host:network:stats', state.networkStats);
 	setTimeout(() => { pollNetworkStats(socket); }, 2000);
 };
 
@@ -514,7 +514,7 @@ const watchPowerSource = () => {
 				state.ups = {};
 			}
 			state.ups.powerSource = data;
-			nsp.emit('ups', state.ups);
+			nsp.emit('host:ups', state.ups);
 		}
 	}
 };
@@ -522,7 +522,7 @@ const watchPowerSource = () => {
 const checkUps = async () => {
 	if (i2c === false) {
 		state.ups = 'remote i/o error';
-		nsp.emit('ups', state.ups);
+		nsp.emit('host:ups', state.ups);
 		return;
 	}
 
@@ -536,7 +536,7 @@ const checkUps = async () => {
 		state.ups.batteryCharge = false;
 	}
 	
-	nsp.emit('ups', state.ups);
+	nsp.emit('host:ups', state.ups);
 };
 
 const pollTime = (socket) => {
@@ -546,7 +546,7 @@ const pollTime = (socket) => {
 	}
 
 	state.time = si.time();
-	nsp.emit('time', state.time);
+	nsp.emit('host:time', state.time);
 	setTimeout(() => { pollTime(socket); }, 60000);
 };
 
@@ -566,62 +566,62 @@ module.exports = (io) => {
 
 		checkUpgrade(socket);
 
-		nsp.emit('system', state.system);
+		nsp.emit('host:system', state.system);
 		if (state.reboot === undefined) {
-			nsp.emit('reboot', false);
+			nsp.emit('host:reboot', false);
 		}
 		if (state.shutdown === undefined) {
-			nsp.emit('shutdown', false);
+			nsp.emit('host:shutdown', false);
 		}
 		if (state.checkUpdates) {
 			if (socket.isAuthenticated && socket.isAdmin) {
-				nsp.to(`user:${socket.username}`).emit('checkUpdates', state.checkUpdates);
+				nsp.to(`user:${socket.username}`).emit('host:updates:check', state.checkUpdates);
 			}
 		}
 		if (state.updates) {
-			nsp.to(`user:${socket.username}`).emit('updates', (socket.isAuthenticated && socket.isAdmin ? state.updates : []));
+			nsp.to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? state.updates : []));
 		} else {
 			checkForUpdates();
 		}
 		if (state.cpuStats) {
-			nsp.emit('cpuStats', state.cpuStats);
+			nsp.emit('host:cpu:stats', state.cpuStats);
 		} else {
 			pollCpuStats(socket);
 		}
 		if (state.memory) {
-			nsp.emit('memory', state.memory);
+			nsp.emit('host:memory', state.memory);
 		} else {
 			pollMemory(socket);
 		}
 		if (state.storage) {
-			nsp.emit('storage', state.storage);
+			nsp.emit('host:storage', state.storage);
 		} else {
 			pollStorage(socket);
 		}
 		if (state.drives) {
-			nsp.emit('drives', state.drives);
+			nsp.emit('host:drives', state.drives);
 		} else {
 			pollDrives(socket);
 		}
 		if (state.networkStats) {
-			nsp.emit('networkStats', state.networkStats);
+			nsp.emit('host:network:stats', state.networkStats);
 		} else {
 			pollNetworkStats(socket);
 		}
 		if (state.ups) {
-			nsp.emit('ups', state.ups);
+			nsp.emit('host:ups', state.ups);
 		}
 		if (state.time) {
-			nsp.emit('time', state.time);
+			nsp.emit('host:time', state.time);
 		} else {
 			pollTime(socket);
 		}
 
-		socket.on('checkUpdates', () => { checkUpdates(socket); });
-		socket.on('upgrade', () => { upgrade(socket); });
-		socket.on('completeUpgrade', () => { completeUpgrade(socket); });
-		socket.on('reboot', () => { reboot(socket); });
-		socket.on('shutdown', () => { shutdown(socket); });
+		socket.on('host:updates:check', () => { checkUpdates(socket); });
+		socket.on('host:upgrade', () => { upgrade(socket); });
+		socket.on('host:upgrade:complete', () => { completeUpgrade(socket); });
+		socket.on('host:reboot', () => { reboot(socket); });
+		socket.on('host:shutdown', () => { shutdown(socket); });
 
 		socket.on('disconnect', () => {
 			//

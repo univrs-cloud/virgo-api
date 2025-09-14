@@ -31,15 +31,15 @@ class ShareEmitter extends BaseEmitter {
 			this.getNsp().emit('shares', this.getState('shares'));
 		}
 
-		socket.on('create', async (config) => {
+		socket.on('share:create', async (config) => {
 			await handleShareAction(socket, 'createShare', config);
 		});
 
-		socket.on('update', async (config) => {
+		socket.on('share:update', async (config) => {
 			await handleShareAction(socket, 'updateShare', config);
 		});
 
-		socket.on('delete', async (config) => {
+		socket.on('share:delete', async (config) => {
 			await handleShareAction(socket, 'deleteShare', config);
 		});
 	}
