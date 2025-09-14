@@ -32,26 +32,26 @@ class ShareEmitter extends BaseEmitter {
 		}
 
 		socket.on('share:create', async (config) => {
-			await handleShareAction(socket, 'createShare', config);
+			await handleShareAction(socket, 'share:create', config);
 		});
 
 		socket.on('share:update', async (config) => {
-			await handleShareAction(socket, 'updateShare', config);
+			await handleShareAction(socket, 'share:update', config);
 		});
 
 		socket.on('share:delete', async (config) => {
-			await handleShareAction(socket, 'deleteShare', config);
+			await handleShareAction(socket, 'share:delete', config);
 		});
 	}
 
 	async processJob(job) {
-		if (job.name === 'createShare') {
+		if (job.name === 'share:create') {
 			return await this.#createShare(job);
 		}
-		if (job.name === 'updateShare') {
+		if (job.name === 'share:update') {
 			return await this.#updateShare(job);
 		}
-		if (job.name === 'deleteShare') {
+		if (job.name === 'share:delete') {
 			return await this.#deleteShare(job);
 		}
 	}

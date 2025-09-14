@@ -43,6 +43,7 @@ class BaseEmitter {
 				name,
 				pattern,
 				{
+					name: name,
 					opts: {
 						removeOnComplete: 1
 					}

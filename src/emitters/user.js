@@ -21,11 +21,11 @@ class UserEmitter extends BaseEmitter {
 				return;
 			}
 		
-			if (!socket.isAdmin && ['createUser', 'deleteUser', 'lockUser', 'unlockUser'].includes(action)) {
+			if (!socket.isAdmin && ['user:create', 'user:delete', 'user:lock', 'user:unlock'].includes(action)) {
 				return;
 			}
 		
-			if (!socket.isAdmin && ['updateUser', 'changePassword'].includes(action) && socket.username !== config.username) {
+			if (!socket.isAdmin && ['user:update', 'user:changePassword'].includes(action) && socket.username !== config.username) {
 				return;
 			}
 			
@@ -45,47 +45,47 @@ class UserEmitter extends BaseEmitter {
 		}
 
 		socket.on('user:create', async (config) => {
-			await handleUserAction(socket, 'createUser', config);
+			await handleUserAction(socket, 'user:create', config);
 		});
 
 		socket.on('user:update', async (config) => {
-			await handleUserAction(socket, 'updateUser', config);
+			await handleUserAction(socket, 'user:update', config);
 		});
 
 		socket.on('user:delete', async (config) => {
-			await handleUserAction(socket, 'deleteUser', config);
+			await handleUserAction(socket, 'user:delete', config);
 		});
 
 		socket.on('user:lock', async (config) => {
-			await handleUserAction(socket, 'lockUser', config);
+			await handleUserAction(socket, 'user:lock', config);
 		});
 
 		socket.on('user:unlock', async (config) => {
-			await handleUserAction(socket, 'unlockUser', config);
+			await handleUserAction(socket, 'user:unlock', config);
 		});
 
 		socket.on('user:password', async (config) => {
-			await handleUserAction(socket, 'changePassword', config);
+			await handleUserAction(socket, 'user:changePassword', config);
 		});
 	}
 
 	async processJob(job) {
-		if (job.name === 'createUser') {
+		if (job.name === 'user:create') {
 			return await this.#createUser(job);
 		}
-		if (job.name === 'updateUser') {
+		if (job.name === 'user:update') {
 			return await this.#updateUser(job);
 		}
-		if (job.name === 'deleteUser') {
+		if (job.name === 'user:delete') {
 			return await this.#deleteUser(job);
 		}
-		if (job.name === 'lockUser') {
+		if (job.name === 'user:lock') {
 			return await this.#lockUser(job);
 		}
-		if (job.name === 'unlockUser') {
+		if (job.name === 'user:unlock') {
 			return await this.#unlockUser(job);
 		}
-		if (job.name === 'changePassword') {
+		if (job.name === 'user:changePassword') {
 			return await this.#changePassword(job);
 		}
 	}

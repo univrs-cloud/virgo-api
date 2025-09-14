@@ -26,29 +26,29 @@ class ConfigurationEmitter extends BaseEmitter {
 			this.getNsp().to(`user:${socket.username}`).emit('configuration', configuration);
 		}
 
-		socket.on('configuration:location:update', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await this.addJob('setLocation', { config, username: socket.username });
-		});
-
 		socket.on('configuration:smtp:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
 
-			await this.addJob('setSmtp', { config, username: socket.username });
+			await this.addJob('smtp:update', { config, username: socket.username });
+		});
+
+		socket.on('configuration:location:update', async (config) => {
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+			
+			await this.addJob('location:update', { config, username: socket.username });
 		});
 	}
 
 	async processJob(job) {
-		if (job.name === 'setSmtp') {
-			return await this.#setSmtp(job);
+		if (job.name === 'smtp:update') {
+			return await this.#smtpUpdate(job);
 		}
-		if (job.name === 'setLocation') {
-			return await this.#setLocation(job);
+		if (job.name === 'location:update') {
+			return await this.#locationUpdate(job);
 		}
 	}
 
@@ -99,7 +99,7 @@ class ConfigurationEmitter extends BaseEmitter {
 			});
 	}
 
-	#setLocation = async (job) => {
+	#locationUpdate = async (job) => {
 		let config = job.data.config;
 		await this.updateJobProgress(job, `Saving location...`);
 		let configuration = this.getState('configuration');
@@ -109,7 +109,7 @@ class ConfigurationEmitter extends BaseEmitter {
 		return `Location saved.`;
 	}
 
-	#setSmtp = async (job) => {
+	#smtpUpdate = async (job) => {
 		let config = job.data.config;
 		await this.updateJobProgress(job, `Saving sotification server...`);
 		if (!config?.recipients) {

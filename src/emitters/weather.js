@@ -23,7 +23,7 @@ class WeatherEmitter extends BaseEmitter {
 	}
 
 	async processJob(job) {
-		if (job.name === 'fetchWeather') {
+		if (job.name === 'weather:fetch') {
 			this.#fetchRetries = 3;
 			return await this.#fetchWeather();
 		}
@@ -71,7 +71,7 @@ class WeatherEmitter extends BaseEmitter {
 
 	async #scheduleWeatherFetcher() {
 		this.addJobSchedule(
-			'fetchWeather',
+			'weather:fetch',
 			{ pattern: '0 1 * * * *' }
 		);
 	}	

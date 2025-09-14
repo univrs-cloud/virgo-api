@@ -55,7 +55,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('appInstall', { config, username: socket.username });
+			await this.addJob('app:install', { config, username: socket.username });
 		});
 
 		socket.on('app:update', async (config) => {
@@ -63,7 +63,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('appUpdate', { config, username: socket.username });
+			await this.addJob('app:update', { config, username: socket.username });
 		});
 
 		socket.on('app:performAction', async (config) => {
@@ -71,7 +71,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('appPerformAction', { config, username: socket.username });
+			await this.addJob('app:performAction', { config, username: socket.username });
 		});
 
 		socket.on('service:performAction', async (config) => {
@@ -79,7 +79,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('servicePerformAction', { config, username: socket.username });
+			await this.addJob('service:performAction', { config, username: socket.username });
 		});
 
 		socket.on('bookmark:create', async (config) => {
@@ -87,7 +87,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('bookmarkCreate', { config, username: socket.username });
+			await this.addJob('bookmark:create', { config, username: socket.username });
 		});
 
 		socket.on('bookmark:update', async (config) => {
@@ -95,7 +95,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('bookmarkUpdate', { config, username: socket.username });
+			await this.addJob('bookmark:update', { config, username: socket.username });
 		});
 
 		socket.on('bookmark:delete', async (config) => {
@@ -103,7 +103,7 @@ class DockerEmitter extends BaseEmitter {
 				return;
 			}
 
-			await this.addJob('bookmarkDelete', { config, username: socket.username });
+			await this.addJob('bookmark:delete', { config, username: socket.username });
 		});
 
 		socket.on('terminal:connect', (id) => { this.#terminalConnect(socket, id); });
@@ -111,31 +111,31 @@ class DockerEmitter extends BaseEmitter {
 	}
 
 	async processJob(job) {
-		if (job.name === 'checkForUpdates') {
+		if (job.name === 'updates:check') {
 			return await this.#checkForUpdates();
 		}
-		if (job.name === 'fetchTemplates') {
+		if (job.name === 'templates:fetch') {
 			return await this.#fetchTemplates();
 		}
-		if (job.name === 'appInstall') {
-			return await this.#install(job);
+		if (job.name === 'app:install') {
+			return await this.#appInstall(job);
 		}
-		if (job.name === 'appUpdate') {
-			return await this.#update(job);
+		if (job.name === 'app:update') {
+			return await this.#appUpdate(job);
 		}
-		if (job.name === 'appPerformAction') {
+		if (job.name === 'app:performAction') {
 			return await this.#performAppAction(job);
 		}
-		if (job.name === 'servicePerformAction') {
+		if (job.name === 'service:performAction') {
 			return await this.#performServiceAction(job);
 		}
-		if (job.name === 'bookmarkCreate') {
+		if (job.name === 'bookmark:create') {
 			return await this.#createBookmark(job);
 		}
-		if (job.name === 'bookmarkUpdate') {
+		if (job.name === 'bookmark:update') {
 			return await this.#updateBookmark(job);
 		}
-		if (job.name === 'bookmarkDelete') {
+		if (job.name === 'bookmark:delete') {
 			return await this.#deleteBookmark(job);
 		}
 	}
@@ -172,14 +172,14 @@ class DockerEmitter extends BaseEmitter {
 
 	async #scheduleUpdatesChecker() {
 		this.addJobSchedule(
-			'checkForUpdates',
+			'updates:check',
 			{ pattern: '0 0 0 * * *' }
 		);
 	}
 	
 	async #scheduleTemplatesFetcher() {
 		this.addJobSchedule(
-			'fetchTemplates',
+			'templates:fetch',
 			{ pattern: '0 1 * * * *' }
 		);
 	}
@@ -351,7 +351,7 @@ class DockerEmitter extends BaseEmitter {
 		setTimeout(() => { this.#pollContainers(socket); }, 2000);
 	}
 
-	async #install(job) {
+	async #appInstall(job) {
 		let config = job.data.config;
 		let template = this.getState('templates')?.find((template) => { return template.id === config.id; });
 		if (!template) {
@@ -406,7 +406,7 @@ class DockerEmitter extends BaseEmitter {
 		return `${template.title} installed.`;
 	}
 
-	async #update(job) {
+	async #appUpdate(job) {
 		let config = job.data.config;
 		const existingApp = this.getState('configured')?.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
 		if (!existingApp) {
