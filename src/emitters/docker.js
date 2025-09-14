@@ -331,7 +331,7 @@ class DockerEmitter extends BaseEmitter {
 
 	async #pollContainers(socket) {
 		if (this.getNsp().server.engine.clientsCount === 0) {
-			this.setState('containers', []);
+			this.setState('containers', undefined);
 			return;
 		}
 	
