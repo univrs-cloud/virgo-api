@@ -157,12 +157,9 @@ class DockerEmitter extends BaseEmitter {
 		if (!fs.existsSync(this.#dataFile)) {
 			touch.sync(this.#dataFile);
 		}
-	
-		if (this.getState('configured') === undefined) {
-			this.setState('configured', {});
-			readFile();
-		}
-	
+		
+		readFile();
+		
 		this.#dataFileWatcher = new FileWatcher(this.#dataFile);
 		this.#dataFileWatcher
 			.onChange((event, path) => {

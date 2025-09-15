@@ -86,11 +86,8 @@ class ConfigurationEmitter extends BaseEmitter {
 		if (!fs.existsSync(this.#configurationFile)) {
 			touch.sync(this.#configurationFile);
 		}
-	
-		if (this.getState('configuration') === undefined) {
-			this.setState('configuration', {});
-			readFile();
-		}
+		
+		readFile();
 	
 		this.#configurationWatcher = new FileWatcher(this.#configurationFile);
 		this.#configurationWatcher
