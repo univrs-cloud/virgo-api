@@ -1,8 +1,4 @@
-const camelcaseKeys = require('camelcase-keys').default;
-const dockerode = require('dockerode');
 const BasePlugin = require('./base');
-
-const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
 	constructor(io) {
@@ -15,13 +11,15 @@ class DockerPlugin extends BasePlugin {
 	}
 
 	onConnection(socket) {
+		const pollingPlugin = this.getPlugin('polling');
+		
 		if (this.getState('configured')) {
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		}
 		if (this.getState('containers')) {
 			this.getNsp().emit('app:containers', this.getState('containers'));
 		} else {
-			this.#pollContainers(socket);
+			pollingPlugin.pollContainers(socket, this);
 		}
 		if (this.getState('templates')) {
 			if (socket.isAuthenticated) {
@@ -190,27 +188,6 @@ class DockerPlugin extends BasePlugin {
 		}
 	}
 
-	async #pollContainers(socket) {
-		if (this.getNsp().server.engine.clientsCount === 0) {
-			this.setState('containers', undefined);
-			return;
-		}
-	
-		try {
-			let containers = await docker.listContainers({ all: true });
-			containers = camelcaseKeys(containers, { deep: true });
-			containers = containers.map((container) => {
-				container.name = container.names[0].replace('/', '');
-				return container;
-			});
-			this.setState('containers', containers);
-		} catch (error) {
-			this.setState('containers', false);
-		}
-	
-		this.getNsp().emit('app:containers', this.getState('containers'));
-		setTimeout(() => { this.#pollContainers(socket); }, 2000);
-	}
 
 	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
 		const { hostname, pathname } = new URL(repositoryUrl);
