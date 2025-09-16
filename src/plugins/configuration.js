@@ -1,14 +1,12 @@
 const BasePlugin = require('./base');
 
 class ConfigurationPlugin extends BasePlugin {
-	#configurationFile = '/var/www/virgo-api/configuration.json';
-
 	constructor(io) {
 		super(io, 'configuration');
 	}
 
-	get configurationFile() {
-		return this.#configurationFile;
+	init() {
+		this.configurationFile = '/var/www/virgo-api/configuration.json';
 	}
 
 	onConnection(socket) {
@@ -20,9 +18,6 @@ class ConfigurationPlugin extends BasePlugin {
 			this.getNsp().to(`user:${socket.username}`).emit('configuration', configuration);
 		}
 	}
-
-
-
 }
 
 module.exports = (io) => {

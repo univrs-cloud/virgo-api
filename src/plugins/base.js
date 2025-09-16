@@ -15,6 +15,11 @@ class BasePlugin {
 		this.#name = name;
 		this.#io = io;
 		this.#nsp = this.#io.of(`/${this.#name}`);
+
+		if (typeof this.init === 'function') {
+			this.init();
+		}
+
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		this.#setupQueues();

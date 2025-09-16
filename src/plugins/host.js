@@ -18,8 +18,8 @@ try {
 }
 
 class HostPlugin extends BasePlugin {
-	#powerSourceWatcher = undefined;
-	#upgradeLogsWatcher = undefined;
+	#powerSourceWatcher;
+	#upgradeLogsWatcher;
 	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 	#upgradeFile = '/var/www/virgo-api/upgrade.log';
 	#upgradePid = null;

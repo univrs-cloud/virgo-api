@@ -16,7 +16,7 @@ const FileWatcher = require('../utils/file_watcher');
 const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
-	#dataFileWatcher = undefined;
+	#dataFileWatcher;
 	#dataFile = '/var/www/virgo-api/data.json';
 	#composeDir = '/opt/docker';
 	#allowedActions = ['start', 'stop', 'kill', 'restart', 'down'];
