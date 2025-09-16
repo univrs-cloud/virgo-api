@@ -38,6 +38,14 @@ class BasePlugin {
 		this.#state[key] = state;
 	}
 
+	getPlugins() {
+		return this.#plugins;
+	}
+
+	getPlugin(name) {
+		return this.#plugins.find((plugin) => { return plugin.name === name; });
+	}
+
 	async addJob(name, data) {
 		try {
 			await this.#queue.add(name, data);
