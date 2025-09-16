@@ -1,69 +1,18 @@
-const fs = require('fs');
-const touch = require('touch');
 const BasePlugin = require('./base');
-const FileWatcher = require('../utils/file_watcher');
 
 class WeatherPlugin extends BasePlugin {
-	#configurationWatcher;
-	#configurationFile = '/var/www/virgo-api/configuration.json';
 	#request = null;
 	#fetchDelay = 10000;
 	fetchRetries = 3;
 
 	constructor(io) {
 		super(io, 'weather');
-		this.#watchConfiguration();
-		this.#scheduleWeatherFetcher();
 	}
 
 	onConnection(socket) {
 		if (this.getState('weather')) {
 			this.getNsp().emit('weather', this.getState('weather'));
 		}
-	}
-
-	#watchConfiguration() {
-		const readFile = () => {
-			let data = fs.readFileSync(this.#configurationFile, { encoding: 'utf8', flag: 'r' });
-			data = data.trim();
-			if (data === '') {
-				this.setState(
-					'configuration',
-					{
-						location: {
-							latitude: '45.749',
-							longitude: '21.227'
-						}
-					}
-				);
-			} else {
-				this.setState('configuration', JSON.parse(data));
-			}
-			this.fetchWeather();
-		};
-
-		if (this.#configurationWatcher) {
-			return;
-		}
-	
-		if (!fs.existsSync(this.#configurationFile)) {
-			touch.sync(this.#configurationFile);
-		}
-		
-		readFile();
-		
-		this.#configurationWatcher = new FileWatcher(this.#configurationFile);
-		this.#configurationWatcher
-			.onChange((event, path) => {
-				readFile();
-			});
-	}
-
-	async #scheduleWeatherFetcher() {
-		this.addJobSchedule(
-			'weather:fetch',
-			{ pattern: '0 1 * * * *' }
-		);
 	}
 
 	async fetchWeather() {

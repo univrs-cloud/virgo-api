@@ -1,7 +1,11 @@
 let fetchRetries = 3;
 
 module.exports = {
-	onConnection(socket, plugin) {
+	register(plugin) {
+		plugin.addJobSchedule(
+			'weather:fetch',
+			{ pattern: '0 1 * * * *' }
+		);
 	},
 	jobs: {
 		'weather:fetch': async (job, plugin) => {

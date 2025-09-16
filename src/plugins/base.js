@@ -150,6 +150,9 @@ class BasePlugin {
 		for (const file of pluginFiles) {
 			const plugin = require(path.join(pluginDir, file));
 			this.#plugins.push(plugin);
+			if (typeof plugin.register === 'function') {
+				plugin.register(this);
+			}
 		}
 	}
 }
