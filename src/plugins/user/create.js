@@ -47,6 +47,7 @@ const createUser = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'create',
 	onConnection(socket, plugin) {
 		socket.on('user:create', async (config) => {
 			await plugin.handleUserAction(socket, 'user:create', config);

@@ -7,6 +7,7 @@ const updateShare = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('share:update', async (config) => {
 			await plugin.handleShareAction(socket, 'share:update', config);

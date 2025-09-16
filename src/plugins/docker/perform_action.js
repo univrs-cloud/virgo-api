@@ -56,6 +56,7 @@ const performServiceAction = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'perform_action',
 	onConnection(socket, plugin) {
 		socket.on('app:performAction', async (config) => {
 			await plugin.handleDockerAction(socket, 'app:performAction', config);

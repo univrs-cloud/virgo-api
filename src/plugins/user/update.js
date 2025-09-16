@@ -36,6 +36,7 @@ const updateUser = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('user:update', async (config) => {
 			await plugin.handleUserAction(socket, 'user:update', config);

@@ -77,7 +77,5 @@ module.exports = {
 	register(plugin) {
 		watchPowerSource(plugin);
 	},
-	watchUpgradeLog(plugin) {
-		watchUpgradeLog(plugin);
-	}
+	watchUpgradeLog
 };

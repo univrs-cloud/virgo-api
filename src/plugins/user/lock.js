@@ -24,6 +24,7 @@ const lockUser = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'lock',
 	onConnection(socket, plugin) {
 		socket.on('user:lock', async (config) => {
 			await plugin.handleUserAction(socket, 'user:lock', config);

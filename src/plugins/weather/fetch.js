@@ -1,4 +1,5 @@
 module.exports = {
+	name: 'fetch',
 	register(plugin) {
 		plugin.addJobSchedule(
 			'weather:fetch',

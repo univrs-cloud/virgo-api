@@ -7,6 +7,7 @@ const createShare = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'create',
 	onConnection(socket, plugin) {
 		socket.on('share:create', async (config) => {
 			await plugin.handleShareAction(socket, 'share:create', config);

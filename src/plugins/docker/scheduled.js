@@ -1,5 +1,6 @@
 
 module.exports = {
+	name: 'scheduled',
 	register(plugin) {
 		// Schedule updates checker to run daily at midnight
 		plugin.addJobSchedule(

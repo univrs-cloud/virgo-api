@@ -37,6 +37,7 @@ const deleteUser = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'delete',
 	onConnection(socket, plugin) {
 		socket.on('user:delete', async (config) => {
 			await plugin.handleUserAction(socket, 'user:delete', config);

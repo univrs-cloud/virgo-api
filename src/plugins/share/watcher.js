@@ -61,6 +61,7 @@ const watchConfigurations = (plugin) => {
 }
 
 module.exports = {
+	name: 'watcher',
 	register(plugin) {
 		watchConfigurations(plugin);
 	}

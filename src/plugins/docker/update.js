@@ -67,6 +67,7 @@ const updateApp = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('app:update', async (config) => {
 			await plugin.handleDockerAction(socket, 'app:update', config);

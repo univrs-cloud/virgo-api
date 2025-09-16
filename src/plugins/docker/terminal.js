@@ -84,6 +84,7 @@ async function terminalConnect(socket, id, plugin) {
 }
 
 module.exports = {
+	name: 'terminal',
 	onConnection(socket, plugin) {
 		socket.on('terminal:connect', (id) => { 
 			terminalConnect(socket, id, plugin); 

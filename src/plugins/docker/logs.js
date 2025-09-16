@@ -43,6 +43,7 @@ async function logsConnect(socket, id, plugin) {
 }
 
 module.exports = {
+	name: 'logs',
 	onConnection(socket, plugin) {
 		socket.on('logs:connect', (id) => { 
 			logsConnect(socket, id, plugin); 

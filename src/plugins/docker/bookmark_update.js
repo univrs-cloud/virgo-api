@@ -25,6 +25,7 @@ const updateBookmark = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'bookmark_update',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:update', async (config) => {
 			await plugin.handleDockerAction(socket, 'bookmark:update', config);

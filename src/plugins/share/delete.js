@@ -7,6 +7,7 @@ const deleteShare = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'delete',
 	onConnection(socket, plugin) {
 		socket.on('share:delete', async (config) => {
 			await plugin.handleShareAction(socket, 'share:delete', config);

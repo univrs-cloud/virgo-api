@@ -20,6 +20,7 @@ const createBookmark = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'bookmark_create',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:create', async (config) => {
 			await plugin.handleDockerAction(socket, 'bookmark:create', config);

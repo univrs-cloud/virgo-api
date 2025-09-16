@@ -59,6 +59,7 @@ const installApp = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'install',
 	onConnection(socket, plugin) {
 		socket.on('app:install', async (config) => {
 			await plugin.handleDockerAction(socket, 'app:install', config);

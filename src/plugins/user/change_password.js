@@ -35,6 +35,7 @@ const changePassword = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'change_password',
 	onConnection(socket, plugin) {
 		socket.on('user:password', async (config) => {
 			await plugin.handleUserAction(socket, 'user:changePassword', config);

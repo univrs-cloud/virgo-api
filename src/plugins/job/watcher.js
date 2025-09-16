@@ -2,6 +2,7 @@
 const { Queue, QueueEvents } = require('bullmq');
 
 module.exports = {
+	name: 'watcher',
 	register(plugin) {
         const eventsToListen = ['waiting', 'progress'];
 		plugin.queues.forEach((queueName) => {

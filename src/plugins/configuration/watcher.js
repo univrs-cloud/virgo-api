@@ -45,6 +45,7 @@ const watchConfiguration = async (plugin) => {
 };
 
 module.exports = {
+	name: 'watcher',
 	register(plugin) {
 		watchConfiguration(plugin);
 	}

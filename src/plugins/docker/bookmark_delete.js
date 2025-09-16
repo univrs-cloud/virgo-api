@@ -15,6 +15,7 @@ const deleteBookmark = async (job, plugin) => {
 };
 
 module.exports = {
+	name: 'bookmark_delete',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:delete', async (config) => {
 			await plugin.handleDockerAction(socket, 'bookmark:delete', config);
