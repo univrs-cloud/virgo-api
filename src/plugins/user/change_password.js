@@ -1,4 +1,6 @@
 const fs = require('fs');
+const yaml = require('js-yaml');
+const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
 
 module.exports = {

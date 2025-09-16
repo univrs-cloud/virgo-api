@@ -3,9 +3,8 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const yaml = require('js-yaml');
-const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
-const BasePlugin = require('../base');
+const BasePlugin = require('./base');
 
 class UserPlugin extends BasePlugin {
 	autheliaUsersFile = '/messier/apps/authelia/config/users.yml';

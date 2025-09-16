@@ -1,6 +1,7 @@
 const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
+const yaml = require('js-yaml');
 const exec = util.promisify(childProcess.exec);
 
 module.exports = {

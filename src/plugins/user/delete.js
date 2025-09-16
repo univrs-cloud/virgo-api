@@ -2,6 +2,7 @@ const fs = require('fs');
 const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
+const yaml = require('js-yaml');
 const linuxUser = require('linux-sys-user').promise();
 
 module.exports = {
