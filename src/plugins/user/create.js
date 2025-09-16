@@ -38,8 +38,8 @@ module.exports = {
 			async function createAutheliaUser () {
 				const fileContents = fs.readFileSync(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 				let autheliaUsersConfig = yaml.load(fileContents);
-				if (!autheliaUsers.users) {
-					autheliaUsers.users = {};
+				if (!autheliaUsersConfig.users) {
+					autheliaUsersConfig.users = {};
 				}
 				autheliaUsersConfig.users[config.username] = {
 					password: bcrypt.hashSync(config.password, plugin.cost),
