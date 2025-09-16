@@ -1,5 +1,3 @@
-let fetchRetries = 3;
-
 module.exports = {
 	register(plugin) {
 		plugin.addJobSchedule(

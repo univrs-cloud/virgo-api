@@ -1,6 +1,6 @@
 const fs = require('fs');
 const touch = require('touch');
-const FileWatcher = require('../utils/file_watcher');
+const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
 let configurationFile = '/var/www/virgo-api/configuration.json';
