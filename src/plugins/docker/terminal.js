@@ -4,14 +4,6 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-module.exports = {
-	onConnection(socket, plugin) {
-		socket.on('terminal:connect', (id) => { 
-			terminalConnect(socket, id, plugin); 
-		});
-	}
-};
-
 async function terminalConnect(socket, id, plugin) {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
@@ -38,7 +30,7 @@ async function terminalConnect(socket, id, plugin) {
 				Tty: true
 			}
 		);
-		const stream = await exec.start(
+		const terminalStream = await exec.start(
 			{
 				stream: true,
 				stdin: true,
@@ -51,12 +43,12 @@ async function terminalConnect(socket, id, plugin) {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		docker.modem.demuxStream(stream, stdout, stderr);
+		docker.modem.demuxStream(terminalStream, stdout, stderr);
 		stdout.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
 		stderr.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
 		// Pipe client input to the container
 		socket.on('terminal:input', (data) => {
-			stream.write(data);
+			terminalStream.write(data);
 		});
 		socket.on('terminal:resize', (size) => {
 			exec.resize({
@@ -66,10 +58,10 @@ async function terminalConnect(socket, id, plugin) {
 		});
 		// Client terminated the connection
 		socket.on('terminal:disconnect', () => {
-			stream.destroy();
+			terminalStream.destroy();
 		});
 		socket.on('disconnect', () => {
-			stream.destroy();
+			terminalStream.destroy();
 		});
 		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:connected');
 	} catch (error) {
@@ -90,3 +82,12 @@ async function terminalConnect(socket, id, plugin) {
 		return null;
 	}
 }
+
+module.exports = {
+	onConnection(socket, plugin) {
+		socket.on('terminal:connect', (id) => { 
+			terminalConnect(socket, id, plugin); 
+		});
+	}
+};
+

@@ -3,14 +3,6 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-module.exports = {
-	onConnection(socket, plugin) {
-		socket.on('logs:connect', (id) => { 
-			logsConnect(socket, id, plugin); 
-		});
-	}
-};
-
 async function logsConnect(socket, id, plugin) {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
@@ -22,7 +14,7 @@ async function logsConnect(socket, id, plugin) {
 	}
 
 	try {
-		const stream = await container.logs(
+		const logsStream = await container.logs(
 			{
 				follow: true,
 				stdout: true,
@@ -34,18 +26,27 @@ async function logsConnect(socket, id, plugin) {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		docker.modem.demuxStream(stream, stdout, stderr);
+		docker.modem.demuxStream(logsStream, stdout, stderr);
 		stdout.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
 		stderr.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
 		// Client terminated the connection
 		socket.on('logs:disconnect', () => {
-			stream.destroy();
+			logsStream.destroy();
 		});
 		socket.on('disconnect', () => {
-			stream.destroy();
+			logsStream.destroy();
 		});
 		plugin.getNsp().to(`user:${socket.username}`).emit('logs:connected');
 	} catch (error) {
 		plugin.getNsp().to(`user:${socket.username}`).emit('logs:error', 'Failed to start container logs stream.');
 	}
 }
+
+module.exports = {
+	onConnection(socket, plugin) {
+		socket.on('logs:connect', (id) => { 
+			logsConnect(socket, id, plugin); 
+		});
+	}
+};
+
