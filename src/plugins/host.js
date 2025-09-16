@@ -18,14 +18,15 @@ class HostPlugin extends BasePlugin {
 	}
 
 	init() {
+		this.i2c = i2c;
 		this.upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 		this.upgradeFile = '/var/www/virgo-api/upgrade.log';
 		this.upgradePid = null;
 		this.checkUpgradeIntervalId = null;
-		this.i2c = i2c;
 		
-		// Sub-plugins are automatically loaded by BasePlugin
-		
+		if (i2c === false) {
+			this.setState('ups', 'remote i/o error');
+		}
 		this.setState('system', {
 			api: {
 				version: version
@@ -62,9 +63,6 @@ class HostPlugin extends BasePlugin {
 		si.networkInterfaces((networkInterface) => {
 			this.setState('system', { ...this.getState('system'), networkInterface });
 		}, null, 'default');
-		if (i2c === false) {
-			this.setState('ups', 'remote i/o error');
-		}
 	}
 
 	onConnection(socket) {

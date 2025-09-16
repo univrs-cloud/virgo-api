@@ -156,16 +156,6 @@ function pollTime(socket, plugin) {
 
 module.exports = {
 	name: 'polling',
-	onConnection(socket, plugin) {
-		// Initialize polling for various system metrics
-		pollCpuStats(socket, plugin);
-		pollMemory(socket, plugin);
-		pollStorage(socket, plugin);
-		pollDrives(socket, plugin);
-		pollNetworkStats(socket, plugin);
-		pollTime(socket, plugin);
-	},
-	// Export individual polling functions for direct access
 	pollCpuStats,
 	pollMemory,
 	pollStorage,
