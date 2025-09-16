@@ -3,10 +3,10 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 
-class ShareEmitter extends BaseEmitter {
+class SharePlugin extends BasePlugin {
 	#configurationWatcher;
 	#configurationFiles = [
 		'/etc/samba/smb.conf',
@@ -172,5 +172,5 @@ class ShareEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new ShareEmitter(io);
+	return new SharePlugin(io);
 };

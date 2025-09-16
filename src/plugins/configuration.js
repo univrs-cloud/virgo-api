@@ -3,10 +3,10 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 const touch = require('touch');
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 
-class ConfigurationEmitter extends BaseEmitter {
+class ConfigurationPlugin extends BasePlugin {
 	#configurationWatcher;
 	#configurationFile = '/var/www/virgo-api/configuration.json';
 	#msmtpConfigurationFile = '/etc/msmtprc';
@@ -153,5 +153,5 @@ class ConfigurationEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new ConfigurationEmitter(io);
+	return new ConfigurationPlugin(io);
 };

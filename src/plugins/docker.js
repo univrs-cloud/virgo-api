@@ -10,12 +10,12 @@ const changeCase = require('change-case');
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const dockerCompose = require('docker-compose');
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 
 const docker = new dockerode();
 
-class DockerEmitter extends BaseEmitter {
+class DockerPlugin extends BasePlugin {
 	#dataFileWatcher;
 	#dataFile = '/var/www/virgo-api/data.json';
 	#composeDir = '/opt/docker';
@@ -700,5 +700,5 @@ class DockerEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new DockerEmitter(io);
+	return new DockerPlugin(io);
 };

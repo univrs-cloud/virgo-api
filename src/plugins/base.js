@@ -1,20 +1,24 @@
+const fs = require('fs');
+const path = require('path');
 const { Queue, Worker } = require('bullmq');
 
-class BaseEmitter {
+class BasePlugin {
 	#name;
 	#io;
 	#nsp;
 	#state = {};
 	#queue;
 	#worker;
+	#plugins = [];
 
-	constructor(io, name, options = {}) {
+	constructor(io, name) {
 		this.#name = name;
 		this.#io = io;
 		this.#nsp = this.#io.of(`/${this.#name}`);
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		this.#setupQueues();
+		this.#loadPlugins();
 	}
 
 	getNsp() {
@@ -54,10 +58,6 @@ class BaseEmitter {
 		}
 	}
 
-	async processJob(job) {
-		throw new Error('processJob must be implemented by subclasses');
-	}
-
 	async updateJobProgress(job, message) {
 		try {
 			const state = await job.getState();
@@ -65,13 +65,6 @@ class BaseEmitter {
 		} catch (error) {
 			console.error('Failed to update job progress:', error);
 		}
-	}
-
-	onConnection(socket) {
-		console.warn(`[${this.#name}] onConnection() not implemented`);
-	}
-	
-	onDisconnect(socket) {
 	}
 
 	#setupMiddleware() {
@@ -86,12 +79,36 @@ class BaseEmitter {
 	#setupConnectionHandlers() {
 		this.#nsp.on('connection', (socket) => {
 			socket.join(`user:${socket.username}`);
-			this.onConnection(socket);
+
+			if (typeof this.onConnection === 'function') {
+				this.onConnection(socket);
+			}
+			this.#plugins.forEach((plugin) => {
+				if (typeof plugin.onConnection === 'function') {
+					plugin.onConnection(socket, this);
+				}
+			});
 			
 			socket.on('disconnect', () => {
-				this.onDisconnect(socket);
+				if (typeof this.onDisconnect === 'function') {
+					this.onDisconnect(socket);
+				}
+				this.#plugins.forEach((plugin) => {
+					if (typeof plugin.onDisconnect === 'function') {
+						plugin.onDisconnect(socket, this);
+					}
+				});
 			});
 		});
+	}
+
+	async #processJob(job) {
+		for (const plugin of this.#plugins) {
+			if (plugin.jobs && typeof plugin.jobs[job.name] === 'function') {
+				return await plugin.jobs[job.name](job, this);
+			}
+		}
+		throw new Error(`[${this.#name}] Unhandled job: ${job.name}`);
 	}
 
 	#setupQueues() {
@@ -99,7 +116,7 @@ class BaseEmitter {
 		this.#worker = new Worker(
 			`${this.#name}-jobs`,
 			async (job) => {
-				return await this.processJob(job);
+				return await this.#processJob(job);
 			},
 			{
 				connection: {
@@ -122,6 +139,24 @@ class BaseEmitter {
 			console.error(error);
 		});
 	}
+
+	#loadPlugins() {
+		const pluginDir = path.join(__dirname);
+		if (!fs.existsSync(pluginDir)) {
+			return;
+		}
+
+		const pluginFiles = fs.readdirSync(pluginDir).filter((file) => { return file.endsWith('.js'); });
+
+		for (const file of pluginFiles) {
+			if (file === 'index.js') {
+				return;
+			}
+
+			const plugin = require(path.join(pluginDir, file));
+			this.#plugins.push(plugin);
+		}
+	}
 }
 
-module.exports = BaseEmitter;
+module.exports = BasePlugin;

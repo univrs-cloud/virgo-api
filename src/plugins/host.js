@@ -7,7 +7,7 @@ const touch = require('touch');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../../package.json');
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 let i2c;
 try {
@@ -17,7 +17,7 @@ try {
 	i2c = false;
 }
 
-class HostEmitter extends BaseEmitter {
+class HostPlugin extends BasePlugin {
 	#powerSourceWatcher;
 	#upgradeLogsWatcher;
 	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
@@ -591,5 +591,5 @@ class HostEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new HostEmitter(io);
+	return new HostPlugin(io);
 };

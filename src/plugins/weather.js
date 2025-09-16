@@ -1,9 +1,9 @@
 const fs = require('fs');
 const touch = require('touch');
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 const FileWatcher = require('../utils/file_watcher');
 
-class WeatherEmitter extends BaseEmitter {
+class WeatherPlugin extends BasePlugin {
 	#configurationWatcher;
 	#configurationFile = '/var/www/virgo-api/configuration.json';
 	#request = null;
@@ -71,7 +71,7 @@ class WeatherEmitter extends BaseEmitter {
 			'weather:fetch',
 			{ pattern: '0 1 * * * *' }
 		);
-	}	
+	}
 
 	async #fetchWeather() {
 		if (this.#request || this.getState('configuration') === undefined) {
@@ -131,5 +131,5 @@ class WeatherEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new WeatherEmitter(io);
+	return new WeatherPlugin(io);
 };

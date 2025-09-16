@@ -8,7 +8,7 @@ const { Server } = require('socket.io');
 const bodyParser = require('body-parser');
 
 const config = require('./config');
-const socketHandlers = require('./src/emitters');
+const plugins = require('./src/plugins');
 const app = express();
 
 app.disable('x-powered-by');
@@ -26,7 +26,7 @@ const options = {
 const sslServer = https.createServer(options, app);
 const io = new Server(sslServer);
 
-socketHandlers(io);
+plugins(io);
 
 sslServer.listen(config.server.port, () => {
 	console.log(`Server started at https://localhost:${config.server.port}`);

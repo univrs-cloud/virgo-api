@@ -1,7 +1,7 @@
 const { Queue, QueueEvents } = require('bullmq');
-const BaseEmitter = require('./base');
+const BasePlugin = require('./base');
 
-class JobEmitter extends BaseEmitter {
+class JobPlugin extends BasePlugin {
 	#queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
 
 	constructor(io) {
@@ -35,5 +35,5 @@ class JobEmitter extends BaseEmitter {
 }
 
 module.exports = (io) => {
-	return new JobEmitter(io);
+	return new JobPlugin(io);
 };
