@@ -1,8 +1,8 @@
 const BasePlugin = require('./base');
 
 class WeatherPlugin extends BasePlugin {
-	#request = null;
-	#fetchDelay = 10000;
+	request = null;
+	fetchDelay = 10000;
 	fetchRetries = 3;
 
 	constructor(io) {
@@ -16,7 +16,7 @@ class WeatherPlugin extends BasePlugin {
 	}
 
 	async fetchWeather() {
-		if (this.#request || this.getState('configuration') === undefined) {
+		if (this.request || this.getState('configuration') === undefined) {
 			return;
 		}
 	
@@ -25,7 +25,7 @@ class WeatherPlugin extends BasePlugin {
 		const longitude = configuration.location.longitude;
 		let weather;
 		try {
-			this.#request = true;
+			this.request = true;
 			const controller = new AbortController();
 			const timeoutId = setTimeout(() => { controller.abort(); }, 30000); // 30 second timeout
 			const weatherResponse = await fetch(
@@ -50,12 +50,12 @@ class WeatherPlugin extends BasePlugin {
 			weather = false;
 			this.fetchRetries--;
 		} finally {
-			this.#request = null;
+			this.request = null;
 			if (weather === false && this.fetchRetries >= 0) {
-				console.log(`Retrying weather fetch in ${this.#fetchDelay}ms. Attempts remaining: ${this.fetchRetries}`);
+				console.log(`Retrying weather fetch in ${this.fetchDelay}ms. Attempts remaining: ${this.fetchRetries}`);
 				setTimeout(() => {
 					this.fetchWeather();
-				}, this.#fetchDelay);
+				}, this.fetchDelay);
 				return;
 			}
 		}
