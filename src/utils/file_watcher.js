@@ -11,12 +11,12 @@ class FileWatcher {
 	#toWatch = [];
 
 	constructor(toWatch, options = {}) {
-		this.#toWatch = toWatch;
+		this.#toWatch = (Array.isArray(toWatch) ? toWatch : [toWatch]);
 		this.#options = {
 			...this.#options,
 			...options
 		};
-		return this.start();
+		this.start();
 	}
 
 	start() {
@@ -24,7 +24,7 @@ class FileWatcher {
 			return this;
 		}
 
-		this.#watcher = chokidar.watch(this.#toWatch, this.options);
+		this.#watcher = chokidar.watch(this.#toWatch, this.#options);
 		this.#watcher
 			.on('all', (event, path) => {
 				this.#triggerCallbacks(event, path);
@@ -44,40 +44,36 @@ class FileWatcher {
 	}
 
 	getWatched() {
+		if (!this.#watcher) {
+			return {};
+		}
+
 		return this.#watcher.getWatched();
 	}
 
 	add(toWatch) {
-		if (Array.isArray(toWatch)) {
-			toWatch.forEach(item => {
-				if (typeof item === 'string') {
-					this.#toWatch.push(item);
-					this.#watcher.add(item);
-				} else {
-					console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
-				}
-			});
-		} else if (typeof toWatch === 'string') {
-			this.#toWatch.push(toWatch);
-			this.#watcher.add(toWatch);
-		}
+		const items = (Array.isArray(toWatch) ? toWatch : [toWatch]);
+		items.forEach(item => {
+			if (typeof item === 'string') {
+				this.#toWatch.push(item);
+				this.#watcher?.add(item);
+			} else {
+				console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
+			}
+		});
 		return this;
 	}
 
 	remove(toUnwatch) {
-		if (Array.isArray(toUnwatch)) {
-			toUnwatch.forEach(item => {
-				if (typeof item === 'string') {
-					this.#toWatch = this.#toWatch.filter((existingItem) => { return existingItem !== item; });
-					this.#watcher.unwatch(item);
-				} else {
-					console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
-				}
-			});
-		} else if (typeof toUnwatch === 'string') {
-			this.#toWatch = this.#toWatch.filter((existingItem) => { return existingItem !== toUnwatch; });
-			this.#watcher.unwatch(toUnwatch);
-		}
+		const items = (Array.isArray(toUnwatch) ? toUnwatch : [toUnwatch]);
+		items.forEach(item => {
+			if (typeof item === 'string') {
+				this.#toWatch = this.#toWatch.filter((existingItem) => { return existingItem !== item; });
+				this.#watcher?.unwatch(item);
+			} else {
+				console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
+			}
+		});
 		return this;
 	}
 

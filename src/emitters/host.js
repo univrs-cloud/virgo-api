@@ -40,14 +40,23 @@ class HostEmitter extends BaseEmitter {
 			}
 		});
 		si.system((system) => {
-			let stdout = childProcess.execSync('zfs version -j 2>/dev/null');
-			let zfs = { version: JSON.parse(stdout).zfs_version.kernel.replace('zfs-kmod-', '') };
-			this.setState('system', { ...this.getState('system'), ...system, zfs });
+			try {
+				let stdout = childProcess.execSync('zfs version -j 2>/dev/null');
+				const parsed = JSON.parse(stdout);
+				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
+				this.setState('system', { ...this.getState('system'), ...system, zfs });
+			} catch (error) {
+				console.error(error);
+			}
 		});
 		si.osInfo((osInfo) => {
-			let stdout = childProcess.execSync('hostname -f 2>/dev/null');
-			osInfo.fqdn = stdout.toString().split(os.EOL)[0];
-			this.setState('system', { ...this.getState('system'), osInfo });
+			try {
+				let stdout = childProcess.execSync('hostname -f 2>/dev/null');
+				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
+				this.setState('system', { ...this.getState('system'), osInfo });
+			} catch (error) {
+				console.error(error);
+			}
 		});
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
@@ -531,7 +540,7 @@ class HostEmitter extends BaseEmitter {
 					name: drive.device.name,
 					model: drive.model_name,
 					serialNumber: drive.serial_number,
-					capcity: drive.user_capacity,
+					capacity: drive.user_capacity,
 					temperature: drive.temperature.current,
 					temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
 					temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp: 99)

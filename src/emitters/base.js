@@ -59,11 +59,16 @@ class BaseEmitter {
 	}
 
 	async updateJobProgress(job, message) {
-		const state = await job.getState();
-		await job.updateProgress({ state, message });
+		try {
+			const state = await job.getState();
+			await job.updateProgress({ state, message });
+		} catch (error) {
+			console.error('Failed to update job progress:', error);
+		}
 	}
 
 	onConnection(socket) {
+		console.warn(`[${this.#name}] onConnection() not implemented`);
 	}
 	
 	onDisconnect(socket) {
