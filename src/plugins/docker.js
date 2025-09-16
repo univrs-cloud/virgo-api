@@ -1,4 +1,8 @@
+const camelcaseKeys = require('camelcase-keys').default;
+const dockerode = require('dockerode');
 const BasePlugin = require('./base');
+
+const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
 	constructor(io) {
