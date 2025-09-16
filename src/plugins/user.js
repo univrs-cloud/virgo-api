@@ -7,10 +7,19 @@ const linuxUser = require('linux-sys-user').promise();
 const BasePlugin = require('./base');
 
 class UserPlugin extends BasePlugin {
+	#autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
+	#cost = 12;
+
 	constructor(io) {
 		super(io, 'user');
-		this.autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
-		this.cost = 12;
+	}
+
+	get autheliaUsersFile() {
+		return this.#autheliaUsersFile;
+	}
+
+	get cost() {
+		return this.#cost;
 	}
 
 	onConnection(socket) {

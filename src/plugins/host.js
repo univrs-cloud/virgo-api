@@ -18,19 +18,15 @@ try {
 }
 
 class HostPlugin extends BasePlugin {
-	#powerSourceWatcher;
-	#upgradeLogsWatcher;
-	#upgradePidFile;
-	#upgradeFile;
-	#upgradePid;
-	#checkUpgradeIntervalId;
+	#powerSourceWatcher = undefined;
+	#upgradeLogsWatcher = undefined;
+	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
+	#upgradeFile = '/var/www/virgo-api/upgrade.log';
+	#upgradePid = null;
+	#checkUpgradeIntervalId = null;
 
 	constructor(io) {
 		super(io, 'host');
-		this.#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
-		this.#upgradeFile = '/var/www/virgo-api/upgrade.log';
-		this.#upgradePid = null;
-		this.#checkUpgradeIntervalId = null;
 		this.#watchPowerSource();
 		this.#scheduleUpdatesChecker();
 		this.#scheduleUpsChecker();

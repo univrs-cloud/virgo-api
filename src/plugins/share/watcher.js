@@ -4,10 +4,6 @@ const exec = util.promisify(require('child_process').exec);
 const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
-let configurationFiles = [
-	'/etc/samba/smb.conf',
-	'/messier/.shares'
-];
 
 const watchConfigurations = async (plugin) => {
 	const isPathWatched = (pathToCheck) => {
@@ -33,7 +29,7 @@ const watchConfigurations = async (plugin) => {
 			plugin.emitShares();
 		});
 
-	configurationFiles.forEach(configurationPath => {
+	plugin.configurationFiles.forEach(configurationPath => {
 		try {
 			fs.accessSync(configurationPath);
 			configurationWatcher.add(configurationPath);
@@ -44,7 +40,7 @@ const watchConfigurations = async (plugin) => {
 
 	const retryInterval = setInterval(() => {
 		let allWatched = true;
-		configurationFiles.forEach(configurationPath => {
+		plugin.configurationFiles.forEach(configurationPath => {
 			try {
 				fs.accessSync(configurationPath);
 				// If path exists but not being watched, add it
