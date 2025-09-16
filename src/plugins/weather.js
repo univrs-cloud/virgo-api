@@ -6,6 +6,7 @@ class WeatherPlugin extends BasePlugin {
 	}
 
 	init() {
+		this.configurationFile = '/var/www/virgo-api/configuration.json';
 		this.request = null;
 		this.fetchDelay = 10000;
 		this.fetchRetries = 3;

@@ -3,11 +3,10 @@ const touch = require('touch');
 const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
-let configurationFile = '/var/www/virgo-api/configuration.json';
 
 const watchConfiguration = (plugin) => {
     const readFile = () => {
-        let data = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
+        let data = fs.readFileSync(plugin.configurationFile, { encoding: 'utf8', flag: 'r' });
         data = data.trim();
         if (data === '') {
             plugin.setState(
@@ -29,13 +28,13 @@ const watchConfiguration = (plugin) => {
         return;
     }
 
-    if (!fs.existsSync(configurationFile)) {
-        touch.sync(configurationFile);
+    if (!fs.existsSync(plugin.configurationFile)) {
+        touch.sync(plugin.configurationFile);
     }
     
     readFile();
     
-    configurationWatcher = new FileWatcher(configurationFile);
+    configurationWatcher = new FileWatcher(plugin.configurationFile);
     configurationWatcher
         .onChange((event, path) => {
             readFile();
