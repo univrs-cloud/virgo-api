@@ -1,10 +1,9 @@
 const BasePlugin = require('./base');
 
 class ConfigurationPlugin extends BasePlugin {
-	configurationFile = '/var/www/virgo-api/configuration.json';
-
 	constructor(io) {
 		super(io, 'configuration');
+		this.configurationFile = '/var/www/virgo-api/configuration.json';
 	}
 
 	onConnection(socket) {

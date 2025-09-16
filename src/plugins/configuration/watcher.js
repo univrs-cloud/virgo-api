@@ -2,6 +2,8 @@ const fs = require('fs');
 const touch = require('touch');
 const FileWatcher = require('../../utils/file_watcher');
 
+let configurationWatcher;
+
 module.exports = {
 	register(plugin) {
 		const readFile = () => {
@@ -36,7 +38,7 @@ module.exports = {
 		
 		readFile();
 	
-		const configurationWatcher = new FileWatcher(plugin.configurationFile);
+		configurationWatcher = new FileWatcher(plugin.configurationFile);
 		configurationWatcher
 			.onChange((event, path) => {
 				readFile();

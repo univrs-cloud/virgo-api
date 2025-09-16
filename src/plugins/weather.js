@@ -1,12 +1,11 @@
 const BasePlugin = require('./base');
 
 class WeatherPlugin extends BasePlugin {
-	request = null;
-	fetchDelay = 10000;
-	fetchRetries = 3;
-
 	constructor(io) {
 		super(io, 'weather');
+		this.request = null;
+		this.fetchDelay = 10000;
+		this.fetchRetries = 3;
 	}
 
 	onConnection(socket) {
