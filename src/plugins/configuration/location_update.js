@@ -1,5 +1,17 @@
 const fs = require('fs');
 
+const updateLocation = async (job, plugin) => {
+	let config = job.data.config;
+	await plugin.updateJobProgress(job, `Saving location...`);
+	
+	let configuration = plugin.getState('configuration');
+	configuration.location = config;
+	fs.writeFileSync(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8', { flag: 'w' });
+	plugin.setState('configuration', configuration);
+	
+	return `Location saved.`;
+};
+
 module.exports = {
 	onConnection(socket, plugin) {
 		socket.on('configuration:location:update', async (config) => {
@@ -7,16 +19,6 @@ module.exports = {
 		});
 	},
 	jobs: {
-		'location:update': async (job, plugin) => {
-			let config = job.data.config;
-			await plugin.updateJobProgress(job, `Saving location...`);
-			
-			let configuration = plugin.getState('configuration');
-			configuration.location = config;
-			fs.writeFileSync(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8', { flag: 'w' });
-			plugin.setState('configuration', configuration);
-			
-			return `Location saved.`;
-		}
+		'location:update': updateLocation
 	}
 };

@@ -5,7 +5,7 @@ const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
 
-const watchConfigurations = async (plugin) => {
+const watchConfigurations = (plugin) => {
 	const isPathWatched = (pathToCheck) => {
 		const watchedPaths = configurationWatcher.getWatched();
 		const dir = pathToCheck.split('/').slice(0, -1).join('/') || '/';

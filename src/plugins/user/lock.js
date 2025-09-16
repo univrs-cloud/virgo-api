@@ -2,6 +2,27 @@ const util = require('util');
 const childProcess = require('child_process');
 const exec = util.promisify(childProcess.exec);
 
+const lockUser = async (job, plugin) => {
+	let config = job.data.config;
+	let user = plugin.getState('users').find((user) => { return user.username === config.username; });
+	if (!user) {
+		throw new Error(`User ${config.username} not found.`);
+	}
+
+	if (user.uid === 1000) {
+		throw new Error(`Owner cannot be locked.`);
+	}
+
+	await plugin.updateJobProgress(job, `Locking system user ${config.username}...`);
+	await exec(`passwd -l ${config.username}`);
+	await plugin.updateJobProgress(job, `Locking Samba user ${config.username}...`);
+	await exec(`smbpasswd -d ${config.username}`);
+	await plugin.updateJobProgress(job, `Locking Authelia user ${config.username}...`);
+	await plugin.toggleAutheliaUserLock(config.username, true);
+	await plugin.emitUsers();
+	return `${config.username} locked.`;
+};
+
 module.exports = {
 	onConnection(socket, plugin) {
 		socket.on('user:lock', async (config) => {
@@ -9,25 +30,6 @@ module.exports = {
 		});
 	},
 	jobs: {
-		'user:lock': async (job, plugin) => {
-			let config = job.data.config;
-			let user = plugin.getState('users').find((user) => { return user.username === config.username; });
-			if (!user) {
-				throw new Error(`User ${config.username} not found.`);
-			}
-		
-			if (user.uid === 1000) {
-				throw new Error(`Owner cannot be locked.`);
-			}
-		
-			await plugin.updateJobProgress(job, `Locking system user ${config.username}...`);
-			await exec(`passwd -l ${config.username}`);
-			await plugin.updateJobProgress(job, `Locking Samba user ${config.username}...`);
-			await exec(`smbpasswd -d ${config.username}`);
-			await plugin.updateJobProgress(job, `Locking Authelia user ${config.username}...`);
-			await plugin.toggleAutheliaUserLock(config.username, true);
-			await plugin.emitUsers();
-			return `${config.username} locked.`;
-		}
+		'user:lock': lockUser
 	}
 };

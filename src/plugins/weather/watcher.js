@@ -5,7 +5,7 @@ const FileWatcher = require('../../utils/file_watcher');
 let configurationWatcher;
 let configurationFile = '/var/www/virgo-api/configuration.json';
 
-const watchConfigurations = async (plugin) => {
+const watchConfiguration = (plugin) => {
     const readFile = () => {
         let data = fs.readFileSync(configurationFile, { encoding: 'utf8', flag: 'r' });
         data = data.trim();
@@ -44,6 +44,6 @@ const watchConfigurations = async (plugin) => {
 
 module.exports = {
 	register(plugin) {
-		watchConfigurations(plugin);
+		watchConfiguration(plugin);
 	}
 };

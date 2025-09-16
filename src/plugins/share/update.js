@@ -1,3 +1,11 @@
+const updateShare = async (job, plugin) => {
+	let config = job.data.config;
+	await plugin.updateJobProgress(job, `Updating share ${config.name}...`);
+	// TODO: Implement actual share update logic
+	await plugin.emitShares();
+	return `Share ${config.name} updated.`;
+};
+
 module.exports = {
 	onConnection(socket, plugin) {
 		socket.on('share:update', async (config) => {
@@ -5,12 +13,6 @@ module.exports = {
 		});
 	},
 	jobs: {
-		'share:update': async (job, plugin) => {
-			let config = job.data.config;
-			await plugin.updateJobProgress(job, `Updating share ${config.name}...`);
-			// TODO: Implement actual share update logic
-			await plugin.emitShares();
-			return `Share ${config.name} updated.`;
-		}
+		'share:update': updateShare
 	}
 };
