@@ -55,6 +55,6 @@
 	"author": "univrs",
 	"license": "UNLICENSED",
 	"devDependencies": {
-		"@types/node": "^24.3.3"
+		"@types/node": "^24.5.0"
 	}
 }
