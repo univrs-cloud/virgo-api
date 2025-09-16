@@ -7,8 +7,8 @@ class WeatherPlugin extends BasePlugin {
 	#configurationWatcher;
 	#configurationFile = '/var/www/virgo-api/configuration.json';
 	#request = null;
-	#fetchRetries = 3;
 	#fetchDelay = 10000;
+	fetchRetries = 3;
 
 	constructor(io) {
 		super(io, 'weather');
@@ -19,13 +19,6 @@ class WeatherPlugin extends BasePlugin {
 	onConnection(socket) {
 		if (this.getState('weather')) {
 			this.getNsp().emit('weather', this.getState('weather'));
-		}
-	}
-
-	async processJob(job) {
-		if (job.name === 'weather:fetch') {
-			this.#fetchRetries = 3;
-			return await this.#fetchWeather();
 		}
 	}
 
@@ -46,7 +39,7 @@ class WeatherPlugin extends BasePlugin {
 			} else {
 				this.setState('configuration', JSON.parse(data));
 			}
-			this.#fetchWeather();
+			this.fetchWeather();
 		};
 
 		if (this.#configurationWatcher) {
@@ -73,7 +66,7 @@ class WeatherPlugin extends BasePlugin {
 		);
 	}
 
-	async #fetchWeather() {
+	async fetchWeather() {
 		if (this.#request || this.getState('configuration') === undefined) {
 			return;
 		}
@@ -106,20 +99,20 @@ class WeatherPlugin extends BasePlugin {
 				console.error('Request timed out after 30 seconds');
 			}
 			weather = false;
-			this.#fetchRetries--;
+			this.fetchRetries--;
 		} finally {
 			this.#request = null;
-			if (weather === false && this.#fetchRetries >= 0) {
-				console.log(`Retrying weather fetch in ${this.#fetchDelay}ms. Attempts remaining: ${this.#fetchRetries}`);
+			if (weather === false && this.fetchRetries >= 0) {
+				console.log(`Retrying weather fetch in ${this.#fetchDelay}ms. Attempts remaining: ${this.fetchRetries}`);
 				setTimeout(() => {
-					this.#fetchWeather();
+					this.fetchWeather();
 				}, this.#fetchDelay);
 				return;
 			}
 		}
 		
 		if (weather) {
-			this.#fetchRetries = 3;
+			this.fetchRetries = 3;
 			this.setState('weather', weather);
 			this.getNsp().emit('weather', this.getState('weather'));
 		} else {
