@@ -44,7 +44,7 @@ async function upgrade(socket, plugin) {
 	}
 
 	try {
-		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove > /var/www/virgo-api/upgrade.log 2>&1"`);
+		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`);
 		checkUpgrade(socket, plugin);
 	} catch (error) {
 		const watcherPlugin = plugin.getPlugin('watcher');
