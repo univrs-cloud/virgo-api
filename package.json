@@ -29,7 +29,7 @@
 	"dependencies": {
 		"bcryptjs": "^3.0.2",
 		"body-parser": "^2.2.0",
-		"bullmq": "^5.58.5",
+		"bullmq": "^5.58.7",
 		"camelcase-keys": "^10.0.0",
 		"change-case": "^5.4.4",
 		"check-disk-space": "^3.4.0",
@@ -45,7 +45,7 @@
 		"linux-sys-user": "^1.2.0",
 		"path": "^0.12.7",
 		"socket.io": "^4.8.1",
-		"systeminformation": "^5.27.9",
+		"systeminformation": "^5.27.10",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
@@ -55,6 +55,6 @@
 	"author": "univrs",
 	"license": "UNLICENSED",
 	"devDependencies": {
-		"@types/node": "^24.5.0"
+		"@types/node": "^24.5.2"
 	}
 }
