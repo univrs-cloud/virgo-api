@@ -1,4 +1,5 @@
 const fs = require('fs');
+const touch = require('touch');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 
@@ -112,8 +113,9 @@ async function shutdown(socket, plugin) {
 
 function checkUpgrade(socket, plugin) {
 	if (!fs.existsSync(plugin.upgradePidFile)) {
-		fs.closeSync(fs.openSync(plugin.upgradePidFile, 'w'));
+		touch.sync(plugin.upgradePidFile);
 	}
+
 	let data = fs.readFileSync(plugin.upgradePidFile, { encoding: 'utf8', flag: 'r' });
 	data = data.trim();
 	if (data === '') {
@@ -136,7 +138,7 @@ function checkUpgrade(socket, plugin) {
 	}
 
 	plugin.checkUpgradeIntervalId = setInterval(async () => {
-		if (isUpgradeInProgress(plugin)) {
+		if (await plugin.isUpgradeInProgress()) {
 			return;
 		}
 
@@ -151,15 +153,6 @@ function checkUpgrade(socket, plugin) {
 		plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
 		updates(socket, plugin);
 	}, 1000);
-}
-
-function isUpgradeInProgress(plugin) {
-	try {
-		process.kill(plugin.upgradePid, 0);
-		return true;
-	} catch (error) {
-		return false;
-	}
 }
 
 function updates(socket, plugin) {

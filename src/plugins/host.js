@@ -1,5 +1,9 @@
 const os = require('os');
+const fs = require('fs');
+const touch = require('touch');
 const childProcess = require('child_process');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 const si = require('systeminformation');
 const { version } = require('../../package.json');
 const BasePlugin = require('./base');
@@ -124,9 +128,6 @@ class HostPlugin extends BasePlugin {
 	}
 
 	async checkForUpdates() {
-		const util = require('util');
-		const exec = util.promisify(require('child_process').exec);
-		
 		try {
 			const response = await exec('apt-show-versions -u');
 			let updates = response.stdout.trim();
@@ -179,11 +180,10 @@ class HostPlugin extends BasePlugin {
 	}
 
 	checkUpgrade(socket) {
-		const fs = require('fs');
-		
 		if (!fs.existsSync(this.upgradePidFile)) {
-			fs.closeSync(fs.openSync(this.upgradePidFile, 'w'));
+			touch.sync(this.upgradePidFile);
 		}
+
 		let data = fs.readFileSync(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data === '') {
@@ -206,7 +206,7 @@ class HostPlugin extends BasePlugin {
 		}
 	
 		this.checkUpgradeIntervalId = setInterval(async () => {
-			if (this.isUpgradeInProgress()) {
+			if (await this.isUpgradeInProgress()) {
 				return;
 			}
 	
@@ -223,10 +223,31 @@ class HostPlugin extends BasePlugin {
 		}, 1000);
 	}
 
-	isUpgradeInProgress() {
+	async isUpgradeInProgress() {
 		try {
-			process.kill(this.upgradePid, 0);
-			return true;
+			if (this.upgradePid !== null) {
+				try {
+					process.kill(this.upgradePid, 0);
+					return true;
+				} catch (error) {
+					// PID is dead, but check if apt-get is still running (systemd upgrade case)
+				}
+			}
+	
+			// Check if apt-get dist-upgrade is currently running (handles systemd upgrade case)
+			const { stdout } = await exec('pgrep -f "apt-get dist-upgrade" || echo ""');
+			if (stdout.trim() !== '') {
+				// Update the PID to the actual running process
+				const pids = stdout.trim().split('\n');
+				if (pids.length > 0) {
+					this.upgradePid = parseInt(pids[0], 10);
+					fs.writeFileSync(this.upgradePidFile, this.upgradePid, 'utf8', { flag: 'w' });
+					//TODO: write new pid to file
+				}
+				return true;
+			}
+			
+			return false;
 		} catch (error) {
 			return false;
 		}
