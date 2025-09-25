@@ -51,7 +51,7 @@ async function upgrade(socket, plugin) {
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			`"echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::="--force-confold" --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`
+			`"echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`
 		], { shell: true });
 		await plugin.checkUpgrade(socket);
 	} catch (error) {

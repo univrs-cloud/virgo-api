@@ -45,8 +45,8 @@ async function pollStorage(socket, plugin) {
 	}
 
 	try {
-		const poolsList = await execa('zpool list -jp --json-int | jq', { shell: true, reject: false });
-		const poolsStatus = await execa('zpool status -jp --json-int | jq', { shell: true, reject: false });
+		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false }).pipe('jq');
+		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false }).pipe('jq');
 		const filesystems = await si.fsSize();
 		const pools = JSON.parse(poolsStatus.stdout).pools;
 		let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
