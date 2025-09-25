@@ -1,7 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const childProcess = require('child_process');
-const exec = util.promisify(childProcess.exec);
+const { execa } = require('execa');
 const yaml = require('js-yaml');
 const linuxUser = require('linux-sys-user').promise();
 
@@ -19,7 +17,7 @@ const deleteUser = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `Deleting Authelia user ${config.username}...`);
 	await deleteAutheliaUser();
 	await plugin.updateJobProgress(job, `Deleting SMB user ${config.username}...`);
-	await exec(`smbpasswd -s -x ${config.username}`);
+	await execa('smbpasswd', ['-s', '-x', config.username]);
 	await plugin.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
 	await plugin.emitUsers();

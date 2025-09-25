@@ -1,5 +1,4 @@
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 
@@ -12,7 +11,7 @@ async function pollCpuStats(socket, plugin) {
 	try {
 		const currentLoad = await si.currentLoad();
 		const cpuTemperature = await si.cpuTemperature();
-		const fan = await exec('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true');
+		const fan = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true, reject: false });
 		plugin.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
 	} catch (error) {
 		plugin.setState('cpuStats', false);
@@ -46,8 +45,8 @@ async function pollStorage(socket, plugin) {
 	}
 
 	try {
-		const poolsList = await exec('zpool list -jp --json-int | jq');
-		const poolsStatus = await exec('zpool status -jp --json-int | jq');
+		const poolsList = await execa('zpool list -jp --json-int | jq', { shell: true, reject: false });
+		const poolsStatus = await execa('zpool status -jp --json-int | jq', { shell: true, reject: false });
 		const filesystems = await si.fsSize();
 		const pools = JSON.parse(poolsStatus.stdout).pools;
 		let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
@@ -96,8 +95,8 @@ async function pollDrives(socket, plugin) {
 	}
 
 	try {
-		const responseSmartctl = await exec(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`);
-		const responseNvme = await exec(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`);
+		const responseSmartctl = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true, reject: false });
+		const responseNvme = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true, reject: false });
 		let drives = JSON.parse(responseSmartctl.stdout);
 		let nvme = JSON.parse(responseNvme.stdout);
 		plugin.setState('drives', drives.map((drive, index) => {

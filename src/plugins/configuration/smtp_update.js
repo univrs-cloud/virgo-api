@@ -1,6 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
@@ -23,7 +22,7 @@ const updateSmtp = async (job, plugin) => {
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');
-	await exec('systemctl restart zfs-zed');
+	await execa('systemctl', ['restart', 'zfs-zed']);
 	
 	return `Notification server saved.`;
 

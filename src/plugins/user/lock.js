@@ -1,6 +1,4 @@
-const util = require('util');
-const childProcess = require('child_process');
-const exec = util.promisify(childProcess.exec);
+const { execa } = require('execa');
 
 const lockUser = async (job, plugin) => {
 	let config = job.data.config;
@@ -14,9 +12,9 @@ const lockUser = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `Locking system user ${config.username}...`);
-	await exec(`passwd -l ${config.username}`);
+	await execa('passwd', ['-l', config.username]);
 	await plugin.updateJobProgress(job, `Locking Samba user ${config.username}...`);
-	await exec(`smbpasswd -d ${config.username}`);
+	await execa('smbpasswd', ['-d', config.username]);
 	await plugin.updateJobProgress(job, `Locking Authelia user ${config.username}...`);
 	await plugin.toggleAutheliaUserLock(config.username, true);
 	await plugin.emitUsers();

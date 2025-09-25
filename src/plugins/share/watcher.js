@@ -1,6 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
@@ -25,7 +24,7 @@ const watchConfigurations = (plugin) => {
 	configurationWatcher = new FileWatcher([]);
 	configurationWatcher
 		.onChange(async (event, path) => {
-			await exec(`smbcontrol all reload-config`);
+			await execa('smbcontrol', ['all', 'reload-config']);
 			plugin.emitShares();
 		});
 

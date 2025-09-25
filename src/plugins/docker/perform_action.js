@@ -1,6 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 const dockerode = require('dockerode');
 
 const docker = new dockerode();
@@ -27,7 +26,7 @@ const performAppAction = async (job, plugin) => {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
 	}
 
-	await exec(`docker compose -p ${composeProject} ${config.action}`);
+	await execa('docker', ['compose', '-p', composeProject, config.action]);
 	if (config.action === 'down') {
 		let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 		configuration = configuration.filter((entity) => { return entity.name !== config.name });

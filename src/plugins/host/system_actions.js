@@ -1,7 +1,5 @@
 const fs = require('fs');
-const touch = require('touch');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 
 async function checkUpdates(socket, plugin) {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
@@ -15,7 +13,7 @@ async function checkUpdates(socket, plugin) {
 	plugin.setState('checkUpdates', true);
 	plugin.getNsp().to(`user:${socket.username}`).emit('host:updates:check', plugin.getState('checkUpdates'));
 	try {
-		await exec('apt update --allow-releaseinfo-change');
+		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		plugin.setState('checkUpdates', false);
 		updates(socket, plugin);
 	} catch (error) {
@@ -45,7 +43,16 @@ async function upgrade(socket, plugin) {
 	}
 
 	try {
-		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`);
+		await execa('systemd-run', [
+			'--unit=upgrade-system',
+			'--description=System upgrade',
+			'--wait',
+			'--collect',
+			'--setenv=DEBIAN_FRONTEND=noninteractive',
+			'bash',
+			'-c',
+			`echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}`
+		]);
 		plugin.checkUpgrade(socket, plugin);
 	} catch (error) {
 		const watcherPlugin = plugin.getPlugin('watcher');
@@ -83,7 +90,7 @@ async function reboot(socket, plugin) {
 	}
 
 	try {
-		await exec('reboot');
+		await execa('reboot');
 		plugin.setState('reboot', true);
 	} catch (error) {
 		plugin.setState('reboot', false);
@@ -102,7 +109,7 @@ async function shutdown(socket, plugin) {
 	}
 
 	try {
-		await exec('shutdown -h now');
+		await execa('shutdown', ['-h', 'now']);
 		plugin.setState('shutdown', true);
 	} catch (error) {
 		plugin.setState('shutdown', false);

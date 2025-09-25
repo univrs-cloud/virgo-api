@@ -1,6 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
 const BasePlugin = require('./base');
@@ -36,7 +35,7 @@ class SharePlugin extends BasePlugin {
 	async emitShares() {
 		const getShares = async () => {
 			try {
-				const response = await exec('testparm -s -l');
+				const response = await execa('testparm', ['-s', '-l']);
 				const shares = ini.parse(response.stdout);
 				delete shares.global;
 				let promises = Object.entries(shares).map(async ([name, value]) => {

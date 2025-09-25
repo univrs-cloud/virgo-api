@@ -1,7 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const childProcess = require('child_process');
-const exec = util.promisify(childProcess.exec);
+const { execa } = require('execa');
 const yaml = require('js-yaml');
 const linuxUser = require('linux-sys-user').promise();
 const BasePlugin = require('./base');
@@ -48,7 +46,10 @@ class UserPlugin extends BasePlugin {
 
 	async setSambaUserPassword(username, password) {
 		try {
-			await exec(`echo "${password}\n${password}" | smbpasswd -s -a "${username}"`);
+			const proc = execa('smbpasswd', ['-s', '-a', username]);
+			proc.stdin.write(`${password}\n${password}\n`);
+  			proc.stdin.end();
+			await proc;
 		} catch (error) {
 			console.log(error);
 		}

@@ -1,8 +1,6 @@
 const fs = require('fs');
-const util = require('util');
-const childProcess = require('child_process');
+const { execa } = require('execa');
 const yaml = require('js-yaml');
-const exec = util.promisify(childProcess.exec);
 
 const updateUser = async (job, plugin) => {
 	let config = job.data.config;
@@ -17,7 +15,7 @@ const updateUser = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `Updating system user ${config.username}...`);
-	await exec(`chfn -f "${config.fullname}" ${config.username}`);
+	await execa('chfn', ['-f', config.fullname, config.username]);
 	await plugin.updateJobProgress(job, `Updating Authelia user ${config.username}...`);
 	await updateAutheliaUser();
 	await plugin.emitUsers();

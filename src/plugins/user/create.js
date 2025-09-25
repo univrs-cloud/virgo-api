@@ -1,7 +1,5 @@
 const fs = require('fs');
-const util = require('util');
-const childProcess = require('child_process');
-const exec = util.promisify(childProcess.exec);
+const { execa } = require('execa');
 const yaml = require('js-yaml');
 const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
@@ -20,7 +18,7 @@ const createUser = async (job, plugin) => {
 		shell: null
 	});
 	await linuxUser.setPassword(config.username, config.password);
-	await exec(`chfn -f "${config.fullname}" ${config.username}`);
+	await execa('chfn', ['-f', config.fullname, config.username]);
 	await plugin.updateJobProgress(job, `Creating SMB user ${config.username}...`);
 	await plugin.setSambaUserPassword(config.username, config.password);
 	await plugin.updateJobProgress(job, `Creating Authelia user ${config.username}...`);

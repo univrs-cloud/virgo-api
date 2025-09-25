@@ -1,8 +1,7 @@
 const os = require('os');
 const fs = require('fs');
 const touch = require('touch');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
+const { execa } = require('execa');
 const si = require('systeminformation');
 const { version } = require('../../package.json');
 const BasePlugin = require('./base');
@@ -40,7 +39,7 @@ class HostPlugin extends BasePlugin {
 		});
 		si.system(async (system) => {
 			try {
-				let stdout = await exec('zfs version -j 2>/dev/null');
+				let { stdout } = await execa('zfs', ['version', '-j'], { reject: false });
 				const parsed = JSON.parse(stdout);
 				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
 				this.setState('system', { ...this.getState('system'), ...system, zfs });
@@ -50,7 +49,7 @@ class HostPlugin extends BasePlugin {
 		});
 		si.osInfo(async (osInfo) => {
 			try {
-				let stdout = await exec('hostname -f 2>/dev/null');
+				let { stdout } = await execa('hostname', ['-f'], { reject: false });
 				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
 				this.setState('system', { ...this.getState('system'), osInfo });
 			} catch (error) {
@@ -128,7 +127,7 @@ class HostPlugin extends BasePlugin {
 
 	async checkForUpdates() {
 		try {
-			const response = await exec('apt-show-versions -u');
+			const response = await execa('apt-show-versions', ['-u']);
 			const updates = response.stdout.trim();
 			if (updates !== '') {
 				this.setState('updates', updates.split('\n').map((line) => {
@@ -238,16 +237,17 @@ class HostPlugin extends BasePlugin {
 			}
 	
 			// Check if apt-get dist-upgrade is currently running (handles systemd upgrade case)
-			const { stdout } = await exec('pgrep -f "apt-get dist-upgrade" || echo ""');
-			if (stdout.trim() !== '') {
-				// Update the PID to the actual running process
+			try {
+				const { stdout } = await execa('pgrep', ['-f', 'apt-get dist-upgrade']);
 				const pids = stdout.trim().split('\n');
-				if (pids.length > 0) {
+				if (pids.length > 0 && pids[0] !== '') {
+					// Update the PID to the actual running process
 					this.upgradePid = parseInt(pids[0], 10);
 					await fs.promises.writeFile(this.upgradePidFile, this.upgradePid, 'utf8');
-					//TODO: write new pid to file
+					return true;
 				}
-				return true;
+			} catch (error) {
+				return false;
 			}
 			
 			return false;
