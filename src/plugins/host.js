@@ -182,7 +182,17 @@ class HostPlugin extends BasePlugin {
 	}
 
 	async checkUpgrade(socket) {
-		if (!await this.isUpgradeInProgress()) {
+		try {
+			await fs.promises.access(this.upgradePidFile);
+		} catch (error) {
+			await touch(this.upgradePidFile);
+		}
+
+		let upgradePid = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
+		upgradePid = upgradePid.trim();
+		this.upgradePid = (upgradePid === '' ? null : parseInt(upgradePid, 10));
+
+		if (this.upgradePid === null) {
 			this.setState('upgrade', undefined);
 			this.getNsp().emit('host:upgrade', null);
 			return;
@@ -218,20 +228,6 @@ class HostPlugin extends BasePlugin {
 
 	async isUpgradeInProgress() {
 		try {
-			await fs.promises.access(this.upgradePidFile);
-		} catch (error) {
-			await touch(this.upgradePidFile);
-		}
-
-		let data = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
-		data = data.trim();
-		if (data === '') {
-			this.upgradePid = null;
-		} else {
-			this.upgradePid = data;
-		}
-
-		try {
 			if (this.upgradePid !== null) {
 				try {
 					process.kill(this.upgradePid, 0);
@@ -239,20 +235,20 @@ class HostPlugin extends BasePlugin {
 				} catch (error) {
 					// PID is dead, but check if apt-get is still running (systemd upgrade case)
 				}
-			}
 	
-			// Check if apt-get dist-upgrade is currently running (handles systemd upgrade case)
-			try {
-				const { stdout } = await execa('pgrep', ['-f', 'apt-get dist-upgrade']);
-				const pids = stdout.trim().split('\n');
-				if (pids.length > 0 && pids[0] !== '') {
-					// Update the PID to the actual running process
-					this.upgradePid = parseInt(pids[0], 10);
-					await fs.promises.writeFile(this.upgradePidFile, this.upgradePid, 'utf8');
-					return true;
+				// Check if apt-get dist-upgrade is currently running (handles systemd upgrade case)
+				try {
+					const { stdout } = await execa('pgrep', ['-f', 'apt-get dist-upgrade']);
+					const pids = stdout.trim().split('\n');
+					if (pids.length > 0 && pids[0] !== '') {
+						// Update the PID to the actual running process
+						this.upgradePid = parseInt(pids[0], 10);
+						await fs.promises.writeFile(this.upgradePidFile, this.upgradePid, 'utf8');
+						return true;
+					}
+				} catch (error) {
+					return false;
 				}
-			} catch (error) {
-				return false;
 			}
 			
 			return false;
