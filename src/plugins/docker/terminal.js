@@ -74,7 +74,7 @@ async function terminalConnect(socket, id, plugin) {
 		const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
 		for (const shell of commonShells) {
 			try {
-				await exec('docker', ['exec', id, shell, `-c 'exit 0'`], { stdio: 'ignore' });
+				await exec(`docker exec ${id} ${shell} -c 'exit 0'`, { stdio: 'ignore' });
 				return shell;
 			} catch (error) {
 				continue;

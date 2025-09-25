@@ -25,7 +25,7 @@ const watchConfigurations = (plugin) => {
 	configurationWatcher = new FileWatcher([]);
 	configurationWatcher
 		.onChange(async (event, path) => {
-			await exec('smbcontrol', ['all', 'reload-config']);
+			await exec(`smbcontrol all reload-config`);
 			plugin.emitShares();
 		});
 

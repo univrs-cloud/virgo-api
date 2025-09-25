@@ -19,7 +19,7 @@ const deleteUser = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `Deleting Authelia user ${config.username}...`);
 	await deleteAutheliaUser();
 	await plugin.updateJobProgress(job, `Deleting SMB user ${config.username}...`);
-	await exec('smbpasswd', ['-s', '-x', config.username]);
+	await exec(`smbpasswd -s -x ${config.username}`);
 	await plugin.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
 	await plugin.emitUsers();

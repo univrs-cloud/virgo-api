@@ -14,9 +14,9 @@ const lockUser = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `Locking system user ${config.username}...`);
-	await exec('passwd', ['-l', config.username]);
+	await exec(`passwd -l ${config.username}`);
 	await plugin.updateJobProgress(job, `Locking Samba user ${config.username}...`);
-	await exec('smbpasswd', ['-d', config.username]);
+	await exec(`smbpasswd -d ${config.username}`);
 	await plugin.updateJobProgress(job, `Locking Authelia user ${config.username}...`);
 	await plugin.toggleAutheliaUserLock(config.username, true);
 	await plugin.emitUsers();
