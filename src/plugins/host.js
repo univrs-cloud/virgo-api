@@ -182,22 +182,11 @@ class HostPlugin extends BasePlugin {
 	}
 
 	async checkUpgrade(socket) {
-		try {
-			await fs.promises.access(this.upgradePidFile);
-		} catch (error) {
-			await touch(this.upgradePidFile);
-		}
-
-		let data = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
-		data = data.trim();
-		if (data === '') {
-			this.upgradePid = null;
+		if (!await this.isUpgradeInProgress()) {
 			this.setState('upgrade', undefined);
 			this.getNsp().emit('host:upgrade', null);
 			return;
 		}
-	
-		this.upgradePid = parseInt(data, 10);
 	
 		// This will be handled by the watcher sub-plugin
 		const watcherPlugin = this.getPlugin('watcher');
@@ -228,6 +217,20 @@ class HostPlugin extends BasePlugin {
 	}
 
 	async isUpgradeInProgress() {
+		try {
+			await fs.promises.access(this.upgradePidFile);
+		} catch (error) {
+			await touch(this.upgradePidFile);
+		}
+
+		let data = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
+		data = data.trim();
+		if (data === '') {
+			this.upgradePid = null;
+		} else {
+			this.upgradePid = data;
+		}
+
 		try {
 			if (this.upgradePid !== null) {
 				try {
