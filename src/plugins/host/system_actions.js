@@ -52,7 +52,7 @@ async function upgrade(socket, plugin) {
 			'bash',
 			'-c',
 			`echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}`
-		]);
+		], { shell: true });
 		plugin.checkUpgrade(socket, plugin);
 	} catch (error) {
 		const watcherPlugin = plugin.getPlugin('watcher');
