@@ -181,12 +181,14 @@ class HostPlugin extends BasePlugin {
 		this.getNsp().emit('host:ups', this.getState('ups'));
 	}
 
-	checkUpgrade(socket) {
-		if (!fs.existsSync(this.upgradePidFile)) {
-			touch.sync(this.upgradePidFile);
+	async checkUpgrade(socket) {
+		try {
+			await fs.promises.access(this.upgradePidFile);
+		} catch (error) {
+			await touch(this.upgradePidFile);
 		}
 
-		let data = fs.readFileSync(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
+		let data = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data === '') {
 			this.upgradePid = null;
