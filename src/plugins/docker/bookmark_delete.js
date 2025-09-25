@@ -10,7 +10,7 @@ const deleteBookmark = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `${existingBookmark.title} bookmark is deleting...`);
 	let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 	configuration = configuration.filter((entity) => { return entity.name !== config.name });
-	fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 	return `${existingBookmark.title} bookmark deleted.`;
 };
 

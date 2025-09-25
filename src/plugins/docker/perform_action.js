@@ -27,11 +27,11 @@ const performAppAction = async (job, plugin) => {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
 	}
 
-	await exec(`docker compose -p ${composeProject} ${config.action}`);
+	await exec('docker', ['compose', '-p', composeProject, config.action]);
 	if (config.action === 'down') {
 		let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 		configuration = configuration.filter((entity) => { return entity.name !== config.name });
-		fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+		await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 	}
 
 	return `${existingApp.title} app ${config.action}ed.`;

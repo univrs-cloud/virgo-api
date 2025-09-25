@@ -24,13 +24,13 @@ const updateUser = async (job, plugin) => {
 	return `User ${config.username} updated.`
 
 	async function updateAutheliaUser() {
-		const fileContents = fs.readFileSync(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.promises.readFile(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
 			autheliaUsersConfig.users[config.username].displayname = config.fullname;
 			autheliaUsersConfig.users[config.username].email = config.email;
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			fs.writeFileSync(plugin.autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+			await fs.promises.writeFile(plugin.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 };

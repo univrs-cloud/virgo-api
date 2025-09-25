@@ -108,7 +108,7 @@ async function pollDrives(socket, plugin) {
 				capacity: drive.user_capacity,
 				temperature: drive.temperature.current,
 				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
-				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp: 99)
+				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp : 99)
 			};
 		}));
 	} catch (error) {

@@ -161,10 +161,18 @@ class BasePlugin {
 
 		const pluginFiles = fs.readdirSync(pluginDir).filter((file) => { return file.endsWith('.js'); });
 		for (const file of pluginFiles) {
-			const plugin = require(path.join(pluginDir, file));
-			this.#plugins.push(plugin);
-			if (typeof plugin.register === 'function') {
-				plugin.register(this);
+			try {
+				const plugin = require(path.join(pluginDir, file));
+				if (!plugin || typeof plugin !== 'object') {
+					console.warn(`[${this.#name}] Invalid plugin in ${file}: not an object`);
+					continue;
+				}
+				this.#plugins.push(plugin);
+				if (typeof plugin.register === 'function') {
+					plugin.register(this);
+				}
+			} catch (error) {
+				console.error(`[${this.#name}] Failed to load plugin ${file}:`, error);
 			}
 		}
 	}

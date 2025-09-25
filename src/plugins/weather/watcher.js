@@ -4,9 +4,9 @@ const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
 
-const watchConfiguration = (plugin) => {
-    const readFile = () => {
-        let data = fs.readFileSync(plugin.configurationFile, { encoding: 'utf8', flag: 'r' });
+const watchConfiguration = async (plugin) => {
+    const readFile = async () => {
+        let data = await fs.promises.readFile(plugin.configurationFile, { encoding: 'utf8', flag: 'r' });
         data = data.trim();
         if (data === '') {
             plugin.setState(
@@ -19,7 +19,12 @@ const watchConfiguration = (plugin) => {
                 }
             );
         } else {
-            plugin.setState('configuration', JSON.parse(data));
+			try {
+				let configuration = JSON.parse(data);
+				plugin.setState('configuration', configuration);
+			} catch (error) {
+				plugin.setState('configuration', false);
+			}
         }
         plugin.fetchWeather();
     };
@@ -28,16 +33,18 @@ const watchConfiguration = (plugin) => {
         return;
     }
 
-    if (!fs.existsSync(plugin.configurationFile)) {
-        touch.sync(plugin.configurationFile);
-    }
+	try {
+		await fs.promises.access(plugin.configurationFile);
+	} catch (error) {
+		await touch(plugin.configurationFile);
+	}
     
-    readFile();
+    await readFile();
     
     configurationWatcher = new FileWatcher(plugin.configurationFile);
     configurationWatcher
-        .onChange((event, path) => {
-            readFile();
+        .onChange(async (event, path) => {
+            await readFile();
         });
 }
 

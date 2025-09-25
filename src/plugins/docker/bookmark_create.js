@@ -15,7 +15,7 @@ const createBookmark = async (job, plugin) => {
 		title: config.title,
 		url: config.url
 	});
-	fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 	return `${config.title} bookmark created.`;
 };
 

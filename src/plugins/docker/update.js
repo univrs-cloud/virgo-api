@@ -14,31 +14,39 @@ const updateApp = async (job, plugin) => {
 		throw new Error(`App not found.`);
 	}
 
-	let template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
 	const container = plugin.getState('containers')?.find((container) => { return container.name === config.name });
+	if (!container) {
+		throw new Error(`Container for app '${config.name}' not found.`);
+	}
+	
 	const composeProject = container.labels.comDockerComposeProject;
 	const composeProjectDir = container.labels.comDockerComposeProjectWorkingDir;
 	const composeProjectContainers = plugin.getState('containers')?.filter((container) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});
 	await plugin.updateJobProgress(job, `${existingApp.title} update starting...`);
+	let template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
+		let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 		try {
 			const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
-			const stack = await response.text();
-			await plugin.updateJobProgress(job, `Writing ${template.title} project template...`);
-			fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
-			const icon = template.logo.split('/').pop();
-			const responseIcon = await fetch(template.logo);
-			await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
-			let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
-			configuration = configuration.map((entity) => {
-				if (entity.type === 'app' && entity.name === config.name) {
-					entity.icon = icon;
+			if (response.ok) {
+				const stack = await response.text();
+				await plugin.updateJobProgress(job, `Writing ${template.title} project template...`);
+				await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
+				const icon = template.logo.split('/').pop();
+				const responseIcon = await fetch(template.logo);
+				if (responseIcon.ok) {
+					await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));	
+					configuration = configuration.map((entity) => {
+						if (entity.type === 'app' && entity.name === config.name) {
+							entity.icon = icon;
+						}
+						return entity;
+					});
+					await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 				}
-				return entity;
-			});
-			fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+			}
 		} catch (error) {}
 	}
 

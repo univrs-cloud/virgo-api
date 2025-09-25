@@ -18,11 +18,11 @@ const updateSmtp = async (job, plugin) => {
 
 	let configuration = plugin.getState('configuration');
 	configuration.smtp = config;
-	fs.writeFileSync(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8');
 	plugin.setState('configuration', configuration);
 	
-	fs.writeFileSync(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8', { flag: 'w' });
-	fs.writeFileSync(zedConfigurationFile, generateZedConfig(config), 'utf8', { flag: 'w' });
+	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
+	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');
 	await exec('systemctl restart zfs-zed');
 	
 	return `Notification server saved.`;

@@ -6,7 +6,7 @@ const updateLocation = async (job, plugin) => {
 	
 	let configuration = plugin.getState('configuration');
 	configuration.location = config;
-	fs.writeFileSync(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8');
 	plugin.setState('configuration', configuration);
 	
 	return `Location saved.`;

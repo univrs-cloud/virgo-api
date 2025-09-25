@@ -3,7 +3,7 @@ const changeCase = require('change-case');
 
 const updateBookmark = async (job, plugin) => {
 	let config = job.data.config;
-	const existingBookmark = plugin.getState('configured')?.configuration.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
+	const existingBookmark = plugin.getState('configured')?.configuration?.find((entity) => { return entity.type === 'bookmark' && entity.name === config?.name; });
 	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);
 	}
@@ -20,7 +20,7 @@ const updateBookmark = async (job, plugin) => {
 		title: config.title,
 		url: config.url
 	});
-	fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 	return `${existingBookmark.title} bookmark updated.`;
 };
 

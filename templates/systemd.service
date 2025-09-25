@@ -2,9 +2,8 @@
 
 [Unit]
 Description={{ node_deb_package_description }}
-Requires=network.target
+Requires=network-online.target
 After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
@@ -13,8 +12,8 @@ WorkingDirectory={{ node_deb_install_dir }}/{{ node_deb_package_name }}
 ExecStart={{ node_deb_install_dir }}/{{ node_deb_package_name }}/app/{{ daemon_entrypoint }}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
+RestartSec=5
 User={{ node_deb_user }}
-PermissionsStartOnly=true
 
 [Install]
 WantedBy=multi-user.target

@@ -46,7 +46,7 @@ async function upgrade(socket, plugin) {
 
 	try {
 		await exec(`systemd-run --unit=upgrade-system --description="System upgrade" --wait --collect --setenv=DEBIAN_FRONTEND=noninteractive bash -c "echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`);
-		checkUpgrade(socket, plugin);
+		plugin.checkUpgrade(socket, plugin);
 	} catch (error) {
 		const watcherPlugin = plugin.getPlugin('watcher');
 		if (watcherPlugin && watcherPlugin.upgradeLogsWatcher) {
@@ -109,50 +109,6 @@ async function shutdown(socket, plugin) {
 	}
 
 	plugin.getNsp().emit('host:shutdown', plugin.getState('shutdown'));
-}
-
-function checkUpgrade(socket, plugin) {
-	if (!fs.existsSync(plugin.upgradePidFile)) {
-		touch.sync(plugin.upgradePidFile);
-	}
-
-	let data = fs.readFileSync(plugin.upgradePidFile, { encoding: 'utf8', flag: 'r' });
-	data = data.trim();
-	if (data === '') {
-		plugin.upgradePid = null;
-		plugin.setState('upgrade', undefined);
-		plugin.getNsp().emit('host:upgrade', null);
-		return;
-	}
-
-	plugin.upgradePid = parseInt(data, 10);
-
-	// This will be handled by the watcher sub-plugin
-	const watcherPlugin = plugin.getPlugin('watcher');
-	if (watcherPlugin) {
-		watcherPlugin.watchUpgradeLog(plugin);
-	}
-
-	if (plugin.checkUpgradeIntervalId !== null) {
-		return;
-	}
-
-	plugin.checkUpgradeIntervalId = setInterval(async () => {
-		if (await plugin.isUpgradeInProgress()) {
-			return;
-		}
-
-		clearInterval(plugin.checkUpgradeIntervalId);
-		plugin.checkUpgradeIntervalId = null;
-		const watcherPlugin = plugin.getPlugin('watcher');
-		if (watcherPlugin && watcherPlugin.upgradeLogsWatcher) {
-			await watcherPlugin.upgradeLogsWatcher.stop();
-			watcherPlugin.upgradeLogsWatcher = undefined;
-		}
-		plugin.setState('upgrade', { ...plugin.getState('upgrade'), state: 'succeeded' });
-		plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
-		updates(socket, plugin);
-	}, 1000);
 }
 
 function updates(socket, plugin) {

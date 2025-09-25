@@ -56,7 +56,7 @@ class SharePlugin extends BasePlugin {
 						share.size = diskSpace.size;
 						share.free = diskSpace.free;
 						share.alloc = share.size - share.free;
-						share.cap = share.alloc / share.size * 100;
+						share.cap = (share.size > 0 ? share.alloc / share.size * 100 : 0);
 					} catch (error) {
 						console.error(`Error checking disk space for ${name}:`, error);
 					}

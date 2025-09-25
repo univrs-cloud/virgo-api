@@ -4,9 +4,9 @@ const FileWatcher = require('../../utils/file_watcher');
 
 let dataFileWatcher;
 
-const watchConfiguration = (plugin) => {
-	const readFile = () => {
-		let data = fs.readFileSync(plugin.dataFile, { encoding: 'utf8', flag: 'r' });
+const watchConfiguration = async (plugin) => {
+	const readFile = async () => {
+		let data = await fs.promises.readFile(plugin.dataFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
 			plugin.setState('configured', JSON.parse(data));
@@ -18,16 +18,18 @@ const watchConfiguration = (plugin) => {
 		return;
 	}
 
-	if (!fs.existsSync(plugin.dataFile)) {
-		touch.sync(plugin.dataFile);
+	try {
+		await fs.promises.access(plugin.dataFile);
+	} catch (error) {
+		await touch(plugin.dataFile);
 	}
 	
-	readFile();
+	await readFile();
 	
 	dataFileWatcher = new FileWatcher(plugin.dataFile);
 	dataFileWatcher
-		.onChange((event, path) => {
-			readFile();
+		.onChange(async (event, path) => {
+			await readFile();
 		});
 };
 

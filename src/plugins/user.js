@@ -55,19 +55,19 @@ class UserPlugin extends BasePlugin {
 	}
 
 	async toggleAutheliaUserLock(username, status) {
-		const fileContents = fs.readFileSync(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.promises.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
 			autheliaUsersConfig.users[username].disabled = status;
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			fs.writeFileSync(this.autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+			await fs.promises.writeFile(this.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 
 	async emitUsers() {
 		const getUsers = async () => {
 			try {
-				const fileContents = fs.readFileSync(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+				const fileContents = await fs.promises.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 				let autheliaUsersConfig = yaml.load(fileContents);
 				let users = await linuxUser.getUsers();
 				let groups = await linuxUser.getGroups();

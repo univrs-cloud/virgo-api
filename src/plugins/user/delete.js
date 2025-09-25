@@ -19,19 +19,19 @@ const deleteUser = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `Deleting Authelia user ${config.username}...`);
 	await deleteAutheliaUser();
 	await plugin.updateJobProgress(job, `Deleting SMB user ${config.username}...`);
-	await exec(`smbpasswd -s -x ${config.username}`);
+	await exec('smbpasswd', ['-s', '-x', config.username]);
 	await plugin.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
 	await plugin.emitUsers();
 	return `User ${config.username} deleted.`
 
 	async function deleteAutheliaUser() {
-		const fileContents = fs.readFileSync(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.promises.readFile(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
 			delete autheliaUsersConfig.users[config.username];
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			fs.writeFileSync(plugin.autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+			await fs.promises.writeFile(plugin.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 };

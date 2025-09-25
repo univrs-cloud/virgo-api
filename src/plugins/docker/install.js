@@ -23,15 +23,19 @@ const installApp = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `${template.title} installation starting...`);
 	await plugin.updateJobProgress(job, `Downloading ${template.title} project template...`);
 	const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+	if (!response.ok) {
+		throw new Error(`Failed to download app template: ${response.status} ${response.statusText}`);
+	}
+	
 	const stack = await response.text();
 	let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
 	const composeProjectDir = path.join(plugin.composeDir, template.name);
 	await plugin.updateJobProgress(job, `Making ${template.title} project directory...`);
-	fs.mkdirSync(composeProjectDir, { recursive: true });
+	await fs.promises.mkdir(composeProjectDir, { recursive: true });
 	await plugin.updateJobProgress(job, `Writing ${template.title} project template...`);
-	fs.writeFileSync(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 	await plugin.updateJobProgress(job, `Writing ${template.title} project configuration...`);
-	fs.writeFileSync(path.join(composeProjectDir, '.env'), env, 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
 	await plugin.updateJobProgress(job, `Installing ${template.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
@@ -42,7 +46,9 @@ const installApp = async (job, plugin) => {
 
 	const icon = template.logo.split('/').pop();
 	const responseIcon = await fetch(template.logo);
-	await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
+	if (responseIcon.ok) {
+		await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
+	}
 	let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 	const app = {
 		name: template.name,
@@ -54,7 +60,7 @@ const installApp = async (job, plugin) => {
 	};
 	configuration.push(app);
 	await plugin.updateJobProgress(job, `Updating apps configuration...`);
-	fs.writeFileSync(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8', { flag: 'w' });
+	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
 	return `${template.title} installed.`;
 };
 

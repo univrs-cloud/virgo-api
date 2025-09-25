@@ -1,7 +1,6 @@
 const os = require('os');
 const fs = require('fs');
 const touch = require('touch');
-const childProcess = require('child_process');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const si = require('systeminformation');
@@ -39,9 +38,9 @@ class HostPlugin extends BasePlugin {
 				version: ''
 			}
 		});
-		si.system((system) => {
+		si.system(async (system) => {
 			try {
-				let stdout = childProcess.execSync('zfs version -j 2>/dev/null');
+				let stdout = await exec('zfs version -j 2>/dev/null');
 				const parsed = JSON.parse(stdout);
 				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
 				this.setState('system', { ...this.getState('system'), ...system, zfs });
@@ -49,9 +48,9 @@ class HostPlugin extends BasePlugin {
 				console.error(error);
 			}
 		});
-		si.osInfo((osInfo) => {
+		si.osInfo(async (osInfo) => {
 			try {
-				let stdout = childProcess.execSync('hostname -f 2>/dev/null');
+				let stdout = await exec('hostname -f 2>/dev/null');
 				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
 				this.setState('system', { ...this.getState('system'), osInfo });
 			} catch (error) {
@@ -130,10 +129,14 @@ class HostPlugin extends BasePlugin {
 	async checkForUpdates() {
 		try {
 			const response = await exec('apt-show-versions -u');
-			let updates = response.stdout.trim();
+			const updates = response.stdout.trim();
 			if (updates !== '') {
 				this.setState('updates', updates.split('\n').map((line) => {
-					let parts = line.split(' ');
+					const parts = line.split(' ').filter((part) => { return part.length > 0; });
+					if (parts.length < 5) {
+						return null;
+					}
+					
 					return {
 						package: parts[0].split(':')[0],
 						version: {
@@ -141,7 +144,7 @@ class HostPlugin extends BasePlugin {
 							upgradableTo: parts[4].split('~')[0]
 						}
 					};
-				}));
+				}).filter(Boolean));
 			} else {
 				this.setState('updates', []);
 			}
@@ -241,7 +244,7 @@ class HostPlugin extends BasePlugin {
 				const pids = stdout.trim().split('\n');
 				if (pids.length > 0) {
 					this.upgradePid = parseInt(pids[0], 10);
-					fs.writeFileSync(this.upgradePidFile, this.upgradePid, 'utf8', { flag: 'w' });
+					await fs.promises.writeFile(this.upgradePidFile, this.upgradePid, 'utf8');
 					//TODO: write new pid to file
 				}
 				return true;

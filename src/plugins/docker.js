@@ -54,11 +54,11 @@ class DockerPlugin extends BasePlugin {
 		images = camelcaseKeys(images, { deep: true });
 		let containers = await docker.listContainers({ all: true });
 		containers = camelcaseKeys(containers, { deep: true });
-		containers.forEach(async ({ id, imageId }) => {
+		for (const { id, imageId } of containers) {
 			const image = images.find((image) => { return image.id === imageId });
 			if (image.repoDigests.length === 0) {
 				// console.log(`${imageName} has no local digest (likely built locally).`);
-				return;
+				continue;
 			}
 	
 			const [, localDigest] = image.repoDigests[(image.repoDigests.length === 1 ? 0 : 1)].split('@');
@@ -80,19 +80,19 @@ class DockerPlugin extends BasePlugin {
 					break;
 				default:
 					// console.log(`Unknown registry for image ${imageName}`);
-					return;
+					continue;
 			}
 	
 			if (!remoteDigest) {
 				// console.log(`Could not fetch remote digest for ${imageName}`);
-				return;
+				continue;
 			}
 			
 			if (localDigest !== remoteDigest) {
 				updates.push({ imageName: imageName, containerId: id });
 				this.setState('updates', updates);
 			}
-		});
+		}
 		this.getNsp().emit('app:updates', this.getState('updates'));
 		return ``;
 	

@@ -1,4 +1,5 @@
-const childProcess = require('child_process');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 const stream = require('stream');
 const dockerode = require('dockerode');
 
@@ -14,14 +15,14 @@ async function terminalConnect(socket, id, plugin) {
 		return;
 	}
 
-	let shell = findContainerShell(id);
+	let shell = await findContainerShell(id);
 	if (!shell) {
 		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'No compatible shell found in container.');
 		return;
 	}
 
 	try {
-		const exec = await container.exec(
+		const containerExec = await container.exec(
 			{
 				Cmd: [`/bin/${shell}`],
 				AttachStdin: true,
@@ -30,7 +31,7 @@ async function terminalConnect(socket, id, plugin) {
 				Tty: true
 			}
 		);
-		const terminalStream = await exec.start(
+		const terminalStream = await containerExec.start(
 			{
 				stream: true,
 				stdin: true,
@@ -51,7 +52,7 @@ async function terminalConnect(socket, id, plugin) {
 			terminalStream.write(data);
 		});
 		socket.on('terminal:resize', (size) => {
-			exec.resize({
+			containerExec.resize({
 				h: size.rows,
 				w: size.cols
 			});
@@ -69,11 +70,11 @@ async function terminalConnect(socket, id, plugin) {
 		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'Failed to start container terminal stream.');
 	}
 
-	function findContainerShell(id) {
+	async function findContainerShell(id) {
 		const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
 		for (const shell of commonShells) {
 			try {
-				childProcess.execSync(`docker exec ${id} ${shell} -c 'exit 0'`, { stdio: 'ignore' });
+				await exec('docker', ['exec', id, shell, `-c 'exit 0'`], { stdio: 'ignore' });
 				return shell;
 			} catch (error) {
 				continue;

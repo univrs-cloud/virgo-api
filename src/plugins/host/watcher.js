@@ -5,9 +5,9 @@ const FileWatcher = require('../../utils/file_watcher');
 let powerSourceWatcher;
 let upgradeLogsWatcher;
 
-const watchPowerSource = (plugin) => {
-	const readFile = () => {
-		let data = fs.readFileSync('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
+const watchPowerSource = async (plugin) => {
+	const readFile = async () => {
+		let data = await fs.promises.readFile('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
 			if (plugin.getState('ups') === undefined) {
@@ -26,22 +26,24 @@ const watchPowerSource = (plugin) => {
 		return;
 	}
 
-	if (!fs.existsSync('/tmp/ups_power_source')) {
-		touch.sync('/tmp/ups_power_source');
+	try {
+		await fs.promises.access('/tmp/ups_power_source');
+	} catch (error) {
+		await touch('/tmp/ups_power_source');
 	}
 
-	readFile();
+	await readFile();
 
 	powerSourceWatcher = new FileWatcher('/tmp/ups_power_source');
 	powerSourceWatcher
-		.onChange((event, path) => {
-			readFile();
+		.onChange(async (event, path) => {
+			await readFile();
 		});
 };
 
-const watchUpgradeLog = (plugin) => {
-	const readFile = () => {
-		let data = fs.readFileSync(plugin.upgradeFile, { encoding: 'utf8', flag: 'r' });
+const watchUpgradeLog = async (plugin) => {
+	const readFile = async () => {
+		let data = await fs.promises.readFile(plugin.upgradeFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
 			plugin.setState('upgrade', { ...plugin.getState('upgrade'), steps: data.split('\n') });
@@ -53,8 +55,10 @@ const watchUpgradeLog = (plugin) => {
 		return;
 	}
 
-	if (!fs.existsSync(plugin.upgradeFile)) {
-		touch.sync(plugin.upgradeFile);
+	try {
+		await fs.promises.access(plugin.upgradeFile);
+	} catch (error) {
+		await touch(plugin.upgradeFile);
 	}
 
 	if (plugin.getState('upgrade') === undefined) {
@@ -62,13 +66,13 @@ const watchUpgradeLog = (plugin) => {
 			state: 'running',
 			steps: []
 		});
-		readFile();
+		await readFile();
 	}
 
 	upgradeLogsWatcher = new FileWatcher(plugin.upgradeFile);
 	upgradeLogsWatcher
-		.onChange((event, path) => {
-			readFile();
+		.onChange(async (event, path) => {
+			await readFile();
 		});
 };
 

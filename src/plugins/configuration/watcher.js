@@ -5,8 +5,8 @@ const FileWatcher = require('../../utils/file_watcher');
 let configurationWatcher;
 
 const watchConfiguration = async (plugin) => {
-	const readFile = () => {
-		let data = fs.readFileSync(plugin.configurationFile, { encoding: 'utf8', flag: 'r' });
+	const readFile = async () => {
+		let data = await fs.promises.readFile(plugin.configurationFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data === '') {
 			plugin.setState(
@@ -20,10 +20,16 @@ const watchConfiguration = async (plugin) => {
 				}
 			);
 		} else {
-			plugin.setState('configuration', JSON.parse(data));
+			try {
+				let configuration = JSON.parse(data);
+				plugin.setState('configuration', configuration);
+			} catch (error) {
+				plugin.setState('configuration', false);
+			}
 		}
-		let configuration = { ...plugin.getState('configuration') };
+
 		for (const socket of plugin.getNsp().sockets.values()) {
+			let configuration = { ...plugin.getState('configuration') };
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;
 			}
@@ -31,16 +37,18 @@ const watchConfiguration = async (plugin) => {
 		}
 	};
 	
-	if (!fs.existsSync(plugin.configurationFile)) {
-		touch.sync(plugin.configurationFile);
+	try {
+		await fs.promises.access(plugin.configurationFile);
+	} catch (error) {
+		await touch(plugin.configurationFile);
 	}
 	
-	readFile();
+	await readFile();
 
 	configurationWatcher = new FileWatcher(plugin.configurationFile);
 	configurationWatcher
-		.onChange((event, path) => {
-			readFile();
+		.onChange(async (event, path) => {
+			await readFile();
 		});
 };
 

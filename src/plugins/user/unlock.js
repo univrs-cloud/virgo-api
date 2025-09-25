@@ -10,9 +10,9 @@ const unlockUser = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `Unlocking system user ${config.username}...`);
-	await exec(`passwd -u ${config.username}`);
+	await exec('passwd', ['-u', config.username]);
 	await plugin.updateJobProgress(job, `Unlocking Samba user ${config.username}...`);
-	await exec(`smbpasswd -e ${config.username}`);
+	await exec('smbpasswd', ['-e', config.username]);
 	await plugin.updateJobProgress(job, `Unlocking Authelia user ${config.username}...`);
 	await plugin.toggleAutheliaUserLock(config.username, false);
 	await plugin.emitUsers();

@@ -29,7 +29,7 @@ const createUser = async (job, plugin) => {
 	return `User ${config.username} created.`
 
 	async function createAutheliaUser () {
-		const fileContents = fs.readFileSync(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.promises.readFile(plugin.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (!autheliaUsersConfig.users) {
 			autheliaUsersConfig.users = {};
@@ -42,7 +42,7 @@ const createUser = async (job, plugin) => {
 			disabled: false
 		};
 		const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-		fs.writeFileSync(plugin.autheliaUsersFile, updatedYaml, 'utf8', { flag: 'w' });
+		await fs.promises.writeFile(plugin.autheliaUsersFile, updatedYaml, 'utf8');
 	};
 };
 

@@ -6,9 +6,9 @@ const docker = require('./docker');
 const share = require('./share');
 const weather = require('./weather');
 
-const plugins = [];
-
 module.exports = (io) => {
+	const plugins = [];
+	
 	plugins.push(job(io));
 	plugins.push(configuration(io));
 	plugins.push(host(io));
