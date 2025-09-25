@@ -29,7 +29,7 @@
 	"dependencies": {
 		"bcryptjs": "^3.0.2",
 		"body-parser": "^2.2.0",
-		"bullmq": "^5.58.7",
+		"bullmq": "^5.58.8",
 		"camelcase-keys": "^10.0.0",
 		"change-case": "^5.4.4",
 		"check-disk-space": "^3.4.0",
