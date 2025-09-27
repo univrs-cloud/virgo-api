@@ -55,8 +55,7 @@ const installApp = async (job, plugin) => {
 		canBeRemoved: true,
 		category: template.categories.find((_, index) => { return index === 0; }),
 		icon: icon,
-		title: template.title,
-		order: await DataService.getNextApplicationOrder()
+		title: template.title
 	};
 	await plugin.updateJobProgress(job, `Updating apps configuration...`);
 	await DataService.setApplication(app);

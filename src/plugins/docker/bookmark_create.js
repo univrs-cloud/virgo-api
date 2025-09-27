@@ -9,8 +9,7 @@ const createBookmark = async (job, plugin) => {
 		category: config.category,
 		icon: '',
 		title: config.title,
-		url: config.url,
-		order: await DataService.getNextBookmarkOrder()
+		url: config.url
 	};
 	await DataService.setBookmark(bookmark);
 	await plugin.loadConfigured();
