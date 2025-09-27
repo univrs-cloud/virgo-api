@@ -261,7 +261,6 @@ class DataService {
 
 	static async getConfiguration() {
 		try {
-			// Get all order entries with their associated items in one query
 			const entries = await ConfigurationOrder.findAll({
 				include: [
 					{
@@ -272,10 +271,10 @@ class DataService {
 						model: Bookmark,
 						required: false
 					}
-				]
+				],
+				raw: true
 			});
 			
-			// Filter out null associations and map entries to include the appropriate item data
 			return entries
 				.filter((entry) => {
 					return entry.Application || entry.Bookmark;
