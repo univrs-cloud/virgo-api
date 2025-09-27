@@ -271,8 +271,7 @@ class DataService {
 						model: Bookmark,
 						required: false
 					}
-				],
-				raw: true
+				]
 			});
 			
 			return entries
@@ -280,10 +279,11 @@ class DataService {
 					return entry.Application || entry.Bookmark;
 				})
 				.map((entry) => {
+					const entryData = entry.get({ plain: true });
 					return {
-						...(entry.type === 'app' ? entry.Application : entry.Bookmark),
-						type: entry.type,
-						order: entry.order
+						...(entryData.type === 'app' ? entryData.Application : entryData.Bookmark),
+						type: entryData.type,
+						order: entryData.order
 					};
 				});
 		} catch (error) {
