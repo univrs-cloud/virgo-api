@@ -27,11 +27,6 @@ const Bookmark = sequelize.define('Bookmark', {
 	url: {
 		type: DataTypes.TEXT,
 		allowNull: true
-	},
-	order: {
-		type: DataTypes.INTEGER,
-		allowNull: false,
-		defaultValue: 0
 	}
 });
 

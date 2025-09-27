@@ -24,18 +24,46 @@ const migrateData = async () => {
 		
 		// Migrate applications and bookmarks individually
 		if (data.configuration && Array.isArray(data.configuration)) {
-			let appOrder = 1;
-			let bookmarkOrder = 1;
+			// Group items by category and track order within each category
+			const categoryGroups = {};
 			
+			// First pass: group items by category
 			for (const item of data.configuration) {
-				if (item.type === 'app') {
-					const appData = { ...item, order: item.order || appOrder++ };
-					await DataService.setApplication(appData);
-					console.log(`Migrated app: ${item.name}`);
-				} else if (item.type === 'bookmark') {
-					const bookmarkData = { ...item, order: item.order || bookmarkOrder++ };
-					await DataService.setBookmark(bookmarkData);
-					console.log(`Migrated bookmark: ${item.name}`);
+				const category = item.category || 'Uncategorized';
+				if (!categoryGroups[category]) {
+					categoryGroups[category] = [];
+				}
+				categoryGroups[category].push(item);
+			}
+			
+			// Second pass: migrate items and assign order within each category
+			for (const [category, items] of Object.entries(categoryGroups)) {
+				let order = 1;
+				
+				for (const item of items) {
+					if (item.type === 'app') {
+						// Remove order field from app data
+						const { order: _, ...appData } = item;
+						await DataService.setApplication(appData);
+						
+						// Set order in the ConfigurationOrder table
+						const createdApp = await DataService.getApplication(item.name);
+						if (createdApp) {
+							await DataService.setConfigurationOrder(createdApp.id, 'app', order++);
+							console.log(`Migrated app: ${item.name} (category: ${category}, order: ${order - 1})`);
+						}
+					} else if (item.type === 'bookmark') {
+						// Remove order field from bookmark data
+						const { order: _, ...bookmarkData } = item;
+						await DataService.setBookmark(bookmarkData);
+						
+						// Set order in the ConfigurationOrder table
+						const createdBookmark = await DataService.getBookmark(item.name);
+						if (createdBookmark) {
+							await DataService.setConfigurationOrder(createdBookmark.id, 'bookmark', order++);
+							console.log(`Migrated bookmark: ${item.name} (category: ${category}, order: ${order - 1})`);
+						}
+					}
 				}
 			}
 		}

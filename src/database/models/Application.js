@@ -32,11 +32,6 @@ const Application = sequelize.define('Application', {
 	url: {
 		type: DataTypes.TEXT,
 		allowNull: true
-	},
-	order: {
-		type: DataTypes.INTEGER,
-		allowNull: false,
-		defaultValue: 0
 	}
 });
 
