@@ -78,7 +78,9 @@ class DataService {
 	// Application methods
 	static async getApplications() {
 		try {
-			const applications = await Application.findAll();
+			const applications = await Application.findAll({
+				raw: true
+			});
 			return applications;
 		} catch (error) {
 			console.error('Error reading applications from database:', error);
@@ -89,13 +91,9 @@ class DataService {
 	static async getApplication(name) {
 		try {
 			const application = await Application.findOne({
-				where: { name: name }
+				where: { name: name },
+				raw: true
 			});
-			
-			if (!application) {
-				return null;
-			}
-			
 			return application;
 		} catch (error) {
 			console.error(`Error reading application '${name}' from database:`, error);
@@ -158,7 +156,9 @@ class DataService {
 	// Bookmark methods
 	static async getBookmarks() {
 		try {
-			const bookmarks = await Bookmark.findAll();
+			const bookmarks = await Bookmark.findAll({
+				raw: true
+			});
 			return bookmarks;
 		} catch (error) {
 			console.error('Error reading bookmarks from database:', error);
@@ -169,13 +169,9 @@ class DataService {
 	static async getBookmark(name) {
 		try {
 			const bookmark = await Bookmark.findOne({
-				where: { name: name }
+				where: { name: name },
+				raw: true
 			});
-			
-			if (!bookmark) {
-				return null;
-			}
-			
 			return bookmark;
 		} catch (error) {
 			console.error(`Error reading bookmark '${name}' from database:`, error);
