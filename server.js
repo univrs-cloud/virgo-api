@@ -29,5 +29,5 @@ const io = new Server(sslServer);
 plugins(io);
 
 sslServer.listen(config.server.port, () => {
-	console.log(`Server started at https://localhost:${config.server.port}`);
+	console.log(`Server started at https://${config.server.host}:${config.server.port}`);
 });

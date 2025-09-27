@@ -2,6 +2,8 @@
 	"name": "virgo-api",
 	"version": "2.5.18",
 	"description": "virgo API",
+	"author": "univrs",
+	"license": "UNLICENSED",
 	"main": "server.js",
 	"scripts": {
 		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ src/",
@@ -53,8 +55,6 @@
 		"raspi": "^6.0.1",
 		"raspi-i2c": "^6.2.4"
 	},
-	"author": "univrs",
-	"license": "UNLICENSED",
 	"devDependencies": {
 		"@types/node": "^24.5.2"
 	}

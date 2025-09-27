@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Queue, Worker } = require('bullmq');
+const config = require('../../config');
 
 class BasePlugin {
 	#name;
@@ -133,8 +134,8 @@ class BasePlugin {
 			},
 			{
 				connection: {
-					host: 'localhost',
-					port: 6379,
+					host: config.redis.host,
+					port: config.redis.port
 				}
 			}
 		);
