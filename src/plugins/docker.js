@@ -207,11 +207,7 @@ class DockerPlugin extends BasePlugin {
 
 	async loadConfigured() {
 		try {
-			let applications = await DataService.getApplications();
-			let bookmarks = await DataService.getBookmarks();
-			applications = applications.map((app) => ({ ...app, type: 'app' }));
-			bookmarks = bookmarks.map((bookmark) => ({ ...bookmark, type: 'bookmark' }));
-			const configuration = [...applications, ...bookmarks];
+			const configuration = await DataService.getConfiguration();
 			this.setState('configured', { configuration });
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		} catch (error) {

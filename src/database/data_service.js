@@ -259,6 +259,36 @@ class DataService {
 		}
 	}
 
+	static async getConfiguration() {
+		try {
+			// Get all order entries with their associated items in one query
+			const orderEntries = await ConfigurationOrder.findAll({
+				include: [
+					{
+						model: Application,
+						required: false
+					},
+					{
+						model: Bookmark,
+						required: false
+					}
+				]
+			});
+			
+			// Map entries to include the appropriate item data
+			return orderEntries.map((entry) => {
+				return {
+					...(entry.type === 'app' ? entry.Application : entry.Bookmark),
+					type: entry.type,
+					order: entry.order
+				};
+			});
+		} catch (error) {
+			console.error('Error getting configuration order with items:', error);
+			return [];
+		}
+	}
+
 	static async getNextOrderForCategory(category) {
 		try {
 			// Get all order entries for apps in this category using associations
