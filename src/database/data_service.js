@@ -50,12 +50,10 @@ class DataService {
 	static async setConfiguration(key, value) {
 		try {
 			const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
-			
 			await Configuration.upsert({
 				key: key,
 				value: stringValue
 			});
-			
 			return true;
 		} catch (error) {
 			console.error(`Error writing configuration key '${key}' to database:`, error);
@@ -103,7 +101,7 @@ class DataService {
 
 	static async setApplication(applicationData) {
 		try {
-			const [ application, wasCreated ] = await Application.upsert({
+			const [ entry ] = await Application.upsert({
 				name: applicationData.name,
 				canBeRemoved: applicationData.canBeRemoved,
 				category: applicationData.category,
@@ -111,13 +109,9 @@ class DataService {
 				icon: applicationData.icon,
 				url: applicationData.url
 			}, { returning: true });
-			
-			// If this is a new application (not an update), set the order
-			if (wasCreated) {
-				const order = await DataService.getNextOrderForCategory(application.category);
-				await DataService.setConfigurationOrder(application.id, 'app', order);
-			}
-			
+			const application = entry.get({ plain: true });
+			const order = await DataService.getNextOrderForCategory(application.category);
+			await DataService.setConfigurationOrder(application.id, 'app', order);
 			return true;
 		} catch (error) {
 			console.error(`Error writing application '${applicationData.name}' to database:`, error);
@@ -181,20 +175,16 @@ class DataService {
 
 	static async setBookmark(bookmarkData) {
 		try {
-			const [ bookmark, wasCreated ] = await Bookmark.upsert({
+			const [ entry ] = await Bookmark.upsert({
 				name: bookmarkData.name,
 				category: bookmarkData.category,
 				title: bookmarkData.title,
 				icon: bookmarkData.icon,
 				url: bookmarkData.url
 			}, { returning: true });
-			
-			// If this is a new bookmark (not an update), set the order
-			if (wasCreated) {
-				const order = await DataService.getNextOrderForCategory(bookmark.category);
-				await DataService.setConfigurationOrder(bookmark.id, 'bookmark', order);
-			}
-			
+			const bookmark = entry.get({ plain: true });
+			const order = await DataService.getNextOrderForCategory(bookmark.category);
+			await DataService.setConfigurationOrder(bookmark.id, 'bookmark', order);
 			return true;
 		} catch (error) {
 			console.error(`Error writing bookmark '${bookmarkData.name}' to database:`, error);
