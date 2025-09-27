@@ -1,14 +1,12 @@
-const fs = require('fs');
+const DataService = require('../../database/data_service');
 
 const updateLocation = async (job, plugin) => {
 	let config = job.data.config;
-	await plugin.updateJobProgress(job, `Saving location...`);
-	
-	let configuration = plugin.getState('configuration');
-	configuration.location = config;
-	await fs.promises.writeFile(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8');
-	plugin.setState('configuration', configuration);
-	
+	await plugin.updateJobProgress(job, `Saving location...`);	
+	await DataService.setConfiguration('location', config);
+	await plugin.loadConfiguration();
+	await plugin.broadcastConfiguration();
+	plugin.getIo().emit('configuration:location:updated');
 	return `Location saved.`;
 };
 

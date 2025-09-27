@@ -1,4 +1,6 @@
 const BasePlugin = require('./base');
+const configurationManager = require('./configuration/configuration_manager');
+const DataService = require('../database/data_service');
 
 class ConfigurationPlugin extends BasePlugin {
 	constructor(io) {
@@ -6,17 +8,24 @@ class ConfigurationPlugin extends BasePlugin {
 	}
 
 	init() {
-		this.configurationFile = '/var/www/virgo-api/configuration.json';
+		this.loadConfiguration();
 	}
 
 	onConnection(socket) {
-		if (this.getState('configuration')) {
-			let configuration = { ...this.getState('configuration') };
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				delete configuration.smtp;
-			}
-			this.getNsp().to(`user:${socket.username}`).emit('configuration', configuration);
+		configurationManager.emitToSocket(socket, this);
+	}
+
+	async loadConfiguration() {
+		try {
+			const configuration = await DataService.getConfiguration();
+			this.setState('configuration', configuration);
+		} catch (error) {
+			console.error('Error loading configuration:', error);
 		}
+	}
+
+	async broadcastConfiguration() {
+		await configurationManager.broadcast(this);
 	}
 }
 

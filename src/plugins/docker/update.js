@@ -4,12 +4,13 @@ const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
 const dockerCompose = require('docker-compose');
 const dockerode = require('dockerode');
+const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
 
 const updateApp = async (job, plugin) => {
 	let config = job.data.config;
-	const existingApp = plugin.getState('configured')?.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
+	const existingApp = await DataService.getApplication(config?.name);
 	if (!existingApp) {
 		throw new Error(`App not found.`);
 	}
@@ -27,7 +28,6 @@ const updateApp = async (job, plugin) => {
 	await plugin.updateJobProgress(job, `${existingApp.title} update starting...`);
 	let template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
-		let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 		try {
 			const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 			if (response.ok) {
@@ -37,14 +37,10 @@ const updateApp = async (job, plugin) => {
 				const icon = template.logo.split('/').pop();
 				const responseIcon = await fetch(template.logo);
 				if (responseIcon.ok) {
-					await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));	
-					configuration = configuration.map((entity) => {
-						if (entity.type === 'app' && entity.name === config.name) {
-							entity.icon = icon;
-						}
-						return entity;
-					});
-					await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
+					await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
+					const updatedApp = { ...existingApp, icon: icon };
+					await DataService.setApplication(updatedApp);
+					await plugin.loadConfigured();
 				}
 			}
 		} catch (error) {}

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const { execa } = require('execa');
+const DataService = require('../../database/data_service');
 
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
@@ -15,10 +16,9 @@ const updateSmtp = async (job, plugin) => {
 		config.recipients.push('voyager@univrs.cloud');
 	}
 
-	let configuration = plugin.getState('configuration');
-	configuration.smtp = config;
-	await fs.promises.writeFile(plugin.configurationFile, JSON.stringify(configuration, null, 2), 'utf8');
-	plugin.setState('configuration', configuration);
+	await DataService.setConfiguration('smtp', config);
+	await plugin.loadConfiguration();
+	await plugin.broadcastConfiguration();
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');

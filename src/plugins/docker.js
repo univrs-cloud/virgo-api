@@ -1,6 +1,7 @@
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
 const BasePlugin = require('./base');
+const DataService = require('../database/data_service');
 
 const docker = new dockerode();
 
@@ -12,6 +13,7 @@ class DockerPlugin extends BasePlugin {
 	init() {
 		this.dataFile = '/var/www/virgo-api/data.json';
 		this.composeDir = '/opt/docker';
+		this.loadConfigured();
 	}
 
 	onConnection(socket) {
@@ -191,8 +193,7 @@ class DockerPlugin extends BasePlugin {
 			}
 		}
 	}
-
-
+	
 	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
 		const { hostname, pathname } = new URL(repositoryUrl);
 		const [owner, repository] = pathname.split('/').filter(Boolean);
@@ -202,6 +203,19 @@ class DockerPlugin extends BasePlugin {
 		}
 	
 		throw new Error(`Unsupported apps repository.`);
+	}
+
+	async loadConfigured() {
+		try {
+			const applications = await DataService.getApplications();
+			const bookmarks = await DataService.getBookmarks();
+			const configuration = [...applications, ...bookmarks];
+			
+			this.setState('configured', { configuration });
+			this.getNsp().emit('app:configured', this.getState('configured'));
+		} catch (error) {
+			console.error('Error loading configuration:', error);
+		}
 	}
 }
 

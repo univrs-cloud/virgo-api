@@ -27,6 +27,10 @@ class BasePlugin {
 		this.#loadPlugins();
 	}
 
+	getIo() {
+		return this.#io;
+	}
+
 	getNsp() {
 		return this.#nsp;
 	}

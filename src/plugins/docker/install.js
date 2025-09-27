@@ -3,6 +3,7 @@ const path = require('path');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
 const dockerCompose = require('docker-compose');
+const DataService = require('../../database/data_service');
 
 const installApp = async (job, plugin) => {
 	let config = job.data.config;
@@ -15,7 +16,7 @@ const installApp = async (job, plugin) => {
 		throw new Error(`Installing this app type is not supported.`);
 	}
 
-	const existingApp = plugin.getState('configured')?.configuration.find((entity) => { return entity.type === 'app' && entity.name === template?.name; });
+	const existingApp = await DataService.getApplication(template?.name);
 	if (existingApp) {
 		throw new Error(`App already installed.`);
 	}
@@ -49,18 +50,16 @@ const installApp = async (job, plugin) => {
 	if (responseIcon.ok) {
 		await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
 	}
-	let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
 	const app = {
 		name: template.name,
-		type: 'app',
 		canBeRemoved: true,
 		category: template.categories.find((_, index) => { return index === 0; }),
 		icon: icon,
 		title: template.title
 	};
-	configuration.push(app);
 	await plugin.updateJobProgress(job, `Updating apps configuration...`);
-	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
+	await DataService.setApplication(app);
+	await plugin.loadConfigured();
 	return `${template.title} installed.`;
 };
 
