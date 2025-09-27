@@ -13,7 +13,7 @@ const migrateData = async () => {
 			return;
 		}
 		
-		console.log('Starting data migration from JSON to database...');
+		console.log('Starting migration from JSON to database...');
 		
 		// Initialize database (already done by configuration migration, but safe to call)
 		await DataService.initialize();
@@ -35,17 +35,14 @@ const migrateData = async () => {
 			}
 		}
 		
-		console.log('Data migration completed successfully!');
+		console.log('Migration completed successfully!');
 		
 		// Rename the original file to indicate it's been migrated
 		await fs.promises.rename(jsonDataPath, `${jsonDataPath}.migrated`);
 		console.log('Data file renamed to data.json.migrated');
 		
 	} catch (error) {
-		console.error('Data migration failed:', error);
-		throw error;
-	} finally {
-		await DataService.close();
+		console.error('Migration failed:', error);
 	}
 };
 

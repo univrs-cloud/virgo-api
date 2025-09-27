@@ -1,5 +1,5 @@
 const BasePlugin = require('./base');
-const DataService = require('../../database/data_service');
+const DataService = require('../database/data_service');
 
 class WeatherPlugin extends BasePlugin {
 	constructor(io) {

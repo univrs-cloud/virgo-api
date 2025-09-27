@@ -36,9 +36,6 @@ const migrateConfiguration = async () => {
 		
 	} catch (error) {
 		console.error('Migration failed:', error);
-		process.exit(1);
-	} finally {
-		await DataService.close();
 	}
 };
 
