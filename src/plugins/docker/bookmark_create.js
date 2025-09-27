@@ -1,21 +1,18 @@
-const fs = require('fs');
 const changeCase = require('change-case');
+const DataService = require('../../database/data_service');
 
 const createBookmark = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	await plugin.updateJobProgress(job, `${config?.title} bookmark is creating...`);
-	let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
-	configuration = configuration.filter((entity) => { return entity.url !== config?.url });
-	configuration.push({
+	const bookmark = {
 		name: changeCase.kebabCase(config.title),
-		type: 'bookmark',
-		canBeRemoved: true,
 		category: config.category,
 		icon: '',
 		title: config.title,
 		url: config.url
-	});
-	await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
+	};
+	await DataService.setBookmark(bookmark);
+	await plugin.loadConfigured();
 	return `${config.title} bookmark created.`;
 };
 

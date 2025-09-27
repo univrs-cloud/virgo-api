@@ -1,4 +1,5 @@
 const BasePlugin = require('./base');
+const DataService = require('../../database/data_service');
 
 class WeatherPlugin extends BasePlugin {
 	constructor(io) {
@@ -6,10 +7,15 @@ class WeatherPlugin extends BasePlugin {
 	}
 
 	init() {
-		this.configurationFile = '/var/www/virgo-api/configuration.json';
 		this.request = null;
 		this.fetchDelay = 10000;
 		this.fetchRetries = 3;
+		
+		this.fetchWeather();
+
+		this.getIo().on('configuration:location:updated', () => {
+			this.fetchWeather();
+		});
 	}
 
 	onConnection(socket) {
@@ -19,11 +25,15 @@ class WeatherPlugin extends BasePlugin {
 	}
 
 	async fetchWeather() {
-		if (this.request || this.getState('configuration') === undefined) {
+		if (this.request) {
 			return;
 		}
 	
-		let configuration = this.getState('configuration');
+		let configuration = await DataService.getConfiguration();
+		if (!configuration || !configuration.location) {
+			return;
+		}
+		
 		const latitude = configuration.location.latitude;
 		const longitude = configuration.location.longitude;
 		let weather;

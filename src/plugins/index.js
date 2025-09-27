@@ -5,8 +5,11 @@ const user = require('./user');
 const docker = require('./docker');
 const share = require('./share');
 const weather = require('./weather');
+const initializeDatabase = require('../database/init');
 
-module.exports = (io) => {
+module.exports = async (io) => {
+	await initializeDatabase();
+	
 	const plugins = [];
 	
 	plugins.push(job(io));

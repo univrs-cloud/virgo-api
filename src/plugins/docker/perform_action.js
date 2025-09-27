@@ -1,6 +1,6 @@
-const fs = require('fs');
 const { execa } = require('execa');
 const dockerode = require('dockerode');
+const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'down'];
@@ -11,7 +11,7 @@ const performAppAction = async (job, plugin) => {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
 
-	const existingApp = plugin.getState('configured')?.configuration.find((entity) => { return entity.type === 'app' && entity.name === config?.name; });
+	const existingApp = await DataService.getApplication(config?.name);
 	if (!existingApp) {
 		throw new Error(`App not found.`);
 	}
@@ -28,11 +28,10 @@ const performAppAction = async (job, plugin) => {
 
 	await execa('docker', ['compose', '-p', composeProject, config.action]);
 	if (config.action === 'down') {
-		let configuration = [...plugin.getState('configured')?.configuration ?? []]; // need to clone so we don't modify the reference
-		configuration = configuration.filter((entity) => { return entity.name !== config.name });
-		await fs.promises.writeFile(plugin.dataFile, JSON.stringify({ configuration }, null, 2), 'utf-8');
+		await DataService.deleteApplication(config.name);
+		await plugin.loadConfigured();
 	}
-
+	
 	return `${existingApp.title} app ${config.action}ed.`;
 };
 
