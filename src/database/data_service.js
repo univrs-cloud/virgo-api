@@ -262,7 +262,7 @@ class DataService {
 	static async getConfiguration() {
 		try {
 			// Get all order entries with their associated items in one query
-			const orderEntries = await ConfigurationOrder.findAll({
+			const entries = await ConfigurationOrder.findAll({
 				include: [
 					{
 						model: Application,
@@ -275,14 +275,18 @@ class DataService {
 				]
 			});
 			
-			// Map entries to include the appropriate item data
-			return orderEntries.map((entry) => {
-				return {
-					...(entry.type === 'app' ? entry.Application : entry.Bookmark),
-					type: entry.type,
-					order: entry.order
-				};
-			});
+			// Filter out null associations and map entries to include the appropriate item data
+			return entries
+				.filter((entry) => {
+					return entry.Application || entry.Bookmark;
+				})
+				.map((entry) => {
+					return {
+						...(entry.type === 'app' ? entry.Application : entry.Bookmark),
+						type: entry.type,
+						order: entry.order
+					};
+				});
 		} catch (error) {
 			console.error('Error getting configuration order with items:', error);
 			return [];

@@ -5,34 +5,22 @@ const ConfigurationOrder = require('./ConfigurationOrder');
 // Define associations
 Application.hasOne(ConfigurationOrder, {
 	foreignKey: 'itemId',
-	constraints: false,
-	scope: {
-		type: 'app'
-	}
+	constraints: false
 });
 
 Bookmark.hasOne(ConfigurationOrder, {
 	foreignKey: 'itemId',
-	constraints: false,
-	scope: {
-		type: 'bookmark'
-	}
+	constraints: false
 });
 
 ConfigurationOrder.belongsTo(Application, {
 	foreignKey: 'itemId',
-	constraints: false,
-	scope: {
-		type: 'app'
-	}
+	constraints: false
 });
 
 ConfigurationOrder.belongsTo(Bookmark, {
 	foreignKey: 'itemId',
-	constraints: false,
-	scope: {
-		type: 'bookmark'
-	}
+	constraints: false
 });
 
 module.exports = {
