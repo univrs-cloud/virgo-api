@@ -12,9 +12,10 @@ const updateBookmark = async (job, plugin) => {
 	const bookmark = {
 		name: changeCase.kebabCase(config.title),
 		category: config.category,
-		// icon: '',
+		icon: existingBookmark.icon,
 		title: config.title,
-		url: config.url
+		url: config.url,
+		order: existingBookmark.order
 	};
 	await DataService.setBookmark(bookmark);
 	await plugin.loadConfigured();

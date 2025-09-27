@@ -24,12 +24,17 @@ const migrateData = async () => {
 		
 		// Migrate applications and bookmarks individually
 		if (data.configuration && Array.isArray(data.configuration)) {
+			let appOrder = 1;
+			let bookmarkOrder = 1;
+			
 			for (const item of data.configuration) {
 				if (item.type === 'app') {
-					await DataService.setApplication(item);
+					const appData = { ...item, order: item.order || appOrder++ };
+					await DataService.setApplication(appData);
 					console.log(`Migrated app: ${item.name}`);
 				} else if (item.type === 'bookmark') {
-					await DataService.setBookmark(item);
+					const bookmarkData = { ...item, order: item.order || bookmarkOrder++ };
+					await DataService.setBookmark(bookmarkData);
 					console.log(`Migrated bookmark: ${item.name}`);
 				}
 			}

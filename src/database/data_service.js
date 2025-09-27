@@ -79,18 +79,9 @@ class DataService {
 	static async getApplications() {
 		try {
 			const applications = await Application.findAll({
-				order: [['name', 'ASC']]
+				order: [['order', 'ASC'], ['name', 'ASC']]
 			});
-			
-			return applications.map(app => ({
-				name: app.name,
-				type: 'app',
-				canBeRemoved: app.canBeRemoved,
-				category: app.category,
-				title: app.title,
-				icon: app.icon,
-				url: app.url
-			}));
+			return applications;
 		} catch (error) {
 			console.error('Error reading applications from database:', error);
 			return [];
@@ -107,15 +98,7 @@ class DataService {
 				return null;
 			}
 			
-			return {
-				name: application.name,
-				type: 'app',
-				canBeRemoved: application.canBeRemoved,
-				category: application.category,
-				title: application.title,
-				icon: application.icon,
-				url: application.url
-			};
+			return application;
 		} catch (error) {
 			console.error(`Error reading application '${name}' from database:`, error);
 			return null;
@@ -130,9 +113,9 @@ class DataService {
 				category: applicationData.category,
 				title: applicationData.title,
 				icon: applicationData.icon,
-				url: applicationData.url
+				url: applicationData.url,
+				order: applicationData.order || 0
 			});
-			
 			return true;
 		} catch (error) {
 			console.error(`Error writing application '${applicationData.name}' to database:`, error);
@@ -157,18 +140,9 @@ class DataService {
 	static async getBookmarks() {
 		try {
 			const bookmarks = await Bookmark.findAll({
-				order: [['name', 'ASC']]
+				order: [['order', 'ASC'], ['name', 'ASC']]
 			});
-			
-			return bookmarks.map(bookmark => ({
-				name: bookmark.name,
-				type: 'bookmark',
-				canBeRemoved: true, // All bookmarks can be removed
-				category: bookmark.category,
-				title: bookmark.title,
-				icon: bookmark.icon,
-				url: bookmark.url
-			}));
+			return bookmarks;
 		} catch (error) {
 			console.error('Error reading bookmarks from database:', error);
 			return [];
@@ -185,15 +159,7 @@ class DataService {
 				return null;
 			}
 			
-			return {
-				name: bookmark.name,
-				type: 'bookmark',
-				canBeRemoved: true, // All bookmarks can be removed
-				category: bookmark.category,
-				title: bookmark.title,
-				icon: bookmark.icon,
-				url: bookmark.url
-			};
+			return bookmark;
 		} catch (error) {
 			console.error(`Error reading bookmark '${name}' from database:`, error);
 			return null;
@@ -207,7 +173,8 @@ class DataService {
 				category: bookmarkData.category,
 				title: bookmarkData.title,
 				icon: bookmarkData.icon,
-				url: bookmarkData.url
+				url: bookmarkData.url,
+				order: bookmarkData.order || 0
 			});
 			
 			return true;
@@ -226,6 +193,56 @@ class DataService {
 			return deleted > 0;
 		} catch (error) {
 			console.error(`Error deleting bookmark '${name}' from database:`, error);
+			return false;
+		}
+	}
+
+	// Helper method to get the next order value for applications
+	static async getNextApplicationOrder() {
+		try {
+			const result = await Application.max('order');
+			return (result || 0) + 1;
+		} catch (error) {
+			console.error('Error getting next application order:', error);
+			return 1;
+		}
+	}
+
+	// Helper method to get the next order value for bookmarks
+	static async getNextBookmarkOrder() {
+		try {
+			const result = await Bookmark.max('order');
+			return (result || 0) + 1;
+		} catch (error) {
+			console.error('Error getting next bookmark order:', error);
+			return 1;
+		}
+	}
+
+	// Helper method to update application order
+	static async updateApplicationOrder(name, newOrder) {
+		try {
+			const [updated] = await Application.update(
+				{ order: newOrder },
+				{ where: { name: name } }
+			);
+			return updated > 0;
+		} catch (error) {
+			console.error(`Error updating application order for '${name}':`, error);
+			return false;
+		}
+	}
+
+	// Helper method to update bookmark order
+	static async updateBookmarkOrder(name, newOrder) {
+		try {
+			const [updated] = await Bookmark.update(
+				{ order: newOrder },
+				{ where: { name: name } }
+			);
+			return updated > 0;
+		} catch (error) {
+			console.error(`Error updating bookmark order for '${name}':`, error);
 			return false;
 		}
 	}
