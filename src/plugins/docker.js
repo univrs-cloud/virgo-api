@@ -213,7 +213,6 @@ class DockerPlugin extends BasePlugin {
 			bookmarks = bookmarks.map((bookmark) => ({ ...bookmark, type: 'bookmark' }));
 			const configuration = [...applications, ...bookmarks];
 			this.setState('configured', { configuration });
-			console.log(this.getState('configured'));
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		} catch (error) {
 			console.error('Error loading configuration:', error);
