@@ -6,7 +6,7 @@ class JobPlugin extends BasePlugin {
 	}
 
 	init() {
-		this.queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'user-jobs', 'share-jobs'];
+		this.queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'bookmark-jobs', 'user-jobs', 'share-jobs'];
 	}
 }
 
