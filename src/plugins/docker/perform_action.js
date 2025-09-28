@@ -29,7 +29,7 @@ const performAppAction = async (job, plugin) => {
 	await execa('docker', ['compose', '-p', composeProject, config.action]);
 	if (config.action === 'down') {
 		await DataService.deleteApplication(config.name);
-		await plugin.loadConfigured();
+		plugin.getInternalEmitter().emit('configured:updated');
 	}
 	
 	return `${existingApp.title} app ${config.action}ed.`;

@@ -18,15 +18,15 @@ const updateBookmark = async (job, plugin) => {
 		order: existingBookmark.order
 	};
 	await DataService.setBookmark(bookmark);
-	await plugin.loadConfigured();
+	plugin.getInternalEmitter().emit('configured:updated');
 	return `${existingBookmark.title} bookmark updated.`;
 };
 
 module.exports = {
-	name: 'bookmark_update',
+	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:update', async (config) => {
-			await plugin.handleDockerAction(socket, 'bookmark:update', config);
+			await plugin.addJob('bookmark:update', { config, username: socket.username });
 		});
 	},
 	jobs: {

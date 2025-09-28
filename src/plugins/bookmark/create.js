@@ -12,15 +12,15 @@ const createBookmark = async (job, plugin) => {
 		url: config.url
 	};
 	await DataService.setBookmark(bookmark);
-	await plugin.loadConfigured();
+	plugin.getInternalEmitter().emit('configured:updated');
 	return `${config.title} bookmark created.`;
 };
 
 module.exports = {
-	name: 'bookmark_create',
+	name: 'create',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:create', async (config) => {
-			await plugin.handleDockerAction(socket, 'bookmark:create', config);
+			await plugin.addJob('bookmark:create', { config, username: socket.username });
 		});
 	},
 	jobs: {

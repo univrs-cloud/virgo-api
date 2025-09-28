@@ -59,7 +59,7 @@ const installApp = async (job, plugin) => {
 	};
 	await plugin.updateJobProgress(job, `Updating apps configuration...`);
 	await DataService.setApplication(app);
-	await plugin.loadConfigured();
+	plugin.getInternalEmitter().emit('configured:updated');
 	return `${template.title} installed.`;
 };
 

@@ -9,6 +9,10 @@ class ConfigurationPlugin extends BasePlugin {
 
 	init() {
 		this.loadConfiguration();
+
+		this.getInternalEmitter().on('configuration:updated', () => {
+			this.loadConfiguration();
+		});
 	}
 
 	onConnection(socket) {

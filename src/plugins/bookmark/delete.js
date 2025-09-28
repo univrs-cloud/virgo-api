@@ -9,15 +9,15 @@ const deleteBookmark = async (job, plugin) => {
 	
 	await plugin.updateJobProgress(job, `${existingBookmark.title} bookmark is deleting...`);
 	await DataService.deleteBookmark(config.name);
-	await plugin.loadConfigured();
+	plugin.getInternalEmitter().emit('configured:updated');
 	return `${existingBookmark.title} bookmark deleted.`;
 };
 
 module.exports = {
-	name: 'bookmark_delete',
+	name: 'delete',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:delete', async (config) => {
-			await plugin.handleDockerAction(socket, 'bookmark:delete', config);
+			await plugin.addJob('bookmark:delete', { config, username: socket.username });
 		});
 	},
 	jobs: {

@@ -40,7 +40,7 @@ const updateApp = async (job, plugin) => {
 					await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
 					const updatedApp = { ...existingApp, icon: icon };
 					await DataService.setApplication(updatedApp);
-					await plugin.loadConfigured();
+					plugin.getInternalEmitter().emit('configured:updated');
 				}
 			}
 		} catch (error) {}

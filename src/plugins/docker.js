@@ -14,6 +14,10 @@ class DockerPlugin extends BasePlugin {
 		this.dataFile = '/var/www/virgo-api/data.json';
 		this.composeDir = '/opt/docker';
 		this.loadConfigured();
+		
+		this.getInternalEmitter().on('configured:updated', () => {
+			this.loadConfigured();
+		});
 	}
 
 	onConnection(socket) {

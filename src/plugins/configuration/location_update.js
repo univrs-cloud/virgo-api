@@ -4,7 +4,7 @@ const updateLocation = async (job, plugin) => {
 	let config = job.data.config;
 	await plugin.updateJobProgress(job, `Saving location...`);	
 	await DataService.setConfiguration('location', config);
-	await plugin.loadConfiguration();
+	plugin.getInternalEmitter().emit('configuration:updated');
 	await plugin.broadcastConfiguration();
 	plugin.getInternalEmitter().emit('configuration:location:updated');
 	return `Location saved.`;
