@@ -6,7 +6,7 @@ const updateLocation = async (job, plugin) => {
 	await DataService.setConfiguration('location', config);
 	await plugin.loadConfiguration();
 	await plugin.broadcastConfiguration();
-	plugin.getIo().emit('configuration:location:updated');
+	plugin.getInternalEmitter().emit('configuration:location:updated');
 	return `Location saved.`;
 };
 

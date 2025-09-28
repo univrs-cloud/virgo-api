@@ -13,7 +13,7 @@ class WeatherPlugin extends BasePlugin {
 		
 		this.fetchWeather();
 
-		this.getIo().on('configuration:location:updated', () => {
+		this.getInternalEmitter().on('configuration:location:updated', () => {
 			this.fetchWeather();
 		});
 	}

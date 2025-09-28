@@ -1,12 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const { Queue, Worker } = require('bullmq');
+const eventEmitter = require('../utils/event_emitter');
 const config = require('../../config');
 
 class BasePlugin {
 	#name;
 	#io;
 	#nsp;
+	#internalEmitter;
 	#state = {};
 	#queue;
 	#worker;
@@ -16,6 +18,7 @@ class BasePlugin {
 		this.#name = name;
 		this.#io = io;
 		this.#nsp = this.#io.of(`/${this.#name}`);
+		this.#internalEmitter = eventEmitter;
 
 		if (typeof this.init === 'function') {
 			this.init();
@@ -33,6 +36,10 @@ class BasePlugin {
 
 	getNsp() {
 		return this.#nsp;
+	}
+
+	getInternalEmitter() {
+		return this.#internalEmitter;
 	}
 
 	getState(key) {

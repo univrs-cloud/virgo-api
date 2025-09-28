@@ -11,7 +11,6 @@ module.exports = async (io) => {
 	await initializeDatabase();
 	
 	const plugins = [];
-	
 	plugins.push(job(io));
 	plugins.push(configuration(io));
 	plugins.push(host(io));
