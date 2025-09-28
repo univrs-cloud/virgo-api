@@ -57,10 +57,18 @@ module.exports = {
 	name: 'perform_action',
 	onConnection(socket, plugin) {
 		socket.on('app:performAction', async (config) => {
-			await plugin.handleDockerAction(socket, 'app:performAction', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			await plugin.addJob('app:performAction', { config, username: socket.username });
 		});
 		socket.on('service:performAction', async (config) => {
-			await plugin.handleDockerAction(socket, 'service:performAction', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			await plugin.addJob('service:performAction', { config, username: socket.username });
 		});
 	},
 	jobs: {

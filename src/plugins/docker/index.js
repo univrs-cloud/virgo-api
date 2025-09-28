@@ -43,14 +43,6 @@ class DockerPlugin extends BasePlugin {
 			this.checkForUpdates();
 		}
 	}
-
-	async handleDockerAction(socket, action, config) {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await this.addJob(action, { config, username: socket.username });
-	}
 	
 	async checkForUpdates() {
 		let updates = [];

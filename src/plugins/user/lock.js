@@ -25,7 +25,11 @@ module.exports = {
 	name: 'lock',
 	onConnection(socket, plugin) {
 		socket.on('user:lock', async (config) => {
-			await plugin.handleUserAction(socket, 'user:lock', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+			
+			await plugin.addJob('user:lock', { config, username: socket.username });
 		});
 	},
 	jobs: {

@@ -37,7 +37,15 @@ module.exports = {
 	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('user:update', async (config) => {
-			await plugin.handleUserAction(socket, 'user:update', config);
+			if (!socket.isAuthenticated) {
+				return;
+			}
+
+			if (!socket.isAdmin && socket.username !== config.username) {
+				return;
+			}
+			
+			await plugin.addJob('user:update', { config, username: socket.username });
 		});
 	},
 	jobs: {

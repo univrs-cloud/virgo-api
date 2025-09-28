@@ -74,7 +74,11 @@ module.exports = {
 	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('app:update', async (config) => {
-			await plugin.handleDockerAction(socket, 'app:update', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			await plugin.addJob('app:update', { config, username: socket.username });
 		});
 	},
 	jobs: {

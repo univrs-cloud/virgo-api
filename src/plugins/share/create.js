@@ -10,7 +10,11 @@ module.exports = {
 	name: 'create',
 	onConnection(socket, plugin) {
 		socket.on('share:create', async (config) => {
-			await plugin.handleShareAction(socket, 'share:create', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+
+			await plugin.addJob('share:create', { config, username: socket.username });
 		});
 	},
 	jobs: {

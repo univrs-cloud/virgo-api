@@ -48,7 +48,11 @@ module.exports = {
 	name: 'create',
 	onConnection(socket, plugin) {
 		socket.on('user:create', async (config) => {
-			await plugin.handleUserAction(socket, 'user:create', config);
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+			
+			await plugin.addJob('user:create', { config, username: socket.username });
 		});
 	},
 	jobs: {

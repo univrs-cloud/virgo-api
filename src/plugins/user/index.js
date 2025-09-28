@@ -28,22 +28,6 @@ class UserPlugin extends BasePlugin {
 		}
 	}
 
-	async handleUserAction(socket, action, config) {
-		if (!socket.isAuthenticated) {
-			return;
-		}
-	
-		if (!socket.isAdmin && ['user:create', 'user:delete', 'user:lock', 'user:unlock'].includes(action)) {
-			return;
-		}
-	
-		if (!socket.isAdmin && ['user:update', 'user:changePassword'].includes(action) && socket.username !== config.username) {
-			return;
-		}
-		
-		await this.addJob(action, { config, username: socket.username });
-	}
-
 	async setSambaUserPassword(username, password) {
 		try {
 			const proc = execa('smbpasswd', ['-s', '-a', username]);

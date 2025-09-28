@@ -38,7 +38,15 @@ module.exports = {
 	name: 'change_password',
 	onConnection(socket, plugin) {
 		socket.on('user:password', async (config) => {
-			await plugin.handleUserAction(socket, 'user:changePassword', config);
+			if (!socket.isAuthenticated) {
+				return;
+			}
+
+			if (!socket.isAdmin && socket.username !== config.username) {
+				return;
+			}
+			
+			await plugin.addJob('user:changePassword', { config, username: socket.username });
 		});
 	},
 	jobs: {

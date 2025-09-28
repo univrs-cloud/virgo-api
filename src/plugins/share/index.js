@@ -24,14 +24,6 @@ class SharePlugin extends BasePlugin {
 		}
 	}
 
-	async handleShareAction(socket, action, config) {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await this.addJob(action, { config, username: socket.username });
-	}
-
 	async emitShares() {
 		const getShares = async () => {
 			try {
