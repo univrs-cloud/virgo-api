@@ -26,6 +26,10 @@ module.exports = {
 	name: 'update',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:update', async (config) => {
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+			
 			await plugin.addJob('bookmark:update', { config, username: socket.username });
 		});
 	},

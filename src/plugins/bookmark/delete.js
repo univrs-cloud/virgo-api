@@ -17,6 +17,10 @@ module.exports = {
 	name: 'delete',
 	onConnection(socket, plugin) {
 		socket.on('bookmark:delete', async (config) => {
+			if (!socket.isAuthenticated || !socket.isAdmin) {
+				return;
+			}
+			
 			await plugin.addJob('bookmark:delete', { config, username: socket.username });
 		});
 	},
