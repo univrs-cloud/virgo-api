@@ -162,13 +162,9 @@ class BasePlugin {
 	}
 
 	#loadPlugins() {
-		const pluginDir = path.join(__dirname);
-		const pluginFiles = fs.readdirSync(pluginDir).filter((file) => { return file.endsWith('.js'); });
+		const pluginDir = path.join(__dirname, this.#name);
+		const pluginFiles = fs.readdirSync(pluginDir).filter((file) => { return file.endsWith('.js') && file !== 'index.js'; });
 		for (const file of pluginFiles) {
-			if (file === 'index.js') {
-				continue;
-			}
-
 			try {
 				const plugin = require(path.join(pluginDir, file));
 				if (!plugin || typeof plugin !== 'object') {

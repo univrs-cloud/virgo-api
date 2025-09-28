@@ -11,7 +11,6 @@ class DockerPlugin extends BasePlugin {
 	}
 
 	init() {
-		this.dataFile = '/var/www/virgo-api/data.json';
 		this.composeDir = '/opt/docker';
 		this.loadConfigured();
 		
