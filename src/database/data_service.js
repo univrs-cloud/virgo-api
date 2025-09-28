@@ -249,7 +249,7 @@ class DataService {
 		}
 	}
 
-	static async getConfiguration() {
+	static async getConfigured() {
 		try {
 			const entries = await ConfigurationOrder.findAll({
 				include: [

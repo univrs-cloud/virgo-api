@@ -207,7 +207,7 @@ class DockerPlugin extends BasePlugin {
 
 	async loadConfigured() {
 		try {
-			const configuration = await DataService.getConfiguration();
+			const configuration = await DataService.getConfigured();
 			this.setState('configured', { configuration });
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		} catch (error) {
