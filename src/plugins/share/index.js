@@ -2,7 +2,7 @@ const fs = require('fs');
 const { execa } = require('execa');
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
-const BasePlugin = require('./base');
+const BasePlugin = require('../base');
 
 class SharePlugin extends BasePlugin {
 	constructor(io) {

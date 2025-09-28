@@ -1,4 +1,4 @@
-const BasePlugin = require('./base');
+const BasePlugin = require('../base');
 
 class BookmarkPlugin extends BasePlugin {
 	constructor(io) {

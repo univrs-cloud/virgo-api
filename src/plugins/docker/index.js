@@ -1,7 +1,7 @@
 const camelcaseKeys = require('camelcase-keys').default;
 const dockerode = require('dockerode');
-const BasePlugin = require('./base');
-const DataService = require('../database/data_service');
+const BasePlugin = require('../base');
+const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
 

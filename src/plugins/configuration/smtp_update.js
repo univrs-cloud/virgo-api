@@ -18,7 +18,6 @@ const updateSmtp = async (job, plugin) => {
 
 	await DataService.setConfiguration('smtp', config);
 	plugin.getInternalEmitter().emit('configuration:updated');
-	await plugin.broadcastConfiguration();
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');

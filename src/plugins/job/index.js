@@ -1,4 +1,4 @@
-const BasePlugin = require('./base');
+const BasePlugin = require('../base');
 
 class JobPlugin extends BasePlugin {
 	constructor(io) {

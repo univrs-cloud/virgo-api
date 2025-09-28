@@ -1,6 +1,6 @@
-const BasePlugin = require('./base');
-const configurationManager = require('./configuration/configuration_manager');
-const DataService = require('../database/data_service');
+const BasePlugin = require('../base');
+const DataService = require('../../database/data_service');
+const configurationManager = require('./configuration_manager');
 
 class ConfigurationPlugin extends BasePlugin {
 	constructor(io) {
@@ -12,6 +12,7 @@ class ConfigurationPlugin extends BasePlugin {
 
 		this.getInternalEmitter().on('configuration:updated', () => {
 			this.loadConfiguration();
+			configurationManager.broadcast(this);
 		});
 	}
 
@@ -26,10 +27,6 @@ class ConfigurationPlugin extends BasePlugin {
 		} catch (error) {
 			console.error('Error loading configuration:', error);
 		}
-	}
-
-	async broadcastConfiguration() {
-		await configurationManager.broadcast(this);
 	}
 }
 

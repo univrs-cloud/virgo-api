@@ -3,8 +3,8 @@ const fs = require('fs');
 const touch = require('touch');
 const { execa } = require('execa');
 const si = require('systeminformation');
-const { version } = require('../../package.json');
-const BasePlugin = require('./base');
+const { version } = require('../../../package.json');
+const BasePlugin = require('../base');
 
 let i2c;
 try {
