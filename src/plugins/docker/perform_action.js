@@ -63,16 +63,16 @@ module.exports = {
 
 			await plugin.addJob('app:performAction', { config, username: socket.username });
 		});
-		socket.on('service:performAction', async (config) => {
+		socket.on('app:service:performAction', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
 
-			await plugin.addJob('service:performAction', { config, username: socket.username });
+			await plugin.addJob('app:service:performAction', { config, username: socket.username });
 		});
 	},
 	jobs: {
 		'app:performAction': performAppAction,
-		'service:performAction': performServiceAction
+		'app:service:performAction': performServiceAction
 	}
 };
