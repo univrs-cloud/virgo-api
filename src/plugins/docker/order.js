@@ -11,6 +11,7 @@ module.exports = {
 			for (const item of config) {
 				await DataService.setConfigurationOrder(item.id, item.type, item.order);
 			};
+			plugin.getInternalEmitter().emit('configured:updated');
 		});
 	}
 };

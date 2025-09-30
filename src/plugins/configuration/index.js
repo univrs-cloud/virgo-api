@@ -5,15 +5,15 @@ const configurationManager = require('./configuration_manager');
 class ConfigurationPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'configuration');
-	}
-
-	init() {
-		this.loadConfiguration();
 
 		this.getInternalEmitter().on('configuration:updated', () => {
 			this.loadConfiguration();
 			configurationManager.broadcast(this);
 		});
+	}
+
+	init() {
+		this.loadConfiguration();
 	}
 
 	onConnection(socket) {

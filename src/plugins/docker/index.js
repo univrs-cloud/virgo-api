@@ -8,15 +8,15 @@ const docker = new dockerode();
 class DockerPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'docker');
+		
+		this.getInternalEmitter().on('configured:updated', () => {
+			this.loadConfigured();
+		});
 	}
 
 	init() {
 		this.composeDir = '/opt/docker';
 		this.loadConfigured();
-		
-		this.getInternalEmitter().on('configured:updated', () => {
-			this.loadConfigured();
-		});
 	}
 
 	onConnection(socket) {

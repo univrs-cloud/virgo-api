@@ -4,6 +4,10 @@ const DataService = require('../../database/data_service');
 class WeatherPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'weather');
+
+		this.getInternalEmitter().on('configuration:location:updated', () => {
+			this.fetchWeather();
+		});
 	}
 
 	init() {
@@ -12,10 +16,6 @@ class WeatherPlugin extends BasePlugin {
 		this.fetchRetries = 3;
 		
 		this.fetchWeather();
-
-		this.getInternalEmitter().on('configuration:location:updated', () => {
-			this.fetchWeather();
-		});
 	}
 
 	onConnection(socket) {
