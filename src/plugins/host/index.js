@@ -297,28 +297,37 @@ class HostPlugin extends BasePlugin {
 		this.checkForUpdates();
 	}
 
-	#loadNetworkIdentifier() {
-		si.osInfo(async (osInfo) => {
+	async #loadNetworkIdentifier() {
+		try {
+			const osInfo = await si.osInfo();
 			try {
 				let { stdout } = await execa('hostname', ['-f'], { reject: false });
 				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
-				this.setState('system', { ...this.getState('system'), osInfo });
 			} catch (error) {
-				console.error(error);
+				osInfo.fqdn = false;
 			}
-		});
+			this.setState('system', { ...this.getState('system'), osInfo });
+		} catch (error) {
+			this.setState('system', { ...this.getState('system'), osInfo: false });
+		}
 	}
 
-	#loadDefaultGateway() {
-		si.networkGatewayDefault((defaultGateway) => {
+	async #loadDefaultGateway() {
+		try {
+			const defaultGateway = await si.networkGatewayDefault();
 			this.setState('system', { ...this.getState('system'), defaultGateway });
-		});
+		} catch (error) {
+			this.setState('system', { ...this.getState('system'), defaultGateway: false });
+		}
 	}
 
-	#loadNetworkInterface() {
-		si.networkInterfaces((networkInterface) => {
+	async #loadNetworkInterface() {
+		try {
+			const networkInterface = await si.networkInterfaces('default');
 			this.setState('system', { ...this.getState('system'), networkInterface });
-		}, null, 'default');
+		} catch (error) {
+			this.setState('system', { ...this.getState('system'), networkInterface: false });
+		}
 	}
 
 }
