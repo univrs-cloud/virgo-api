@@ -24,7 +24,7 @@ class ConfigurationPlugin extends BasePlugin {
 			const configuration = await DataService.getConfiguration();
 			this.setState('configuration', configuration);
 		} catch (error) {
-			console.error('Error loading configuration:', error);
+			console.error(`Error loading configuration:`, error);
 		}
 	}
 }

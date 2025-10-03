@@ -53,7 +53,7 @@ const watchConfigurations = (plugin) => {
 		});
 
 		if (allWatched) {
-			console.log('All share configurations are now being watched. Stopping retry interval.');
+			console.log(`All share configurations are now being watched. Stopping retry interval.`);
 			clearInterval(retryInterval);
 		}
 	}, 10000);

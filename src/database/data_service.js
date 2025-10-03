@@ -10,11 +10,11 @@ class DataService {
 			await Application.sync({ force: false });
 			await Bookmark.sync({ force: false });
 			await ConfigurationOrder.sync({ force: false });
-			console.log('Database models synchronized.');
+			console.log(`Database models synchronized.`);
 			
 			return true;
 		} catch (error) {
-			console.error('Unable to connect to the database:', error);
+			console.error(`Unable to connect to the database:`, error);
 			return false;
 		}
 	}
@@ -35,7 +35,7 @@ class DataService {
 			
 			return configuration;
 		} catch (error) {
-			console.error('Error reading configuration from database:', error);
+			console.error(`Error reading configuration from database:`, error);
 			// Return default configuration if database read fails
 			return {
 				location: {
@@ -68,7 +68,7 @@ class DataService {
 			}
 			return true;
 		} catch (error) {
-			console.error('Error updating configuration in database:', error);
+			console.error(`Error updating configuration in database:`, error);
 			return false;
 		}
 	}
@@ -81,7 +81,7 @@ class DataService {
 			});
 			return applications;
 		} catch (error) {
-			console.error('Error reading applications from database:', error);
+			console.error(`Error reading applications from database:`, error);
 			return [];
 		}
 	}
@@ -155,7 +155,7 @@ class DataService {
 			});
 			return bookmarks;
 		} catch (error) {
-			console.error('Error reading bookmarks from database:', error);
+			console.error(`Error reading bookmarks from database:`, error);
 			return [];
 		}
 	}
@@ -277,7 +277,7 @@ class DataService {
 					};
 				});
 		} catch (error) {
-			console.error('Error getting configuration order with items:', error);
+			console.error(`Error getting configuration order with items:`, error);
 			return [];
 		}
 	}
@@ -318,9 +318,9 @@ class DataService {
 	static async close() {
 		try {
 			await sequelize.close();
-			console.log('Database connection closed.');
+			console.log(`Database connection closed.`);
 		} catch (error) {
-			console.error('Error closing database connection:', error);
+			console.error(`Error closing database connection:`, error);
 		}
 	}
 }

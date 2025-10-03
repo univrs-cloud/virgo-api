@@ -9,11 +9,11 @@ const migrateConfiguration = async () => {
 		try {
 			await fs.promises.access(jsonConfigPath);
 		} catch (error) {
-			console.log('No JSON configuration file found. Skipping migration.');
+			console.log(`No JSON configuration file found. Skipping migration.`);
 			return;
 		}
 		
-		console.log('Starting migration from JSON to database...');
+		console.log(`Starting migration from JSON to database...`);
 		
 		// Initialize database
 		await DataService.initialize();
@@ -28,14 +28,14 @@ const migrateConfiguration = async () => {
 			console.log(`Migrated ${key} to database`);
 		}
 		
-		console.log('Migration completed successfully!');
+		console.log(`Migration completed successfully!`);
 		
 		// Rename the original file to indicate it's been migrated
 		await fs.promises.rename(jsonConfigPath, `${jsonConfigPath}.migrated`);
-		console.log('Configuration file renamed to configuration.json.migrated');
+		console.log(`File renamed to configuration.json.migrated`);
 		
 	} catch (error) {
-		console.error('Migration failed:', error);
+		console.error(`Migration failed:`, error);
 	}
 };
 

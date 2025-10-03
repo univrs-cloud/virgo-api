@@ -3,11 +3,11 @@ const { runMigrations } = require('./migrations');
 
 const initializeDatabase = async () => {
 	try {
-		console.log('Initializing database...');
+		console.log(`Initializing database...`);
 		await runMigrations();
-		console.log('Database initialization completed.');
+		console.log(`Database initialization completed.`);
 	} catch (error) {
-		console.error('Database initialization failed:', error);
+		console.error(`Database initialization failed:`, error);
 		throw error;
 	}
 };

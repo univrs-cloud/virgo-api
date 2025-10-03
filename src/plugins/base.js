@@ -57,7 +57,7 @@ class BasePlugin {
 		try {
 			await this.#queue.add(name, data);
 		} catch (error) {
-			console.error('Error starting job:', error);
+			console.error(`Error starting job:`, error);
 		}
 	}
 
@@ -74,7 +74,7 @@ class BasePlugin {
 				}
 			);
 		} catch (error) {
-			console.error('Error starting job:', error);
+			console.error(`Error starting job:`, error);
 		}
 	}
 
@@ -83,7 +83,7 @@ class BasePlugin {
 			const state = await job.getState();
 			await job.updateProgress({ state, message });
 		} catch (error) {
-			console.error('Failed to update job progress:', error);
+			console.error(`Failed to update job progress:`, error);
 		}
 	}
 

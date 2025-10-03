@@ -37,7 +37,7 @@ class HostPlugin extends BasePlugin {
 		});
 		si.system(async (system) => {
 			try {
-				let { stdout } = await execa('zfs', ['version', '-j'], { reject: false });
+				const { stdout } = await execa('zfs', ['version', '-j'], { reject: false });
 				const parsed = JSON.parse(stdout);
 				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
 				this.setState('system', { ...this.getState('system'), ...system, zfs });
@@ -298,7 +298,7 @@ class HostPlugin extends BasePlugin {
 		try {
 			const osInfo = await si.osInfo();
 			try {
-				let { stdout } = await execa('hostname', ['-f'], { reject: false });
+				const { stdout } = await execa('hostname', ['-f'], { reject: false });
 				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
 			} catch (error) {
 				osInfo.fqdn = false;

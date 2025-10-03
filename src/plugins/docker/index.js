@@ -216,7 +216,7 @@ class DockerPlugin extends BasePlugin {
 			this.setState('configured', { configuration });
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		} catch (error) {
-			console.error('Error loading configuration:', error);
+			console.error(`Error loading configured:`, error);
 		}
 	}
 }

@@ -75,9 +75,9 @@ class WeatherPlugin extends BasePlugin {
 			
 			weather = await weatherResponse.json();
 		} catch (error) {
-			console.error('Weather fetch error:', error.message);
+			console.error(`Weather fetch error:`, error.message);
 			if (error.name === 'AbortError') {
-				console.error('Request timed out after 30 seconds');
+				console.error(`Request timed out after 30 seconds`);
 			}
 			weather = false;
 			this.fetchRetries--;
@@ -97,7 +97,7 @@ class WeatherPlugin extends BasePlugin {
 			this.setState('weather', weather);
 			this.getNsp().emit('weather', this.getState('weather'));
 		} else {
-			console.error('Failed to fetch weather data after all retry attempts');
+			console.error(`Failed to fetch weather data after all retry attempts`);
 		}
 		
 		return ``;

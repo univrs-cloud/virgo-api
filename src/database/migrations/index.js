@@ -3,15 +3,15 @@ const migrateData = require('./002_migrate_data');
 
 const runMigrations = async () => {
 	try {
-		console.log('Running database migrations...');
+		console.log(`Running database migrations...`);
 		
 		// Run migrations in order
 		await migrateConfiguration();
 		await migrateData();
 		
-		console.log('All migrations completed successfully!');
+		console.log(`All migrations completed successfully!`);
 	} catch (error) {
-		console.error('Migration failed:', error);
+		console.error(`Migration failed:`, error);
 		throw error;
 	}
 };

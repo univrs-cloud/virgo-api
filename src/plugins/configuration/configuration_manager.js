@@ -7,7 +7,7 @@ const emitToSocket = (socket, plugin) => {
 		}
 		socket.emit('configuration', userConfiguration);
 	} catch (error) {
-		console.error('Error emitting configuration to socket:', error);
+		console.error(`Error emitting configuration to socket:`, error);
 	}
 };
 
@@ -22,7 +22,7 @@ const broadcast = (plugin) => {
 			plugin.getNsp().to(`user:${socket.username}`).emit('configuration', userConfiguration);
 		}
 	} catch (error) {
-		console.error('Error broadcasting configuration:', error);
+		console.error(`Error broadcasting configuration:`, error);
 	}
 };
 
