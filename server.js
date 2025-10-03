@@ -24,13 +24,7 @@ const options = {
 	cert: fs.readFileSync(path.join(__dirname, './cert/cert.pem'))
 };
 const sslServer = https.createServer(options, app);
-const io = new Server(
-	sslServer,
-	{
-		pingInterval: 2000,
-		pingTimeout: 2000
-	}
-);
+const io = new Server(sslServer);
 
 plugins(io);
 
