@@ -1,20 +1,20 @@
 const updateIdentifier = (job, plugin) => {
 	let config = job.data.config;
-	console.log(job, config, plugin);
+	console.log(config);
 	plugin.getInternalEmitter().emit('host:network:identifier:updated');
 	return `Host updated.`;
 };
 
 const updateDefaultGateway = (job, plugin) => {
 	let config = job.data.config;
-	console.log(job, config, plugin);
+	console.log(config);
 	plugin.getInternalEmitter().emit('host:network:gateway:updated');
 	return `Default gateway updated.`;
 };
 
 const updateInnterface = (job, plugin) => {
 	let config = job.data.config;
-	console.log(job, config, plugin);
+	console.log(config);
 	plugin.getInternalEmitter().emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };
