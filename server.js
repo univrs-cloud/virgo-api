@@ -27,8 +27,8 @@ const sslServer = https.createServer(options, app);
 const io = new Server(
 	sslServer,
 	{
-		pingInterval: 1000,
-		pingTimeout: 1000
+		pingInterval: 2000,
+		pingTimeout: 2000
 	}
 );
 
