@@ -49,20 +49,17 @@ class HostPlugin extends BasePlugin {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
 		this.#loadNetworkIdentifier();
-		this.#loadDefaultGateway();
 		this.#loadNetworkInterface();
+		this.#loadDefaultGateway();
 
 		this.getInternalEmitter()
 			.on('host:network:identifier:updated', () => {
 				this.#loadNetworkIdentifier();
 				this.getNsp().emit('host:system', this.getState('system'));
 			})
-			.on('host:network:gateway:updated', () => {
-				this.#loadDefaultGateway();
-				this.getNsp().emit('host:system', this.getState('system'));
-			})
 			.on('host:network:interface:updated', () => {
 				this.#loadNetworkInterface();
+				this.#loadDefaultGateway();
 				this.getNsp().emit('host:system', this.getState('system'));
 			});
 	}

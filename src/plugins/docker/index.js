@@ -71,13 +71,19 @@ class DockerPlugin extends BasePlugin {
 			let remoteDigest = null;
 			switch (registry) {
 				case 'dockerhub':
-					remoteDigest = await getDockerHubDigest(imageName);
+					try {
+						remoteDigest = await getDockerHubDigest(imageName);
+					} catch (error) {}
 					break;
 				case 'ghcr':
-					remoteDigest = await getGHCRDigest(imageName);
+					try {
+						remoteDigest = await getGHCRDigest(imageName);
+					} catch (error) {}
 					break;
 				case 'lscr':
-					remoteDigest = await getLSCRDigest(imageName);
+					try {
+						remoteDigest = await getLSCRDigest(imageName);
+					} catch (error) {}
 					break;
 				default:
 					// console.log(`Unknown registry for image ${imageName}`);

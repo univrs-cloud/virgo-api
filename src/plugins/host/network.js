@@ -2,7 +2,8 @@ const { execa } = require('execa');
 
 const updateIdentifier = async (job, plugin) => {
 	let config = job.data.config;
-	console.log(config);
+	// config.hostname
+	// config.domainName
 	try {
 		await execa('true');
 	} catch (error) {
@@ -12,28 +13,30 @@ const updateIdentifier = async (job, plugin) => {
 	return `Host updated.`;
 };
 
-const updateDefaultGateway = async (job, plugin) => {
-	let config = job.data.config;
-	console.log(config);
-	try {
-		await execa('true');
-	} catch (error) {
-		throw new Error(`Default gateway was not updated.`);
-	}
-	plugin.getInternalEmitter().emit('host:network:gateway:updated');
-	return `Default gateway updated.`;
-};
-
 const updateInnterface = async (job, plugin) => {
 	let config = job.data.config;
-	console.log(config);
 	try {
-		await execa('true');
+		const connectionName = await getConnectionNameForInterface(config.name);
+		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.method', config.method]);
+		if (config.method === 'manual') {
+			await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.addresses', `${config.ipAddress}/${config.netmask}`]);
+			await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.gateway', config.gateway]);
+		}
+		await execa('nmcli', ['connection', 'reload']);
+    	await execa('nmcli', ['connection', 'up', connectionName]);
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
 	}
 	plugin.getInternalEmitter().emit('host:network:interface:updated');
 	return `Network interface updated.`;
+};
+
+const getConnectionNameForInterface = async (name) => {
+	const { stdout } = await execa('nmcli', ['-t', '-f', 'NAME,DEVICE', 'connection', 'show']);
+	const line = stdout
+	  .split('\n')
+	  .find((line) => line.endsWith(`:${name}`));
+	return line?.split(':')[0];
 };
 
 module.exports = {
@@ -46,13 +49,6 @@ module.exports = {
 
 			await plugin.addJob('host:network:identifier:update', { config, username: socket.username });
 		});
-		socket.on('host:network:gateway:update', async (config) => { 
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await plugin.addJob('host:network:gateway:update', { config, username: socket.username });
-		});
 		socket.on('host:network:interface:update', async (config) => { 
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
@@ -63,7 +59,6 @@ module.exports = {
 	},
 	jobs: {
 		'host:network:identifier:update': updateIdentifier,
-		'host:network:gateway:update': updateDefaultGateway,
 		'host:network:interface:update': updateInnterface
 	}
 };
