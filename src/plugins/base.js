@@ -20,10 +20,6 @@ class BasePlugin {
 		this.#nsp = this.#io.of(`/${this.#name}`);
 		this.#internalEmitter = eventEmitter;
 
-		if (typeof this.init === 'function') {
-			this.init();
-		}
-
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		this.#setupQueues();

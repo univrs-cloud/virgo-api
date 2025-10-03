@@ -6,19 +6,22 @@ const DataService = require('../../database/data_service');
 const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
+	#composeDir = '/opt/docker';
+
 	constructor(io) {
 		super(io, 'docker');
 		
+		this.#loadConfigured();
+
 		this.getInternalEmitter()
 			.on('configured:updated', () => {
 				this.#loadConfigured();
 			});
 	}
 
-	init() {
-		this.composeDir = '/opt/docker';
-		this.#loadConfigured();
-	}
+	get composeDir() {
+		return this.#composeDir;
+	};
 
 	onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');

@@ -6,15 +6,13 @@ class ConfigurationPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'configuration');
 
+		this.#loadConfiguration();
+
 		this.getInternalEmitter()
 			.on('configuration:updated', () => {
 				this.#loadConfiguration();
 				configurationManager.broadcast(this);
 			});
-	}
-
-	init() {
-		this.#loadConfiguration();
 	}
 
 	onConnection(socket) {

@@ -5,15 +5,17 @@ const checkDiskSpace = require('check-disk-space').default;
 const BasePlugin = require('../base');
 
 class SharePlugin extends BasePlugin {
+	#configurationFiles = [
+		'/etc/samba/smb.conf',
+		'/messier/.shares'
+	];
+	
 	constructor(io) {
 		super(io, 'share');
 	}
 
-	init() {
-		this.configurationFiles = [
-			'/etc/samba/smb.conf',
-			'/messier/.shares'
-		];
+	get configurationFiles() {
+		return this.#configurationFiles;
 	}
 
 	onConnection(socket) {

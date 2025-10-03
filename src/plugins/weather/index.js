@@ -2,8 +2,14 @@ const BasePlugin = require('../base');
 const DataService = require('../../database/data_service');
 
 class WeatherPlugin extends BasePlugin {
+	#fetchDelay = 10000;
+	#fetchRetries = 3;
+	#request = null;
+
 	constructor(io) {
 		super(io, 'weather');
+
+		this.fetchWeather();
 
 		this.getInternalEmitter()
 			.on('configuration:location:updated', () => {
@@ -11,12 +17,24 @@ class WeatherPlugin extends BasePlugin {
 			});
 	}
 
-	init() {
-		this.request = null;
-		this.fetchDelay = 10000;
-		this.fetchRetries = 3;
-		
-		this.fetchWeather();
+	get fetchDelay() {
+		return this.#fetchDelay;
+	}
+
+	get fetchRetries() {
+		return this.#fetchRetries
+	}
+
+	set fetchRetries(value) {
+		this.#fetchRetries = value;
+	}
+
+	get request() {
+		return this.#request;
+	}
+
+	set request(value) {
+		this.#request = value;
 	}
 
 	onConnection(socket) {

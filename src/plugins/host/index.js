@@ -15,32 +15,16 @@ try {
 }
 
 class HostPlugin extends BasePlugin {
+	#i2c = i2c;
+	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
+	#upgradeFile = '/var/www/virgo-api/upgrade.log';
+	#upgradePid = null;
+	#checkUpgradeIntervalId = null;
+
 	constructor(io) {
 		super(io, 'host');
 
-		this.getInternalEmitter()
-			.on('host:network:identifier:updated', () => {
-				this.#loadNetworkIdentifier();
-				this.getNsp().emit('host:system', this.getState('system'));
-			})
-			.on('host:network:gateway:updated', () => {
-				this.#loadDefaultGateway();
-				this.getNsp().emit('host:system', this.getState('system'));
-			})
-			.on('host:network:interface:updated', () => {
-				this.#loadNetworkInterface();
-				this.getNsp().emit('host:system', this.getState('system'));
-			});
-	}
-
-	init() {
-		this.i2c = i2c;
-		this.upgradePidFile = '/var/www/virgo-api/upgrade.pid';
-		this.upgradeFile = '/var/www/virgo-api/upgrade.log';
-		this.upgradePid = null;
-		this.checkUpgradeIntervalId = null;
-		
-		if (i2c === false) {
+		if (this.i2c === false) {
 			this.setState('ups', 'remote i/o error');
 		}
 		this.setState('system', {
@@ -67,6 +51,48 @@ class HostPlugin extends BasePlugin {
 		this.#loadNetworkIdentifier();
 		this.#loadDefaultGateway();
 		this.#loadNetworkInterface();
+
+		this.getInternalEmitter()
+			.on('host:network:identifier:updated', () => {
+				this.#loadNetworkIdentifier();
+				this.getNsp().emit('host:system', this.getState('system'));
+			})
+			.on('host:network:gateway:updated', () => {
+				this.#loadDefaultGateway();
+				this.getNsp().emit('host:system', this.getState('system'));
+			})
+			.on('host:network:interface:updated', () => {
+				this.#loadNetworkInterface();
+				this.getNsp().emit('host:system', this.getState('system'));
+			});
+	}
+
+	get i2c() {
+		return this.#i2c;
+	}
+
+	get upgradePidFile() {
+		return this.#upgradePidFile;
+	}
+
+	get upgradeFile() {
+		return this.#upgradeFile;
+	}
+
+	get upgradePid() {
+		return this.#upgradePid;
+	}
+
+	set upgradePid(value) {
+		return this.#upgradePid = value;
+	}
+
+	get checkUpgradeIntervalId() {
+		return this.#checkUpgradeIntervalId;
+	}
+
+	set checkUpgradeIntervalId(value) {
+		return this.#checkUpgradeIntervalId = value;
 	}
 
 	onConnection(socket) {
