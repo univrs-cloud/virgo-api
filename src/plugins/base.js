@@ -23,7 +23,10 @@ class BasePlugin {
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		this.#setupQueues();
-		this.#loadPlugins();
+
+		setImmediate(() => {
+			this.#loadPlugins();
+		});
 	}
 
 	getNsp() {
