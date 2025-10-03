@@ -15,6 +15,7 @@ const updateIdentifier = async (job, plugin) => {
 
 const updateInnterface = async (job, plugin) => {
 	let config = job.data.config;
+	await plugin.updateJobProgress(job, `Network interface updating...`);
 	try {
 		const connectionName = await getConnectionNameForInterface(config.name);
 		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.method', config.method]);
@@ -24,6 +25,7 @@ const updateInnterface = async (job, plugin) => {
 		}
 		await execa('nmcli', ['connection', 'reload']);
     	await execa('nmcli', ['connection', 'up', connectionName]);
+		await sleep(3000);
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
 	}
@@ -37,6 +39,10 @@ const getConnectionNameForInterface = async (name) => {
 	  .split('\n')
 	  .find((line) => line.endsWith(`:${name}`));
 	return line?.split(':')[0];
+};
+
+const sleep = (ms) => {
+	return new Promise(resolve => setTimeout(resolve, ms));
 };
 
 module.exports = {

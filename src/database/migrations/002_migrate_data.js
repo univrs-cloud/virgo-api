@@ -9,7 +9,7 @@ const migrateData = async () => {
 		try {
 			await fs.promises.access(jsonDataPath);
 		} catch (error) {
-			console.log('No data.json file found. Skipping data migration.');
+			console.log('No data.json file found. Skipping migration.');
 			return;
 		}
 		

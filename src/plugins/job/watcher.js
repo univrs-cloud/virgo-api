@@ -25,5 +25,16 @@ module.exports = {
 				});
 			});
 		});
+	},
+	async onConnection(socket, plugin) {
+		const states = ['wait', 'paused', 'delayed', 'active'];
+		let jobs = [];
+		for (const queueName of plugin.queues) {
+			const queue = new Queue(queueName);
+			const queuedJobs = await queue.getJobs(states);	
+			jobs = [...jobs, ...queuedJobs];
+		};
+		jobs = jobs.filter((job) => { return !job.opts || !job.opts.repeat; });
+		socket.emit('jobs', jobs);
 	}
 };
