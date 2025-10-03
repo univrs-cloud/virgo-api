@@ -2,7 +2,7 @@ const { execa } = require('execa');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 
-async function pollCpuStats(socket, plugin) {
+const pollCpuStats = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('cpuStats', undefined);
 		return;
@@ -19,9 +19,9 @@ async function pollCpuStats(socket, plugin) {
 
 	plugin.getNsp().emit('host:cpu:stats', plugin.getState('cpuStats'));
 	setTimeout(() => { pollCpuStats(socket, plugin); }, 5000);
-}
+};
 
-async function pollMemory(socket, plugin) {
+const pollMemory = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('memory', undefined);
 		return;
@@ -36,9 +36,9 @@ async function pollMemory(socket, plugin) {
 
 	plugin.getNsp().emit('host:memory', plugin.getState('memory'));
 	setTimeout(() => { pollMemory(socket, plugin); }, 10000);
-}
+};
 
-async function pollStorage(socket, plugin) {
+const pollStorage = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('storage', undefined);
 		return;
@@ -86,9 +86,9 @@ async function pollStorage(socket, plugin) {
 
 	plugin.getNsp().emit('host:storage', plugin.getState('storage'));
 	setTimeout(() => { pollStorage(socket, plugin); }, 60000);
-}
+};
 
-async function pollDrives(socket, plugin) {
+const pollDrives = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('drives', undefined);
 		return;
@@ -116,9 +116,9 @@ async function pollDrives(socket, plugin) {
 
 	plugin.getNsp().emit('host:drives', plugin.getState('drives'));
 	setTimeout(() => { pollDrives(socket, plugin); }, 60000);
-}
+};
 
-async function pollNetworkStats(socket, plugin) {
+const pollNetworkStats = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('networkStats', undefined);
 		return;
@@ -140,9 +140,9 @@ async function pollNetworkStats(socket, plugin) {
 
 	plugin.getNsp().emit('host:network:stats', plugin.getState('networkStats'));
 	setTimeout(() => { pollNetworkStats(socket, plugin); }, 2000);
-}
+};
 
-function pollTime(socket, plugin) {
+const pollTime = (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('time', undefined);
 		return;
@@ -151,7 +151,7 @@ function pollTime(socket, plugin) {
 	plugin.setState('time', si.time());
 	plugin.getNsp().emit('host:time', plugin.getState('time'));
 	setTimeout(() => { pollTime(socket, plugin); }, 60000);
-}
+};
 
 module.exports = {
 	name: 'polling',

@@ -4,7 +4,7 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-async function terminalConnect(socket, id, plugin) {
+const terminalConnect = async (socket, id, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -68,20 +68,20 @@ async function terminalConnect(socket, id, plugin) {
 		console.error(error);
 		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'Failed to start container terminal stream.');
 	}
+};
 
-	async function findContainerShell(id) {
-		const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
-		for (const shell of commonShells) {
-			try {
-				await execa('docker', ['exec', id, shell, '-c', 'exit 0'], { stdio: 'ignore' });
-				return shell;
-			} catch (error) {
-				continue;
-			}
+const findContainerShell = async (id) => {
+	const commonShells = ['bash', 'sh', 'zsh', 'ash', 'dash'];
+	for (const shell of commonShells) {
+		try {
+			await execa('docker', ['exec', id, shell, '-c', 'exit 0'], { stdio: 'ignore' });
+			return shell;
+		} catch (error) {
+			continue;
 		}
-		return null;
 	}
-}
+	return null;
+};
 
 module.exports = {
 	name: 'terminal',

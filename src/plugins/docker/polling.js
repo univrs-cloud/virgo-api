@@ -3,7 +3,7 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-async function pollContainers(socket, plugin) {
+const pollContainers = async (socket, plugin) => {
 	if (plugin.getNsp().server.engine.clientsCount === 0) {
 		plugin.setState('containers', undefined);
 		return;
@@ -23,7 +23,7 @@ async function pollContainers(socket, plugin) {
 
 	plugin.getNsp().emit('app:containers', plugin.getState('containers'));
 	setTimeout(() => { pollContainers(socket, plugin); }, 2000);
-}
+};
 
 module.exports = {
 	name: 'polling',

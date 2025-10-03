@@ -3,7 +3,7 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-async function logsConnect(socket, id, plugin) {
+const logsConnect = async (socket, id, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -40,7 +40,7 @@ async function logsConnect(socket, id, plugin) {
 	} catch (error) {
 		plugin.getNsp().to(`user:${socket.username}`).emit('logs:error', 'Failed to start container logs stream.');
 	}
-}
+};
 
 module.exports = {
 	name: 'logs',

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const { execa } = require('execa');
 
-async function checkUpdates(socket, plugin) {
+const checkUpdates = async (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -20,9 +20,9 @@ async function checkUpdates(socket, plugin) {
 		plugin.setState('checkUpdates', false);
 		plugin.getNsp().to(`user:${socket.username}`).emit('host:updates:check', plugin.getState('checkUpdates'));
 	}
-}
+};
 
-async function upgrade(socket, plugin) {
+const upgrade = async (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -35,8 +35,7 @@ async function upgrade(socket, plugin) {
 		state: 'running',
 		steps: []
 	});
-
-	// This will be handled by the watcher sub-plugin
+	
 	const watcherPlugin = plugin.getPlugin('watcher');
 	if (watcherPlugin) {
 		watcherPlugin.watchUpgradeLog(plugin);
@@ -66,9 +65,9 @@ async function upgrade(socket, plugin) {
 		plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
 		updates(socket, plugin);
 	}
-}
+};
 
-function completeUpgrade(socket, plugin) {
+const completeUpgrade = (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -78,9 +77,9 @@ function completeUpgrade(socket, plugin) {
 	fs.closeSync(fs.openSync(plugin.upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync(plugin.upgradeFile, 'w'));
 	plugin.getNsp().emit('host:upgrade', null);
-}
+};
 
-async function reboot(socket, plugin) {
+const reboot = async (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -97,9 +96,9 @@ async function reboot(socket, plugin) {
 	}
 
 	plugin.getNsp().emit('host:reboot', plugin.getState('reboot'));
-}
+};
 
-async function shutdown(socket, plugin) {
+const shutdown = async (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
@@ -116,9 +115,9 @@ async function shutdown(socket, plugin) {
 	}
 
 	plugin.getNsp().emit('host:shutdown', plugin.getState('shutdown'));
-}
+};
 
-function updates(socket, plugin) {
+const updates = (socket, plugin) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		plugin.getNsp().to(`user:${socket.username}`).emit('host:updates', false);
 		return;
@@ -128,7 +127,7 @@ function updates(socket, plugin) {
 		plugin.getNsp().emit('host:upgrade', null);
 	}
 	plugin.checkForUpdates();
-}
+};
 
 module.exports = {
 	name: 'system_actions',
