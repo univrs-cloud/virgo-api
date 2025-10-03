@@ -17,6 +17,20 @@ try {
 class HostPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'host');
+
+		this.getInternalEmitter()
+			.on('host:network:identifier:updated', () => {
+				this.#loadNetworkIdentifier();
+				this.getNsp().emit('host:system', this.getState('system'));
+			})
+			.on('host:network:gateway:updated', () => {
+				this.#loadDefaultGateway();
+				this.getNsp().emit('host:system', this.getState('system'));
+			})
+			.on('host:network:interface:updated', () => {
+				this.#loadNetworkInterface();
+				this.getNsp().emit('host:system', this.getState('system'));
+			});
 	}
 
 	init() {
@@ -47,24 +61,12 @@ class HostPlugin extends BasePlugin {
 				console.error(error);
 			}
 		});
-		si.osInfo(async (osInfo) => {
-			try {
-				let { stdout } = await execa('hostname', ['-f'], { reject: false });
-				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
-				this.setState('system', { ...this.getState('system'), osInfo });
-			} catch (error) {
-				console.error(error);
-			}
-		});
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
-		si.networkGatewayDefault((defaultGateway) => {
-			this.setState('system', { ...this.getState('system'), defaultGateway });
-		});
-		si.networkInterfaces((networkInterface) => {
-			this.setState('system', { ...this.getState('system'), networkInterface });
-		}, null, 'default');
+		this.#loadNetworkIdentifier();
+		this.#loadDefaultGateway();
+		this.#loadNetworkInterface();
 	}
 
 	onConnection(socket) {
@@ -267,6 +269,30 @@ class HostPlugin extends BasePlugin {
 			this.getNsp().emit('host:upgrade', null);
 		}
 		this.checkForUpdates();
+	}
+
+	#loadNetworkIdentifier() {
+		si.osInfo(async (osInfo) => {
+			try {
+				let { stdout } = await execa('hostname', ['-f'], { reject: false });
+				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
+				this.setState('system', { ...this.getState('system'), osInfo });
+			} catch (error) {
+				console.error(error);
+			}
+		});
+	}
+
+	#loadDefaultGateway() {
+		si.networkGatewayDefault((defaultGateway) => {
+			this.setState('system', { ...this.getState('system'), defaultGateway });
+		});
+	}
+
+	#loadNetworkInterface() {
+		si.networkInterfaces((networkInterface) => {
+			this.setState('system', { ...this.getState('system'), networkInterface });
+		}, null, 'default');
 	}
 
 }

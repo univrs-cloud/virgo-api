@@ -9,14 +9,15 @@ class DockerPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'docker');
 		
-		this.getInternalEmitter().on('configured:updated', () => {
-			this.loadConfigured();
-		});
+		this.getInternalEmitter()
+			.on('configured:updated', () => {
+				this.#loadConfigured();
+			});
 	}
 
 	init() {
 		this.composeDir = '/opt/docker';
-		this.loadConfigured();
+		this.#loadConfigured();
 	}
 
 	onConnection(socket) {
@@ -200,7 +201,7 @@ class DockerPlugin extends BasePlugin {
 		throw new Error(`Unsupported apps repository.`);
 	}
 
-	async loadConfigured() {
+	async #loadConfigured() {
 		try {
 			const configuration = await DataService.getConfigured();
 			this.setState('configured', { configuration });

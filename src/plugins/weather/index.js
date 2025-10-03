@@ -5,9 +5,10 @@ class WeatherPlugin extends BasePlugin {
 	constructor(io) {
 		super(io, 'weather');
 
-		this.getInternalEmitter().on('configuration:location:updated', () => {
-			this.fetchWeather();
-		});
+		this.getInternalEmitter()
+			.on('configuration:location:updated', () => {
+				this.fetchWeather();
+			});
 	}
 
 	init() {
