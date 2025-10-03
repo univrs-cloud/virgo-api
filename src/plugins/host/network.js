@@ -24,22 +24,20 @@ const updateInnterface = async (job, plugin) => {
 			await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.gateway', config.gateway]);
 		}
 		await execa('nmcli', ['connection', 'reload']);
-    	await execa('nmcli', ['connection', 'up', connectionName]);
-		await waitForConnection(connectionName);
-		plugin.getInternalEmitter().emit('host:network:interface:updated');
-		await sleep(5000);
+		await execa('nmcli', ['connection', 'up', connectionName]);
+		await sleep(1000);
 	} catch (error) {
-		plugin.getInternalEmitter().emit('host:network:interface:updated');
 		throw new Error(`Network interface was not updated.`);
 	}
+	plugin.getInternalEmitter().emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };
 
 const getConnectionNameForInterface = async (name) => {
 	const { stdout } = await execa('nmcli', ['-t', '-f', 'NAME,DEVICE', 'connection', 'show']);
 	const line = stdout
-	  .split('\n')
-	  .find((line) => line.endsWith(`:${name}`));
+		.split('\n')
+		.find((line) => line.endsWith(`:${name}`));
 	return line?.split(':')[0];
 };
 
@@ -48,30 +46,6 @@ const sleep = (ms) => {
 		setTimeout(resolve, ms);
 	});
 };
-
-async function waitForConnection(connectionName, timeoutMs = 10000) {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		try {
-			const { stdout } = await execa('nmcli', ['-t', '-f', 'NAME,STATE', 'connection', 'show', '--active']);
-			const lines = stdout.split('\n');
-			const isActive = lines.some((line) => {
-				const [name, state] = line.split(':');
-				return name === connectionName && state === 'activated';
-			});
-
-			if (isActive) {
-				return true;
-			}
-		} catch (error) {
-			console.error(`Failed to check connection state:`, error);
-		}
-
-		await sleep(500); // retry every 0.5s
-	}
-
-	throw new Error(`Timeout waiting for connection "${connectionName}" to activate.`);
-}
 
 module.exports = {
 	name: 'system_actions',

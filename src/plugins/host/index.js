@@ -53,13 +53,13 @@ class HostPlugin extends BasePlugin {
 		this.#loadDefaultGateway();
 
 		this.getInternalEmitter()
-			.on('host:network:identifier:updated', () => {
-				this.#loadNetworkIdentifier();
+			.on('host:network:identifier:updated', async () => {
+				await this.#loadNetworkIdentifier();
 				this.getNsp().emit('host:system', this.getState('system'));
 			})
-			.on('host:network:interface:updated', () => {
-				this.#loadNetworkInterface();
-				this.#loadDefaultGateway();
+			.on('host:network:interface:updated', async () => {
+				await this.#loadNetworkInterface();
+				await this.#loadDefaultGateway();
 				this.getNsp().emit('host:system', this.getState('system'));
 			});
 	}
