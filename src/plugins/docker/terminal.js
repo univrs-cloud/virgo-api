@@ -9,18 +9,18 @@ const terminalConnect = async (socket, id, plugin) => {
 		return;
 	}
 
-	const container = docker.getContainer(id);
-	if (!container) {
-		return;
-	}
-
-	let shell = await findContainerShell(id);
-	if (!shell) {
-		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'No compatible shell found in container.');
-		return;
-	}
-
 	try {
+		const container = docker.getContainer(id);
+		if (!container) {
+			return;
+		}
+
+		let shell = await findContainerShell(id);
+		if (!shell) {
+			plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'No compatible shell found in container.');
+			return;
+		}
+		
 		const containerExec = await container.exec(
 			{
 				Cmd: [`/bin/${shell}`],
@@ -43,9 +43,9 @@ const terminalConnect = async (socket, id, plugin) => {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		docker.modem.demuxStream(terminalStream, stdout, stderr);
 		stdout.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
 		stderr.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
+		docker.modem.demuxStream(terminalStream, stdout, stderr);
 		// Pipe client input to the container
 		socket.on('terminal:input', (data) => {
 			terminalStream.write(data);

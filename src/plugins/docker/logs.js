@@ -8,12 +8,12 @@ const logsConnect = async (socket, id, plugin) => {
 		return;
 	}
 
-	const container = docker.getContainer(id);
-	if (!container) {
-		return;
-	}
-
 	try {
+		const container = docker.getContainer(id);
+		if (!container) {
+			return;
+		}
+		
 		const logsStream = await container.logs(
 			{
 				follow: true,
@@ -26,9 +26,9 @@ const logsConnect = async (socket, id, plugin) => {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		docker.modem.demuxStream(logsStream, stdout, stderr);
 		stdout.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
 		stderr.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('logs:output', data.toString('utf8')) });
+		docker.modem.demuxStream(logsStream, stdout, stderr);
 		// Client terminated the connection
 		socket.on('logs:disconnect', () => {
 			logsStream.destroy();
