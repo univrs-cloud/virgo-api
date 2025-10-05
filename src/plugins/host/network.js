@@ -4,10 +4,15 @@ const { execa } = require('execa');
 const updateIdentifier = async (job, plugin) => {
 	const config = job.data.config;
 	const system = plugin.getState('system');
+	await plugin.updateJobProgress(job, `Host updating...`);
 	try {
-		const fqdn = `${config.hostname}.${config.domainName}`;
-		await updateEtcHosts(system.networkInterface.ip4, config.hostname, fqdn);
-		await execa('hostnamectl', ['set-hostname', fqdn]);
+		const connectionName = await getConnectionNameForInterface(system.networkInterface.ifaceName);
+		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns-search', config.domainName]);
+		await execa('nmcli', ['connection', 'reload']);
+		await execa('nmcli', ['connection', 'up', connectionName]);
+		await execa('hostnamectl', ['set-hostname', config.hostname]);
+		await updateEtcHosts(plugin, system.networkInterface.ip4, config.hostname, `${config.hostname}.${config.domainName}`);
+		await sleep(1000);
 	} catch (error) {
 		throw new Error(`Host was not updated.`);
 	}
@@ -20,7 +25,7 @@ const updateInnterface = async (job, plugin) => {
 	const system = plugin.getState('system');
 	await plugin.updateJobProgress(job, `Network interface updating...`);
 	try {
-		const connectionName = await getConnectionNameForInterface(config.name);
+		const connectionName = await getConnectionNameForInterface(system.networkInterface.ifaceName);
 		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.method', config.method]);
 		if (config.method === 'manual') {
 			await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.addresses', `${config.ipAddress}/${config.netmask}`]);
@@ -28,7 +33,7 @@ const updateInnterface = async (job, plugin) => {
 		}
 		await execa('nmcli', ['connection', 'reload']);
 		await execa('nmcli', ['connection', 'up', connectionName]);
-		await updateEtcHosts(config.ipAddress, system.osInfo.hostname, system.osInfo.fqdn);
+		await updateEtcHosts(plugin, config.ipAddress, system.osInfo.hostname, system.osInfo.fqdn);
 		await sleep(1000);
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
@@ -37,9 +42,9 @@ const updateInnterface = async (job, plugin) => {
 	return `Network interface updated.`;
 };
 
-const updateEtcHosts = async (ip, hostname, fqdn) => {
+const updateEtcHosts = async (plugin, ip, hostname, fqdn) => {
 	const configuration = `127.0.0.1	localhost
-::1			localhost ip6-localhost ip6-loopback
+::1		localhost ip6-localhost ip6-loopback
 ff02::1		ip6-allnodes
 ff02::2		ip6-allrouters
 

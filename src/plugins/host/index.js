@@ -303,10 +303,16 @@ class HostPlugin extends BasePlugin {
 		try {
 			const osInfo = await si.osInfo();
 			try {
-				const { stdout } = await execa('hostname', ['-f'], { reject: false });
-				osInfo.fqdn = stdout.toString().split(os.EOL)[0];
+				const { stdout: fqdn } = await execa('hostname', ['-f'], { reject: false });
+				osInfo.fqdn = fqdn.toString().split(os.EOL)[0];
 			} catch (error) {
 				osInfo.fqdn = false;
+			}
+			try {
+				const { stdout: domainName } = await execa('hostname', ['-d'], { reject: false });
+				osInfo.domainName = domainName.toString().split(os.EOL)[0];
+			} catch (error) {
+				osInfo.domainName = false;
 			}
 			this.setState('system', { ...this.getState('system'), osInfo });
 		} catch (error) {
