@@ -39,8 +39,10 @@ const moveDatabaseLocation = async () => {
 			console.log(`Created config directory: ${configDir}`);
 		}
 		
-		// Move the database file
-		await fs.promises.rename(oldDbPath, newDbPath);
+		// Copy the database file (cross-device move)
+		await fs.promises.copyFile(oldDbPath, newDbPath);
+		// Remove the original file after successful copy
+		await fs.promises.unlink(oldDbPath);
 		console.log(`Successfully moved database from ${oldDbPath} to ${newDbPath}`);
 		
 	} catch (error) {
