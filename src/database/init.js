@@ -1,4 +1,3 @@
-const DataService = require('./data_service');
 const { runMigrations } = require('./migrations');
 
 const initializeDatabase = async () => {

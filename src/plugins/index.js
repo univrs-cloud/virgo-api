@@ -1,25 +1,17 @@
-const job = require('./job');
-const configuration = require('./configuration');
-const host = require('./host');
-const user = require('./user');
-const docker = require('./docker');
-const bookmark = require('./bookmark');
-const share = require('./share');
-const weather = require('./weather');
 const initializeDatabase = require('../database/init');
 
 module.exports = async (io) => {
 	await initializeDatabase();
 	
 	const plugins = [];
-	plugins.push(job(io));
-	plugins.push(configuration(io));
-	plugins.push(host(io));
-	plugins.push(user(io));
-	plugins.push(docker(io));
-	plugins.push(bookmark(io));
-	plugins.push(share(io));
-	plugins.push(weather(io));
+	plugins.push(require('./job')(io));
+	plugins.push(require('./configuration')(io));
+	plugins.push(require('./host')(io));
+	plugins.push(require('./user')(io));
+	plugins.push(require('./docker')(io));
+	plugins.push(require('./bookmark')(io));
+	plugins.push(require('./share')(io));
+	plugins.push(require('./weather')(io));
 
 	return {
 		plugins
