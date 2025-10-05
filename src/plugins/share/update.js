@@ -1,5 +1,5 @@
 const updateShare = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	await plugin.updateJobProgress(job, `Updating share ${config.name}...`);
 	// TODO: Implement actual share update logic
 	await plugin.emitShares();

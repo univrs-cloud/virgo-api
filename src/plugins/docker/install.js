@@ -6,8 +6,8 @@ const dockerCompose = require('docker-compose');
 const DataService = require('../../database/data_service');
 
 const installApp = async (job, plugin) => {
-	let config = job.data.config;
-	let template = plugin.getState('templates')?.find((template) => { return template.id === config.id; });
+	const config = job.data.config;
+	const template = plugin.getState('templates')?.find((template) => { return template.id === config.id; });
 	if (!template) {
 		throw new Error(`App template not found.`);
 	}

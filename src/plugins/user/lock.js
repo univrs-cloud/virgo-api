@@ -1,8 +1,8 @@
 const { execa } = require('execa');
 
 const lockUser = async (job, plugin) => {
-	let config = job.data.config;
-	let user = plugin.getState('users').find((user) => { return user.username === config.username; });
+	const config = job.data.config;
+	const user = plugin.getState('users').find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}

@@ -16,6 +16,7 @@ try {
 
 class HostPlugin extends BasePlugin {
 	#i2c = i2c;
+	#etcHosts = '/etc/hosts';
 	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 	#upgradeFile = '/var/www/virgo-api/upgrade.log';
 	#upgradePid = null;
@@ -66,6 +67,10 @@ class HostPlugin extends BasePlugin {
 
 	get i2c() {
 		return this.#i2c;
+	}
+
+	get etcHosts() {
+		return this.#etcHosts;
 	}
 
 	get upgradePidFile() {

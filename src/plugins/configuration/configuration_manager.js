@@ -1,6 +1,6 @@
 const emitToSocket = (socket, plugin) => {
 	try {
-		let configuration = plugin.getState('configuration') || {};
+		const configuration = plugin.getState('configuration') || {};
 		let userConfiguration = { ...configuration };
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			delete userConfiguration.smtp;
@@ -13,7 +13,7 @@ const emitToSocket = (socket, plugin) => {
 
 const broadcast = (plugin) => {
 	try {
-		let configuration = plugin.getState('configuration') || {};
+		const configuration = plugin.getState('configuration') || {};
 		for (const socket of plugin.getNsp().sockets.values()) {
 			let userConfiguration = { ...configuration };
 			if (!socket.isAuthenticated || !socket.isAdmin) {

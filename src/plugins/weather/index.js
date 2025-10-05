@@ -48,7 +48,7 @@ class WeatherPlugin extends BasePlugin {
 			return;
 		}
 	
-		let configuration = await DataService.getConfiguration();
+		const configuration = await DataService.getConfiguration();
 		if (!configuration || !configuration.location) {
 			return;
 		}

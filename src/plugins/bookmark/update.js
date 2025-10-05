@@ -2,7 +2,7 @@ const changeCase = require('change-case');
 const DataService = require('../../database/data_service');
 
 const updateBookmark = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	const existingBookmark = await DataService.getBookmark(config?.name);
 	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);

@@ -6,7 +6,7 @@ const docker = new dockerode();
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'down'];
 
 const performAppAction = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	if (!allowedActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
@@ -36,7 +36,7 @@ const performAppAction = async (job, plugin) => {
 };
 
 const performServiceAction = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	if (!allowedActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}

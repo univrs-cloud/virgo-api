@@ -5,8 +5,8 @@ const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
 
 const createUser = async (job, plugin) => {
-	let config = job.data.config;
-	let user = plugin.getState('users').find((user) => { return user.username === config.username; });
+	const config = job.data.config;
+	const user = plugin.getState('users').find((user) => { return user.username === config.username; });
 	if (user) {
 		throw new Error(`User already exists.`);
 	}

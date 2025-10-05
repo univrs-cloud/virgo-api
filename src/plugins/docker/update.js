@@ -9,7 +9,7 @@ const DataService = require('../../database/data_service');
 const docker = new dockerode();
 
 const updateApp = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	const existingApp = await DataService.getApplication(config?.name);
 	if (!existingApp) {
 		throw new Error(`App not found.`);
@@ -26,7 +26,7 @@ const updateApp = async (job, plugin) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});
 	await plugin.updateJobProgress(job, `${existingApp.title} update starting...`);
-	let template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
+	const template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
 		try {
 			const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));

@@ -1,7 +1,7 @@
 const DataService = require('../../database/data_service');
 
 const updateLocation = async (job, plugin) => {
-	let config = job.data.config;
+	const config = job.data.config;
 	await plugin.updateJobProgress(job, `Saving location...`);	
 	await DataService.setConfiguration('location', config);
 	plugin.getInternalEmitter().emit('configuration:updated');

@@ -4,13 +4,13 @@ const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
 
 const changePassword = async (job, plugin) => {
-	let config = job.data.config;
-	let user = plugin.getState('users').find((user) => { return user.username === config.username; });
+	const config = job.data.config;
+	const user = plugin.getState('users').find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	let authenticatedUser = plugin.getState('users').find((user) => { return user.username === job.data.username; });
+	const authenticatedUser = plugin.getState('users').find((user) => { return user.username === job.data.username; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
 		throw new Error(`Only the owner can change his own password.`);
 	}
