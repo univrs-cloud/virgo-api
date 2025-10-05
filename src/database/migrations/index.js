@@ -1,3 +1,4 @@
+const moveDatabaseLocation = require('./000_move_database_location');
 const migrateConfiguration = require('./001_migrate_configuration');
 const migrateData = require('./002_migrate_data');
 
@@ -6,6 +7,7 @@ const runMigrations = async () => {
 		console.log(`Running database migrations...`);
 		
 		// Run migrations in order
+		await moveDatabaseLocation();
 		await migrateConfiguration();
 		await migrateData();
 		
