@@ -20,8 +20,8 @@ if [ $? == 1 ]; then
 	else
 		/usr/local/bin/n lts
 		/usr/local/bin/n prune
-		systemctl start virgo-api.service
 	fi
+	systemctl start virgo-api.service
 fi
 
 file_path="/etc/mail.rc"
