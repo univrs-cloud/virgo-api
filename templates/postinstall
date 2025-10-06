@@ -14,7 +14,7 @@ systemctl enable virgo-api.service
 ischroot
 if [ $? == 1 ]; then
 	latest_lts=$(/usr/local/bin/n --lts 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-	installed_versions=$(/usr/local/bin/n ls 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+	installed_versions=$(/usr/local/bin/node -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 	if echo "$installed_versions" | grep -qx "$latest_lts"; then
 		echo "Node.js LTS $latest_lts is already installed. Skipping install."
 	else
