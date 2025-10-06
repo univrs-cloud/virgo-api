@@ -5,7 +5,7 @@ set -o pipefail
 mkdir -p /var/www/virgo-api/app/cert/
 openssl genrsa -out /var/www/virgo-api/app/cert/key.pem 4096
 chmod 600 /var/www/virgo-api/app/cert/key.pem
-openssl req -new -key /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/csr.pem -subj "/CN=virgo/O=Organization/C=RO"
+openssl req -new -key /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/csr.pem -subj "/CN=virgo/O=univrs.cloud/C=RO"
 openssl x509 -req -days 365 -in /var/www/virgo-api/app/cert/csr.pem -signkey /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/cert.pem -sha256
 chmod 644 /var/www/virgo-api/app/cert/cert.pem
 
