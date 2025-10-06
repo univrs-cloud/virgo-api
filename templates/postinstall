@@ -13,9 +13,15 @@ systemctl enable virgo-api.service
 
 ischroot
 if [ $? == 1 ]; then
-	/usr/local/bin/n lts
-	/usr/local/bin/n prune
-	systemctl start virgo-api.service
+	latest_lts=$(/usr/local/bin/n --lts 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+	installed_versions=$(/usr/local/bin/n ls 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+	if echo "$installed_versions" | grep -qx "$latest_lts"; then
+		echo "Node.js LTS $latest_lts is already installed. Skipping install."
+	else
+		/usr/local/bin/n lts
+		/usr/local/bin/n prune
+		systemctl start virgo-api.service
+	fi
 fi
 
 file_path="/etc/mail.rc"
