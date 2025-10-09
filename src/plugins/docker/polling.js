@@ -1,14 +1,7 @@
 const camelcaseKeys = require('camelcase-keys').default;
-const { time } = require('console');
 const dockerode = require('dockerode');
 
 const docker = new dockerode();
-const polling = {
-	containers: false
-};
-const timeouts = {
-	containers: null
-};
 const CACHE_TTL = 1 * 60 * 1000; // 1 minute in ms
 
 const pollContainersOnce = async (socket, plugin) => {
@@ -27,38 +20,46 @@ const pollContainersOnce = async (socket, plugin) => {
 	plugin.getNsp().emit('app:containers', plugin.getState('containers'));
 };
 
-const pollContainers = async (socket, plugin) => {
-	if (polling.containers) {
+const poll = (socket, plugin, entity, interval) => {
+	if (polls[entity].polling) {
 		return;
 	}
 
 	const loop = async () => {
 		if (plugin.getNsp().server.engine.clientsCount === 0) {
-			polling.containers = false;
-			if (!timeouts.containers) {
-				timeouts.containers = setTimeout(() => {
-					plugin.setState('containers', undefined);
-					timeouts.containers = null;
+			polls[entity].polling = false;
+			if (!polls[entity].timeouts) {
+				polls[entity].timeouts = setTimeout(() => {
+					plugin.setState(entity, undefined);
+					polls[entity].timeouts = null;
 				}, CACHE_TTL);
 			}
 			return;
 		}
 
-		if (timeouts.containers) {
-			clearTimeout(timeouts.containers);
-			timeouts.containers = null;
+		if (polls[entity].timeouts) {
+			clearTimeout(polls[entity].timeouts);
+			polls[entity].timeouts = null;
 		}
 		
-		polling.containers = true;
-		await pollContainersOnce(socket, plugin);
-		setTimeout(loop, 2000);
+		polls[entity].polling = true;
+		await polls[entity].callbacks(socket, plugin);
+		setTimeout(loop, interval);
 	};
 
 	loop();
 };
 
-const startPolling = async (socket, plugin) => {
-	await pollContainers(socket, plugin);
+const polls = {
+	containers: {
+		callbacks: pollContainersOnce,
+		polling: false,
+		timeouts: null
+	}
+};
+
+const startPolling = (socket, plugin) => {
+	poll(socket, plugin, 'containers', 2000);
 };
 
 module.exports = {

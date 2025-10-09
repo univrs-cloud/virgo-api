@@ -23,7 +23,7 @@ class DockerPlugin extends BasePlugin {
 		return this.#composeDir;
 	};
 
-	onConnection(socket) {
+	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin.startPolling(socket, this);
 

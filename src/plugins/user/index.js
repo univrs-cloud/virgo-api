@@ -16,7 +16,7 @@ class UserPlugin extends BasePlugin {
 		return this.#autheliaUsersFile;
 	}
 
-	get const() {
+	get cost() {
 		return this.#cost;
 	}
 

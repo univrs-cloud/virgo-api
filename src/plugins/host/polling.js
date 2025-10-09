@@ -2,12 +2,27 @@ const { execa } = require('execa');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
 
-const pollCpuStats = async (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('cpuStats', undefined);
-		return;
+const CACHE_TTL = 1 * 60 * 1000; // 1 minute in ms
+
+const pollNetworkStatsOnce = async (socket, plugin) => {
+	try {
+		const networkStats = await si.networkStats();
+		let networkInterfaceStats = networkStats[0];
+		if (networkInterfaceStats.rx_sec === null) {
+			networkInterfaceStats.rx_sec = 0;
+		}
+		if (networkInterfaceStats.tx_sec === null) {
+			networkInterfaceStats.tx_sec = 0;
+		}
+		plugin.setState('networkStats', networkInterfaceStats);
+	} catch (error) {
+		plugin.setState('networkStats', false);
 	}
 
+	plugin.getNsp().emit('host:network:stats', plugin.getState('networkStats'));
+};
+
+const pollCpuStatsOnce = async (socket, plugin) => {
 	try {
 		const currentLoad = await si.currentLoad();
 		const cpuTemperature = await si.cpuTemperature();
@@ -18,15 +33,9 @@ const pollCpuStats = async (socket, plugin) => {
 	}
 
 	plugin.getNsp().emit('host:cpu:stats', plugin.getState('cpuStats'));
-	setTimeout(() => { pollCpuStats(socket, plugin); }, 5000);
 };
 
-const pollMemory = async (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('memory', undefined);
-		return;
-	}
-
+const pollMemoryOnce = async (socket, plugin) => {
 	try {
 		const memory = await si.mem();
 		plugin.setState('memory', memory);
@@ -35,15 +44,9 @@ const pollMemory = async (socket, plugin) => {
 	}
 
 	plugin.getNsp().emit('host:memory', plugin.getState('memory'));
-	setTimeout(() => { pollMemory(socket, plugin); }, 10000);
 };
 
-const pollStorage = async (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('storage', undefined);
-		return;
-	}
-
+const pollStorageOnce = async (socket, plugin) => {
 	try {
 		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false }).pipe('jq');
 		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false }).pipe('jq');
@@ -85,15 +88,9 @@ const pollStorage = async (socket, plugin) => {
 	}
 
 	plugin.getNsp().emit('host:storage', plugin.getState('storage'));
-	setTimeout(() => { pollStorage(socket, plugin); }, 60000);
 };
 
-const pollDrives = async (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('drives', undefined);
-		return;
-	}
-
+const pollDrivesOnce = async (socket, plugin) => {
 	try {
 		const responseSmartctl = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true, reject: false });
 		const responseNvme = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true, reject: false });
@@ -115,50 +112,86 @@ const pollDrives = async (socket, plugin) => {
 	}
 
 	plugin.getNsp().emit('host:drives', plugin.getState('drives'));
-	setTimeout(() => { pollDrives(socket, plugin); }, 60000);
 };
 
-const pollNetworkStats = async (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('networkStats', undefined);
-		return;
-	}
-
-	try {
-		const networkStats = await si.networkStats();
-		let networkInterfaceStats = networkStats[0];
-		if (networkInterfaceStats.rx_sec === null) {
-			networkInterfaceStats.rx_sec = 0;
-		}
-		if (networkInterfaceStats.tx_sec === null) {
-			networkInterfaceStats.tx_sec = 0;
-		}
-		plugin.setState('networkStats', networkInterfaceStats);
-	} catch (error) {
-		plugin.setState('networkStats', false);
-	}
-
-	plugin.getNsp().emit('host:network:stats', plugin.getState('networkStats'));
-	setTimeout(() => { pollNetworkStats(socket, plugin); }, 2000);
-};
-
-const pollTime = (socket, plugin) => {
-	if (plugin.getNsp().server.engine.clientsCount === 0) {
-		plugin.setState('time', undefined);
-		return;
-	}
-
+const pollTimeOnce = async (socket, plugin) => {
 	plugin.setState('time', si.time());
 	plugin.getNsp().emit('host:time', plugin.getState('time'));
-	setTimeout(() => { pollTime(socket, plugin); }, 60000);
+};
+
+const poll = (socket, plugin, entity, interval) => {
+	if (polls[entity].polling) {
+		return;
+	}
+
+	const loop = async () => {
+		if (plugin.getNsp().server.engine.clientsCount === 0) {
+			polls[entity].polling = false;
+			if (!polls[entity].timeouts) {
+				polls[entity].timeouts = setTimeout(() => {
+					plugin.setState(entity, undefined);
+					polls[entity].timeouts = null;
+				}, CACHE_TTL);
+			}
+			return;
+		}
+
+		if (polls[entity].timeouts) {
+			clearTimeout(polls[entity].timeouts);
+			polls[entity].timeouts = null;
+		}
+		
+		polls[entity].polling = true;
+		await polls[entity].callbacks(socket, plugin);
+		setTimeout(loop, interval);
+	};
+
+	loop();
+};
+
+const polls = {
+	networkStats: {
+		callbacks: pollNetworkStatsOnce,
+		polling: false,
+		timeouts: null
+	},
+	cpuStats: {
+		callbacks: pollCpuStatsOnce,
+		polling: false,
+		timeouts: null
+	},
+	memory: {
+		callbacks: pollMemoryOnce,
+		polling: false,
+		timeouts: null
+	},
+	storage: {
+		callbacks: pollStorageOnce,
+		polling: false,
+		timeouts: null
+	},
+	drives: {
+		callbacks: pollDrivesOnce,
+		polling: false,
+		timeouts: null
+	},
+	time: {
+		callbacks: pollTimeOnce,
+		polling: false,
+		timeouts: null
+	}
+};
+
+const startPolling = (socket, plugin) => {
+	poll(socket, plugin, 'networkStats', 2000);
+	poll(socket, plugin, 'cpuStats', 5000);
+	poll(socket, plugin, 'memory', 10000);
+	poll(socket, plugin, 'storage', 60000);
+	poll(socket, plugin, 'drives', 60000);
+	poll(socket, plugin, 'time', 60000);
 };
 
 module.exports = {
 	name: 'polling',
-	pollCpuStats,
-	pollMemory,
-	pollStorage,
-	pollDrives,
-	pollNetworkStats,
-	pollTime
+	startPolling
 };

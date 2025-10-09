@@ -53,6 +53,8 @@ class HostPlugin extends BasePlugin {
 		this.#loadNetworkInterface();
 		this.#loadDefaultGateway();
 
+		this.checkUps();
+
 		this.getInternalEmitter()
 			.on('host:network:identifier:updated', async () => {
 				await this.#loadNetworkIdentifier();
@@ -97,10 +99,10 @@ class HostPlugin extends BasePlugin {
 		return this.#checkUpgradeIntervalId = value;
 	}
 
-	onConnection(socket) {
+	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
+		pollingPlugin.startPolling(socket, this);
 		
-		this.checkUps();
 		this.checkUpgrade(socket);
 
 		this.getNsp().emit('host:system', this.getState('system'));
@@ -122,36 +124,24 @@ class HostPlugin extends BasePlugin {
 		}
 		if (this.getState('cpuStats')) {
 			this.getNsp().emit('host:cpu:stats', this.getState('cpuStats'));
-		} else {
-			pollingPlugin.pollCpuStats(socket, this);
 		}
 		if (this.getState('memory')) {
 			this.getNsp().emit('host:memory', this.getState('memory'));
-		} else {
-			pollingPlugin.pollMemory(socket, this);
 		}
 		if (this.getState('storage')) {
 			this.getNsp().emit('host:storage', this.getState('storage'));
-		} else {
-			pollingPlugin.pollStorage(socket, this);
 		}
 		if (this.getState('drives')) {
 			this.getNsp().emit('host:drives', this.getState('drives'));
-		} else {
-			pollingPlugin.pollDrives(socket, this);
 		}
 		if (this.getState('networkStats')) {
 			this.getNsp().emit('host:network:stats', this.getState('networkStats'));
-		} else {
-			pollingPlugin.pollNetworkStats(socket, this);
 		}
 		if (this.getState('ups')) {
 			this.getNsp().emit('host:ups', this.getState('ups'));
 		}
 		if (this.getState('time')) {
 			this.getNsp().emit('host:time', this.getState('time'));
-		} else {
-			pollingPlugin.pollTime(socket, this);
 		}
 	}
 
