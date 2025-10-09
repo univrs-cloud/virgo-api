@@ -25,14 +25,13 @@ class DockerPlugin extends BasePlugin {
 
 	onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
-		
+		pollingPlugin.startPolling(socket, this);
+
 		if (this.getState('configured')) {
 			this.getNsp().emit('app:configured', this.getState('configured'));
 		}
 		if (this.getState('containers')) {
 			this.getNsp().emit('app:containers', this.getState('containers'));
-		} else {
-			pollingPlugin.pollContainers(socket, this);
 		}
 		if (this.getState('templates')) {
 			if (socket.isAuthenticated) {
