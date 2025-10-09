@@ -59,5 +59,9 @@
 	},
 	"devDependencies": {
 		"@types/node": "^24.7.1"
+	},
+	"overrides": {
+		"glob": "^11.0.3",
+		"node-gyp": "^11.4.2"
 	}
 }
