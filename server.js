@@ -13,7 +13,7 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
 app.use(express.json());
-app.use('/', require('./src/controllers'));
+app.use(require('./src/controllers'));
 app.use(require('./src/middleware/auth_cookie_handler'));
 app.use(require('./src/middleware/error_404_handler'));
 app.use(require('./src/middleware/error_handler'));
