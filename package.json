@@ -57,7 +57,7 @@
 		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.7.1"
+		"@types/node": "^24.7.2"
 	},
 	"overrides": {
 		"glob": "^11.0.3",
