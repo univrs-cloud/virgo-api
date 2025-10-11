@@ -2,6 +2,7 @@
 
 set -o pipefail
 
+ischroot
 if [ $? == 1 ]; then
 	latest_lts=$(/usr/local/bin/n --lts 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 	installed_versions=$(/usr/local/bin/node -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
