@@ -105,7 +105,6 @@ class HostPlugin extends BasePlugin {
 		
 		this.checkUpgrade(socket);
 
-		this.getNsp().emit('host:system', this.getState('system'));
 		if (this.getState('reboot') === undefined) {
 			this.getNsp().emit('host:reboot', false);
 		}
@@ -122,6 +121,12 @@ class HostPlugin extends BasePlugin {
 		} else {
 			this.checkForUpdates();
 		}
+		if (this.getState('system')) {
+			this.getNsp().emit('host:system', this.getState('system'));
+		}
+		if (this.getState('networkStats')) {
+			this.getNsp().emit('host:network:stats', this.getState('networkStats'));
+		}
 		if (this.getState('cpuStats')) {
 			this.getNsp().emit('host:cpu:stats', this.getState('cpuStats'));
 		}
@@ -133,9 +138,6 @@ class HostPlugin extends BasePlugin {
 		}
 		if (this.getState('drives')) {
 			this.getNsp().emit('host:drives', this.getState('drives'));
-		}
-		if (this.getState('networkStats')) {
-			this.getNsp().emit('host:network:stats', this.getState('networkStats'));
 		}
 		if (this.getState('ups')) {
 			this.getNsp().emit('host:ups', this.getState('ups'));
