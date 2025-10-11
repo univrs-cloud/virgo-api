@@ -8,11 +8,11 @@ class ConfigurationPlugin extends BasePlugin {
 
 		this.#loadConfiguration();
 
-		this.getInternalEmitter()
-			.on('configuration:updated', () => {
-				this.#loadConfiguration();
-				configurationManager.broadcast(this);
-			});
+	this.getInternalEmitter()
+		.on('configuration:updated', async () => {
+			await this.#loadConfiguration();
+			configurationManager.broadcast(this);
+		});
 	}
 
 	onConnection(socket) {

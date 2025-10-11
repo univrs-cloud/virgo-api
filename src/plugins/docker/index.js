@@ -14,8 +14,9 @@ class DockerPlugin extends BasePlugin {
 		this.#loadConfigured();
 
 		this.getInternalEmitter()
-			.on('configured:updated', () => {
-				this.#loadConfigured();
+			.on('configured:updated', async () => {
+				await this.#loadConfigured();
+				this.getNsp().emit('app:configured', this.getState('configured'));
 			});
 	}
 
@@ -213,7 +214,6 @@ class DockerPlugin extends BasePlugin {
 		try {
 			const configuration = await DataService.getConfigured();
 			this.setState('configured', { configuration });
-			this.getNsp().emit('app:configured', this.getState('configured'));
 		} catch (error) {
 			console.error(`Error loading configured:`, error);
 		}

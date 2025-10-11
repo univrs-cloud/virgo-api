@@ -12,8 +12,8 @@ class WeatherPlugin extends BasePlugin {
 		this.fetchWeather();
 
 		this.getInternalEmitter()
-			.on('configuration:location:updated', () => {
-				this.fetchWeather();
+			.on('configuration:location:updated', async () => {
+				await this.fetchWeather();
 			});
 	}
 
