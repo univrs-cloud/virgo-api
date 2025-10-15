@@ -25,8 +25,8 @@
 		}
 	},
 	"engines": {
-		"node": ">=22.20.0",
-		"npm": ">=10.9.0"
+		"node": ">=20.19.5",
+		"npm": ">=10.8.2"
 	},
 	"dependencies": {
 		"bcryptjs": "^3.0.2",
@@ -57,7 +57,8 @@
 		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.7.2"
+		"@types/node": "^24.7.2",
+		"node-deb": "^0.10.7"
 	},
 	"overrides": {
 		"glob": "^11.0.3",
