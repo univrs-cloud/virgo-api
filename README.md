@@ -2,7 +2,7 @@
 
 How to build DEB
 ---
-`npm install`
+`npm ci`
 
 `npm run deb`
 
