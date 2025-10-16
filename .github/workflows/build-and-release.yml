@@ -23,7 +23,9 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install --include=optional --ignore-scripts
+        run: |
+          npm install
+          npm install raspi-i2c --ignore-scripts
 
       - name: Build .deb package
         run: npm run deb
