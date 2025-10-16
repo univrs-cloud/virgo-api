@@ -23,7 +23,7 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install --include=optional
+        run: npm install --include=optional --ignore-scripts
 
       - name: Build .deb package
         run: npm run deb
