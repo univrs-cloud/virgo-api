@@ -1,17 +1,18 @@
 const initializeDatabase = require('../database/init');
 
-module.exports = async (io) => {
+module.exports = async () => {
 	await initializeDatabase();
 	
-	const plugins = [];
-	plugins.push(require('./job')(io));
-	plugins.push(require('./configuration')(io));
-	plugins.push(require('./host')(io));
-	plugins.push(require('./user')(io));
-	plugins.push(require('./docker')(io));
-	plugins.push(require('./bookmark')(io));
-	plugins.push(require('./share')(io));
-	plugins.push(require('./weather')(io));
+	const plugins = [
+		require('./job')(),
+		require('./configuration')(),
+		require('./host')(),
+		require('./user')(),
+		require('./docker')(),
+		require('./bookmark')(),
+		require('./share')(),
+		require('./weather')()
+	];
 
 	return {
 		plugins

@@ -3,8 +3,8 @@ const BasePlugin = require('../base');
 class JobPlugin extends BasePlugin {
 	#queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'bookmark-jobs', 'user-jobs', 'share-jobs'];
 
-	constructor(io) {
-		super(io, 'job');
+	constructor() {
+		super('job');
 	}
 
 	get queues() {
@@ -12,6 +12,6 @@ class JobPlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new JobPlugin(io);
+module.exports = () => {
+	return new JobPlugin();
 };

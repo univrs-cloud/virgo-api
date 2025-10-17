@@ -6,8 +6,8 @@ class WeatherPlugin extends BasePlugin {
 	#fetchRetries = 3;
 	#request = null;
 
-	constructor(io) {
-		super(io, 'weather');
+	constructor() {
+		super('weather');
 
 		this.fetchWeather();
 
@@ -104,6 +104,6 @@ class WeatherPlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new WeatherPlugin(io);
+module.exports = () => {
+	return new WeatherPlugin();
 };

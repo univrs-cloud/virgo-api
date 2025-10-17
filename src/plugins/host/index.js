@@ -22,8 +22,8 @@ class HostPlugin extends BasePlugin {
 	#upgradePid = null;
 	#checkUpgradeIntervalId = null;
 
-	constructor(io) {
-		super(io, 'host');
+	constructor() {
+		super('host');
 
 		if (this.i2c === false) {
 			this.setState('ups', 'remote i/o error');
@@ -332,6 +332,6 @@ class HostPlugin extends BasePlugin {
 
 }
 
-module.exports = (io) => {
-	return new HostPlugin(io);
+module.exports = () => {
+	return new HostPlugin();
 };

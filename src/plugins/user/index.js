@@ -8,8 +8,8 @@ class UserPlugin extends BasePlugin {
 	#autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
 	#cost = 12;
 
-	constructor(io) {
-		super(io, 'user');
+	constructor() {
+		super('user');
 	}
 
 	get autheliaUsersFile() {
@@ -97,6 +97,6 @@ class UserPlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new UserPlugin(io);
+module.exports = () => {
+	return new UserPlugin();
 };

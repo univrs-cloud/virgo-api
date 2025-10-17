@@ -3,8 +3,8 @@ const DataService = require('../../database/data_service');
 const configurationManager = require('./configuration_manager');
 
 class ConfigurationPlugin extends BasePlugin {
-	constructor(io) {
-		super(io, 'configuration');
+	constructor() {
+		super('configuration');
 
 		this.#loadConfiguration();
 
@@ -29,6 +29,6 @@ class ConfigurationPlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new ConfigurationPlugin(io);
+module.exports = () => {
+	return new ConfigurationPlugin();
 };

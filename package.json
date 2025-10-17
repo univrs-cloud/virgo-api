@@ -4,9 +4,9 @@
 	"description": "virgo API",
 	"author": "univrs",
 	"license": "UNLICENSED",
-	"main": "server.js",
+	"main": "index.js",
 	"scripts": {
-		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- server.js config.js cert/ src/",
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js cert/ src/",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"node_deb": {
@@ -21,7 +21,7 @@
 			"systemd_service": "templates/systemd.service"
 		},
 		"entrypoints": {
-			"daemon": "server.js"
+			"daemon": "index.js"
 		}
 	},
 	"engines": {
@@ -57,7 +57,7 @@
 		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.7.2",
+		"@types/node": "^24.8.1",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {

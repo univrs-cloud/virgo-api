@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Queue, Worker } = require('bullmq');
+const { getIO } = require('../socket');
 const eventEmitter = require('../utils/event_emitter');
 const config = require('../../config');
 
@@ -14,9 +15,9 @@ class BasePlugin {
 	#worker;
 	#plugins = [];
 
-	constructor(io, name) {
+	constructor(name) {
 		this.#name = name;
-		this.#io = io;
+		this.#io = getIO();
 		this.#nsp = this.#io.of(`/${this.#name}`);
 		this.#internalEmitter = eventEmitter;
 

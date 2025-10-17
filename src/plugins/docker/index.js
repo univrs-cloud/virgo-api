@@ -8,8 +8,8 @@ const docker = new dockerode();
 class DockerPlugin extends BasePlugin {
 	#composeDir = '/opt/docker';
 
-	constructor(io) {
-		super(io, 'docker');
+	constructor() {
+		super('docker');
 		
 		this.#loadConfigured();
 
@@ -220,6 +220,6 @@ class DockerPlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new DockerPlugin(io);
+module.exports = () => {
+	return new DockerPlugin();
 };

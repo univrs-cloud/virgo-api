@@ -10,8 +10,8 @@ class SharePlugin extends BasePlugin {
 		'/messier/.shares'
 	];
 	
-	constructor(io) {
-		super(io, 'share');
+	constructor() {
+		super('share');
 	}
 
 	get configurationFiles() {
@@ -66,6 +66,6 @@ class SharePlugin extends BasePlugin {
 	}
 }
 
-module.exports = (io) => {
-	return new SharePlugin(io);
+module.exports = () => {
+	return new SharePlugin();
 };
