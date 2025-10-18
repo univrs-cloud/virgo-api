@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execa } = require('execa');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
 const dockerCompose = require('docker-compose');
@@ -22,6 +23,21 @@ const installApp = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `${template.title} installation starting...`);
+	const dataset = `messier/apps/${template.name}`
+	try {
+		await fs.promises.access(`/${dataset}`);
+		await plugin.updateJobProgress(job, `Storage space ${dataset} for ${template.title} already exists. Skipping creation.`);
+	} catch (error) {
+		if (error.code === 'ENOENT') {
+			await plugin.updateJobProgress(job, `Creating storage space ${dataset} for ${template.title}...`);
+			try {
+				await execa('zfs', ['create', dataset]); // Only create dataset if not exists
+				await plugin.updateJobProgress(job, `Storage space ${dataset} created for ${template.title}.`);
+			} catch (error) {
+				throw new Error(`Could not create storage space ${dataset} for ${template.title}.`);
+			}
+		}
+	}
 	await plugin.updateJobProgress(job, `Downloading ${template.title} project template...`);
 	const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 	if (!response.ok) {
@@ -57,7 +73,7 @@ const installApp = async (job, plugin) => {
 		icon: icon,
 		title: template.title
 	};
-	await plugin.updateJobProgress(job, `Updating apps configuration...`);
+	await plugin.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
 	plugin.getInternalEmitter().emit('configured:updated');
 	return `${template.title} installed.`;
