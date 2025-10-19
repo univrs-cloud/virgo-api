@@ -27,19 +27,18 @@ const poll = (socket, plugin, entity, interval) => {
 
 	const loop = async () => {
 		if (plugin.getNsp().server.engine.clientsCount === 0) {
-			polls[entity].polling = false;
 			if (!polls[entity].timeouts) {
 				polls[entity].timeouts = setTimeout(() => {
-					plugin.setState(entity, undefined);
+					polls[entity].polling = false;
 					polls[entity].timeouts = null;
+					plugin.setState(entity, undefined);
 				}, CACHE_TTL);
 			}
-			return;
-		}
-
-		if (polls[entity].timeouts) {
-			clearTimeout(polls[entity].timeouts);
-			polls[entity].timeouts = null;
+		} else {
+			if (polls[entity].timeouts) {
+				clearTimeout(polls[entity].timeouts);
+				polls[entity].timeouts = null;
+			}
 		}
 		
 		polls[entity].polling = true;
