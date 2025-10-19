@@ -13,7 +13,7 @@ const unlockUser = async (job, plugin) => {
 	await execa('smbpasswd', ['-e', config.username]);
 	await plugin.updateJobProgress(job, `Unlocking Authelia user ${config.username}...`);
 	await plugin.toggleAutheliaUserLock(config.username, false);
-	await plugin.emitUsers();
+	plugin.getInternalEmitter().emit('users:updated');
 	return `${config.username} unlocked.`;
 };
 

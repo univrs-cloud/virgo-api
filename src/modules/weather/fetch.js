@@ -9,7 +9,8 @@ module.exports = {
 	jobs: {
 		'weather:fetch': async (job, plugin) => {
 			plugin.fetchRetries = 3;
-			return await plugin.fetchWeather();
+			plugin.fetchWeather();
+			return '';
 		}
 	}
 };

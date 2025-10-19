@@ -18,7 +18,7 @@ const updateUser = async (job, plugin) => {
 	await execa('chfn', ['-f', config.fullname, config.username]);
 	await plugin.updateJobProgress(job, `Updating Authelia user ${config.username}...`);
 	await updateAutheliaUser();
-	await plugin.emitUsers();
+	plugin.getInternalEmitter().emit('users:updated');
 	return `User ${config.username} updated.`
 
 	async function updateAutheliaUser() {

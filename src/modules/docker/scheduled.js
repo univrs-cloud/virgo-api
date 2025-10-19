@@ -16,10 +16,12 @@ module.exports = {
 	},
 	jobs: {
 		'updates:check': async (job, plugin) => {
-			return await plugin.checkForUpdates();
+			plugin.checkForUpdates();
+			return '';
 		},
 		'templates:fetch': async (job, plugin) => {
-			return await plugin.fetchTemplates();
+			plugin.getInternalEmitter().emit('templates:fetched');
+			return '';
 		}
 	}
 };

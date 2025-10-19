@@ -17,7 +17,7 @@ class SharePlugin extends BasePlugin {
 
 		this.getInternalEmitter()
 			.on('shares:updated', async () => {
-				this.#loadShares();
+				await this.#loadShares();
 				this.getNsp().emit('shares', this.getState('shares'));
 			});
 	}

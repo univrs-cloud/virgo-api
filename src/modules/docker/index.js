@@ -12,11 +12,17 @@ class DockerPlugin extends BasePlugin {
 		super('docker');
 		
 		this.#loadConfigured();
+		this.#loadTemplates();
+		this.checkForUpdates();
 
 		this.getInternalEmitter()
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
 				this.getNsp().emit('app:configured', this.getState('configured'));
+			})
+			.on('templates:fetched', async () => {
+				await this.#loadTemplates();
+				this.getNsp().emit('app:templates', this.getState('templates'));
 			});
 	}
 
@@ -35,16 +41,10 @@ class DockerPlugin extends BasePlugin {
 			this.getNsp().emit('app:containers', this.getState('containers'));
 		}
 		if (this.getState('templates')) {
-			if (socket.isAuthenticated) {
-				this.getNsp().to(`user:${socket.username}`).emit('app:templates', this.getState('templates'));
-			}
-		} else {
-			this.fetchTemplates();
+			this.getNsp().emit('app:templates', this.getState('templates'));
 		}
 		if (this.getState('updates')) {
 			this.getNsp().emit('app:updates', this.getState('updates'));
-		} else {
-			this.checkForUpdates();
 		}
 	}
 	
@@ -182,22 +182,6 @@ class DockerPlugin extends BasePlugin {
 			}
 		}
 	}
-
-	async fetchTemplates() {
-		try {
-			const response = await fetch(`https://apps.univrs.cloud/template.json`);
-			const data = await response.json();
-			this.setState('templates', data.templates);
-		} catch (error) {
-			this.setState('templates', false);
-		}
-	
-		for (const socket of this.getNsp().sockets.values()) {
-			if (socket.isAuthenticated) {
-				this.getNsp().to(`user:${socket.username}`).emit('app:templates', this.getState('templates'));
-			}
-		}
-	}
 	
 	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
 		const { hostname, pathname } = new URL(repositoryUrl);
@@ -217,6 +201,17 @@ class DockerPlugin extends BasePlugin {
 		} catch (error) {
 			this.setState('configured', false);
 			console.error(`Error loading configured:`, error);
+		}
+	}
+
+	async #loadTemplates() {
+		try {
+			const response = await fetch(`https://apps.univrs.cloud/template.json`);
+			const data = await response.json();
+			this.setState('templates', data.templates);
+		} catch (error) {
+			this.setState('templates', false);
+			console.error(`Error loading templates:`, error);
 		}
 	}
 }

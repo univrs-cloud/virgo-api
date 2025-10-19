@@ -17,10 +17,12 @@ module.exports = {
 	},
 	jobs: {
 		'updates:check': async (job, plugin) => {
-			return await plugin.checkForUpdates();
+			plugin.checkForUpdates();
+			return '';
 		},
 		'ups:check': async (job, plugin) => {
-			return await plugin.checkUps();
+			plugin.checkUps();
+			return  '';
 		}
 	}
 };

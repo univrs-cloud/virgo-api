@@ -20,7 +20,7 @@ const deleteUser = async (job, plugin) => {
 	await execa('smbpasswd', ['-s', '-x', config.username]);
 	await plugin.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
-	await plugin.emitUsers();
+	plugin.getInternalEmitter().emit('users:updated');
 	return `User ${config.username} deleted.`
 
 	async function deleteAutheliaUser() {

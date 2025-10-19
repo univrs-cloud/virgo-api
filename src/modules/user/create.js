@@ -23,7 +23,7 @@ const createUser = async (job, plugin) => {
 	await plugin.setSambaUserPassword(config.username, config.password);
 	await plugin.updateJobProgress(job, `Creating Authelia user ${config.username}...`);
 	await createAutheliaUser();
-	await plugin.emitUsers();
+	plugin.getInternalEmitter().emit('users:updated');
 	return `User ${config.username} created.`
 
 	async function createAutheliaUser () {
