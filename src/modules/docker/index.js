@@ -7,13 +7,11 @@ const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
 	#composeDir = '/opt/docker';
-	#pollingPlugin;
 
 	constructor() {
 		super('docker');
 		
 		this.#loadConfigured();
-		this.#pollingPlugin = this.getPlugin('polling');
 
 		this.getInternalEmitter()
 			.on('configured:updated', async () => {
@@ -27,7 +25,8 @@ class DockerPlugin extends BasePlugin {
 	};
 
 	async onConnection(socket) {
-		this.#pollingPlugin.startPolling(socket, this);
+		const pollingPlugin = this.getPlugin('polling');
+		pollingPlugin.startPolling(socket, this);
 
 		if (this.getState('configured')) {
 			this.getNsp().emit('app:configured', this.getState('configured'));
