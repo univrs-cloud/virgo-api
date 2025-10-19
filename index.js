@@ -4,13 +4,13 @@ const config = require('./config');
 const createApp = require('./src/app');
 const createServer = require('./src/server');
 const { initializeSocket } = require('./src/socket');
-const plugins = require('./src/plugins');
+const modules = require('./src/modules');
 
 try {
 	const app = createApp();
 	const server = createServer(app);
 	initializeSocket(server);
-	plugins();
+	modules();
 
 	server.listen(config.server.port, () => {
 		console.log(`Server started at https://${config.server.host}:${config.server.port}`);

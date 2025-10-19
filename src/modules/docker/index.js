@@ -7,11 +7,13 @@ const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
 	#composeDir = '/opt/docker';
+	#pollingPlugin;
 
 	constructor() {
 		super('docker');
 		
 		this.#loadConfigured();
+		this.#pollingPlugin = this.getPlugin('polling');
 
 		this.getInternalEmitter()
 			.on('configured:updated', async () => {
@@ -25,8 +27,7 @@ class DockerPlugin extends BasePlugin {
 	};
 
 	async onConnection(socket) {
-		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(socket, this);
+		this.#pollingPlugin.startPolling(socket, this);
 
 		if (this.getState('configured')) {
 			this.getNsp().emit('app:configured', this.getState('configured'));
@@ -215,6 +216,7 @@ class DockerPlugin extends BasePlugin {
 			const configuration = await DataService.getConfigured();
 			this.setState('configured', { configuration });
 		} catch (error) {
+			this.setState('configured', false);
 			console.error(`Error loading configured:`, error);
 		}
 	}

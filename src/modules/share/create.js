@@ -2,7 +2,7 @@ const createShare = async (job, plugin) => {
 	const config = job.data.config;
 	await plugin.updateJobProgress(job, `Creating share ${config.name}...`);
 	// TODO: Implement actual share creation logic
-	await plugin.emitShares();
+	plugin.getInternalEmitter().emit('shares:updated');
 	return `Share ${config.name} created.`;
 };
 

@@ -2,7 +2,7 @@ const deleteShare = async (job, plugin) => {
 	const config = job.data.config;
 	await plugin.updateJobProgress(job, `Deleting share ${config.name}...`);
 	// TODO: Implement actual share deletion logic
-	await plugin.emitShares();
+	plugin.getInternalEmitter().emit('shares:updated');
 	return `Share ${config.name} deleted.`;
 };
 

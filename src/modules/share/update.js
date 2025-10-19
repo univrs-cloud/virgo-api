@@ -2,7 +2,7 @@ const updateShare = async (job, plugin) => {
 	const config = job.data.config;
 	await plugin.updateJobProgress(job, `Updating share ${config.name}...`);
 	// TODO: Implement actual share update logic
-	await plugin.emitShares();
+	plugin.getInternalEmitter().emit('shares:updated');
 	return `Share ${config.name} updated.`;
 };
 

@@ -21,6 +21,7 @@ class HostPlugin extends BasePlugin {
 	#upgradeFile = '/var/www/virgo-api/upgrade.log';
 	#upgradePid = null;
 	#checkUpgradeIntervalId = null;
+	#pollingPlugin;
 
 	constructor() {
 		super('host');
@@ -52,6 +53,7 @@ class HostPlugin extends BasePlugin {
 		this.#loadNetworkIdentifier();
 		this.#loadNetworkInterface();
 		this.#loadDefaultGateway();
+		this.#pollingPlugin = this.getPlugin('polling');
 
 		this.checkUps();
 
@@ -100,8 +102,7 @@ class HostPlugin extends BasePlugin {
 	}
 
 	async onConnection(socket) {
-		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(socket, this);
+		this.#pollingPlugin.startPolling(socket, this);
 		
 		this.checkUpgrade(socket);
 

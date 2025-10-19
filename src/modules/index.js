@@ -3,7 +3,7 @@ const initializeDatabase = require('../database/init');
 module.exports = async () => {
 	await initializeDatabase();
 	
-	const plugins = [
+	const modules = [
 		require('./job')(),
 		require('./configuration')(),
 		require('./host')(),
@@ -15,6 +15,6 @@ module.exports = async () => {
 	];
 
 	return {
-		plugins
+		modules
 	};
 };

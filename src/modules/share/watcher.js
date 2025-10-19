@@ -25,7 +25,7 @@ const watchConfigurations = (plugin) => {
 	configurationWatcher
 		.onChange(async (event, path) => {
 			await execa('smbcontrol', ['all', 'reload-config']);
-			plugin.emitShares();
+			plugin.getInternalEmitter().emit('shares:updated');
 		});
 
 	plugin.configurationFiles.forEach(configurationPath => {
