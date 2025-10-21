@@ -18,7 +18,7 @@ class DockerPlugin extends BasePlugin {
 				await this.#loadConfigured();
 				this.getNsp().emit('app:configured', this.getState('configured'));
 			})
-			.on('templates:fetched', async () => {
+			.on('templates:fetch', async () => {
 				await this.#loadTemplates();
 				this.getNsp().emit('app:templates', this.getState('templates'));
 			});

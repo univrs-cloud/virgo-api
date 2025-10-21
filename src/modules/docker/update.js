@@ -208,9 +208,16 @@ const updateApp = async (job, plugin) => {
 
 module.exports = {
 	name: 'update',
-	onConnection(socket, plugin) {
+	register(plugin) {
 		checkForUpdates(plugin);
 
+		// Schedule updates checker to run daily at midnight
+		plugin.addJobSchedule(
+			'updates:check',
+			{ pattern: '0 0 0 * * *' }
+		);
+	},
+	onConnection(socket, plugin) {
 		socket.on('app:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
@@ -220,6 +227,10 @@ module.exports = {
 		});
 	},
 	jobs: {
+		'updates:check': async (job, plugin) => {
+			checkForUpdates(plugin);
+			return '';
+		},
 		'app:update': updateApp
 	}
 };
