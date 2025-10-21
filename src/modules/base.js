@@ -63,10 +63,9 @@ class BasePlugin {
 	}
 
 	async addJobSchedule(name, pattern) {
-		const id = `${name.replace(':', '-')}-id`;
 		try {
 			await this.#queue.upsertJobScheduler(
-				id,
+				name,
 				pattern,
 				{
 					name: name,
