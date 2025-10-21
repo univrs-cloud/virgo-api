@@ -15,7 +15,7 @@ const checkUpdates = async (socket, plugin) => {
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		plugin.setState('checkUpdates', false);
-		updates(socket, plugin);
+		plugin.updates(socket);
 	} catch (error) {
 		plugin.setState('checkUpdates', false);
 		plugin.getNsp().to(`user:${socket.username}`).emit('host:updates:check', plugin.getState('checkUpdates'));
@@ -63,7 +63,7 @@ const upgrade = async (socket, plugin) => {
 		plugin.checkUpgradeIntervalId = null;
 		plugin.setState('upgrade', { ...plugin.getState('upgrade'), state: 'failed' });
 		plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
-		updates(socket, plugin);
+		plugin.updates(socket);
 	}
 };
 
@@ -115,18 +115,6 @@ const shutdown = async (socket, plugin) => {
 	}
 
 	plugin.getNsp().emit('host:shutdown', plugin.getState('shutdown'));
-};
-
-const updates = (socket, plugin) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		plugin.getNsp().to(`user:${socket.username}`).emit('host:updates', false);
-		return;
-	}
-
-	if (plugin.upgradePid === null) {
-		plugin.getNsp().emit('host:upgrade', null);
-	}
-	plugin.checkForUpdates();
 };
 
 module.exports = {

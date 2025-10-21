@@ -6,23 +6,11 @@ module.exports = {
 			'updates:check',
 			{ pattern: '0 0 0 * * *' }
 		);
-		
-		// Schedule UPS checker to run every minute (if I2C is available)
-		if (plugin.i2c !== false) {
-			plugin.addJobSchedule(
-				'ups:check',
-				{ pattern: '0 */10 * * * *' }
-			);
-		}
 	},
 	jobs: {
 		'updates:check': async (job, plugin) => {
 			plugin.checkForUpdates();
 			return '';
-		},
-		'ups:check': async (job, plugin) => {
-			plugin.checkUps();
-			return  '';
 		}
 	}
 };

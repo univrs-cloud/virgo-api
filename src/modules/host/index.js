@@ -6,16 +6,7 @@ const si = require('systeminformation');
 const { version } = require('../../../package.json');
 const BasePlugin = require('../base');
 
-let i2c;
-try {
-	({ I2C } = require('raspi-i2c'));
-	i2c = new I2C();
-} catch (error) {
-	i2c = false;
-}
-
 class HostPlugin extends BasePlugin {
-	#i2c = i2c;
 	#etcHosts = '/etc/hosts';
 	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 	#upgradeFile = '/var/www/virgo-api/upgrade.log';
@@ -25,9 +16,6 @@ class HostPlugin extends BasePlugin {
 	constructor() {
 		super('host');
 
-		if (this.i2c === false) {
-			this.setState('ups', 'remote i/o error');
-		}
 		this.setState('system', {
 			api: {
 				version: version
@@ -49,11 +37,10 @@ class HostPlugin extends BasePlugin {
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
+		this.checkForUpdates();
 		this.#loadNetworkIdentifier();
 		this.#loadNetworkInterface();
 		this.#loadDefaultGateway();
-
-		this.checkUps();
 
 		this.getInternalEmitter()
 			.on('host:network:identifier:updated', async () => {
@@ -65,10 +52,6 @@ class HostPlugin extends BasePlugin {
 				await this.#loadDefaultGateway();
 				this.getNsp().emit('host:system', this.getState('system'));
 			});
-	}
-
-	get i2c() {
-		return this.#i2c;
 	}
 
 	get etcHosts() {
@@ -118,8 +101,6 @@ class HostPlugin extends BasePlugin {
 		}
 		if (this.getState('updates')) {
 			this.getNsp().to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? this.getState('updates') : []));
-		} else {
-			this.checkForUpdates();
 		}
 		if (this.getState('system')) {
 			this.getNsp().emit('host:system', this.getState('system'));
@@ -138,9 +119,6 @@ class HostPlugin extends BasePlugin {
 		}
 		if (this.getState('drives')) {
 			this.getNsp().emit('host:drives', this.getState('drives'));
-		}
-		if (this.getState('ups')) {
-			this.getNsp().emit('host:ups', this.getState('ups'));
 		}
 		if (this.getState('time')) {
 			this.getNsp().emit('host:time', this.getState('time'));
@@ -180,27 +158,6 @@ class HostPlugin extends BasePlugin {
 			}
 		};
 		return ``;
-	}
-
-	async checkUps() {
-		if (this.i2c === false) {
-			this.getNsp().emit('host:ups', this.getState('ups'));
-			return;
-		}
-	
-		if (this.getState('ups') === undefined) {
-			this.setState('ups', {});
-		}
-	
-		let batteryCharge;
-		try {
-			batteryCharge = this.i2c.readByteSync(0x36, 4);
-		} catch (error) {
-			batteryCharge = false;
-		}
-		this.setState('ups', { ...this.getState('ups'), batteryCharge });
-		
-		this.getNsp().emit('host:ups', this.getState('ups'));
 	}
 
 	async checkUpgrade(socket) {
