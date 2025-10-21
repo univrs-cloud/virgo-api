@@ -29,7 +29,8 @@ const poll = (socket, plugin, entity, interval) => {
 		if (plugin.getNsp().server.engine.clientsCount === 0) {
 			if (!polls[entity].timeouts) {
 				polls[entity].timeouts = setTimeout(() => {
-					polls[entity].polling = false;
+					clearTimeout(polls[entity].polling);
+					polls[entity].polling = null;
 					polls[entity].timeouts = null;
 					plugin.setState(entity, undefined);
 				}, CACHE_TTL);
@@ -41,9 +42,10 @@ const poll = (socket, plugin, entity, interval) => {
 			}
 		}
 		
-		polls[entity].polling = true;
 		await polls[entity].callbacks(socket, plugin);
-		setTimeout(loop, interval);
+		if (polls[entity].polling !== null) {
+			polls[entity].polling = setTimeout(loop, interval);
+		}
 	};
 
 	loop();
