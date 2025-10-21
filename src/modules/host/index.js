@@ -37,7 +37,6 @@ class HostPlugin extends BasePlugin {
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
-		this.checkForUpdates();
 		this.#loadNetworkIdentifier();
 		this.#loadNetworkInterface();
 		this.#loadDefaultGateway();
