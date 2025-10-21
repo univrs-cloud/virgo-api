@@ -218,8 +218,8 @@ module.exports = {
 		);
 	},
 	onConnection(socket, plugin) {
-		if (this.getState('updates')) {
-			this.getNsp().emit('app:updates', this.getState('updates'));
+		if (plugin.getState('updates')) {
+			plugin.getNsp().emit('app:updates', plugin.getState('updates'));
 		}
 		
 		socket.on('app:update', async (config) => {
