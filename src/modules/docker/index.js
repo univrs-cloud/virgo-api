@@ -41,9 +41,6 @@ class DockerPlugin extends BasePlugin {
 		if (this.getState('templates')) {
 			this.getNsp().emit('app:templates', this.getState('templates'));
 		}
-		if (this.getState('updates')) {
-			this.getNsp().emit('app:updates', this.getState('updates'));
-		}
 	}
 
 	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {

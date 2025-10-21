@@ -218,6 +218,10 @@ module.exports = {
 		);
 	},
 	onConnection(socket, plugin) {
+		if (this.getState('updates')) {
+			this.getNsp().emit('app:updates', this.getState('updates'));
+		}
+		
 		socket.on('app:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
