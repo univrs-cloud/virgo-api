@@ -21,7 +21,7 @@ const pollContainersOnce = async (socket, plugin) => {
 };
 
 const poll = (socket, plugin, entity, interval) => {
-	if (polls[entity].polling) {
+	if (polls[entity].polling !== null) {
 		return;
 	}
 
@@ -48,13 +48,14 @@ const poll = (socket, plugin, entity, interval) => {
 		}
 	};
 
+	polls[entity].polling = true;
 	loop();
 };
 
 const polls = {
 	containers: {
 		callbacks: pollContainersOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	}
 };

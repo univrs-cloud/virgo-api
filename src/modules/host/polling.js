@@ -120,7 +120,7 @@ const pollTimeOnce = async (socket, plugin) => {
 };
 
 const poll = (socket, plugin, entity, interval) => {
-	if (polls[entity].polling) {
+	if (polls[entity].polling !== null) {
 		return;
 	}
 
@@ -147,38 +147,39 @@ const poll = (socket, plugin, entity, interval) => {
 		}
 	};
 
+	polls[entity].polling = true;
 	loop();
 };
 
 const polls = {
 	networkStats: {
 		callbacks: pollNetworkStatsOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	},
 	cpuStats: {
 		callbacks: pollCpuStatsOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	},
 	memory: {
 		callbacks: pollMemoryOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	},
 	storage: {
 		callbacks: pollStorageOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	},
 	drives: {
 		callbacks: pollDrivesOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	},
 	time: {
 		callbacks: pollTimeOnce,
-		polling: false,
+		polling: null,
 		timeouts: null
 	}
 };
