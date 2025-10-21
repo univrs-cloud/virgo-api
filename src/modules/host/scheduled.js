@@ -11,7 +11,7 @@ module.exports = {
 		if (plugin.i2c !== false) {
 			plugin.addJobSchedule(
 				'ups:check',
-				{ pattern: '0 * * * * *' }
+				{ pattern: '0 */10 * * * *' }
 			);
 		}
 	},
