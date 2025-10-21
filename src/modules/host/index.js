@@ -70,7 +70,7 @@ class HostPlugin extends BasePlugin {
 	}
 
 	set upgradePid(value) {
-		return this.#upgradePid = value;
+		this.#upgradePid = value;
 	}
 
 	get checkUpgradeIntervalId() {
@@ -78,7 +78,7 @@ class HostPlugin extends BasePlugin {
 	}
 
 	set checkUpgradeIntervalId(value) {
-		return this.#checkUpgradeIntervalId = value;
+		this.#checkUpgradeIntervalId = value;
 	}
 
 	async onConnection(socket) {
