@@ -142,7 +142,9 @@ const poll = (socket, plugin, entity, interval) => {
 		}
 		
 		await polls[entity].callbacks(socket, plugin);
-		polls[entity].polling = setTimeout(loop, interval);
+		if (polls[entity].polling !== null) {
+			polls[entity].polling = setTimeout(loop, interval);
+		}
 	};
 
 	loop();
