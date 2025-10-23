@@ -8,6 +8,7 @@ class DockerPlugin extends BasePlugin {
 	#composeDir = '/opt/docker';
 	#appsDataset = 'messier/apps';
 	#appsDir;
+	#appIconsDir = '/var/www/virgo-ui/app/dist/assets/img/apps';
 
 	constructor() {
 		super('docker');
@@ -38,6 +39,10 @@ class DockerPlugin extends BasePlugin {
 
 	get appsDir() {
 		return this.#appsDir;
+	}
+
+	get appIconsDir() {
+		return this.#appIconsDir;
 	}
 
 	async onConnection(socket) {

@@ -65,7 +65,7 @@ const installApp = async (job, plugin) => {
 	const icon = template.logo.split('/').pop();
 	const responseIcon = await fetch(template.logo);
 	if (responseIcon.ok) {
-		await streamPipeline(responseIcon.body, fs.createWriteStream(`/var/www/virgo-ui/app/dist/assets/img/apps/${icon}`));
+		await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(plugin.appIconsDir, icon)));
 	}
 	const app = {
 		name: template.name,
