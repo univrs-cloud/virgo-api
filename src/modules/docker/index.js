@@ -6,9 +6,13 @@ const docker = new dockerode();
 
 class DockerPlugin extends BasePlugin {
 	#composeDir = '/opt/docker';
+	#appsDataset = 'messier/apps';
+	#appsDir;
 
 	constructor() {
 		super('docker');
+		
+		this.#appsDir = `/${this.#appsDataset}`;
 		
 		this.#loadConfigured();
 		this.#loadTemplates();
@@ -26,7 +30,15 @@ class DockerPlugin extends BasePlugin {
 
 	get composeDir() {
 		return this.#composeDir;
-	};
+	}
+
+	get appsDataset() {
+		return this.#appsDataset;
+	}
+
+	get appsDir() {
+		return this.#appsDir;
+	}
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');

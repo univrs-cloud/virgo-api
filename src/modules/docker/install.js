@@ -23,9 +23,10 @@ const installApp = async (job, plugin) => {
 	}
 
 	await plugin.updateJobProgress(job, `${template.title} installation starting...`);
-	const dataset = `messier/apps/${template.name}`
+	const dataset = `${plugin.appsDataset}/${template.name}`;
+	const appDir = path.join(plugin.appsDir, template.name);
 	try {
-		await fs.promises.access(`/${dataset}`);
+		await fs.promises.access(appDir);
 		await plugin.updateJobProgress(job, `Storage space ${dataset} for ${template.title} already exists. Skipping creation.`);
 	} catch (error) {
 		if (error.code === 'ENOENT') {
