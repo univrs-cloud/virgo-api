@@ -30,7 +30,7 @@
 	},
 	"dependencies": {
 		"bcryptjs": "^3.0.2",
-		"bullmq": "^5.61.0",
+		"bullmq": "^5.61.2",
 		"camelcase-keys": "^10.0.0",
 		"change-case": "^5.4.4",
 		"check-disk-space": "^3.4.0",
@@ -40,8 +40,8 @@
 		"execa": "^9.6.0",
 		"express": "^5.1.0",
 		"express-rate-limit": "^8.1.0",
-		"express-validator": "^7.2.1",
-		"ini": "^5.0.0",
+		"express-validator": "^7.3.0",
+		"ini": "^6.0.0",
 		"js-yaml": "^4.1.0",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^1.2.0",
@@ -57,7 +57,7 @@
 		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.8.1",
+		"@types/node": "^24.9.1",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
