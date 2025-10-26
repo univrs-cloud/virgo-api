@@ -2,9 +2,9 @@ const fs = require('fs');
 const { execa } = require('execa');
 const yaml = require('js-yaml');
 const linuxUser = require('linux-sys-user').promise();
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 
-class UserPlugin extends BasePlugin {
+class UserModule extends BaseModule {
 	#autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
 	#cost = 12;
 
@@ -99,5 +99,5 @@ class UserPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new UserPlugin();
+	return new UserModule();
 };

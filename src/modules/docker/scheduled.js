@@ -1,16 +1,16 @@
 
 module.exports = {
 	name: 'scheduled',
-	register(plugin) {
+	register(module) {
 		// Schedule templates fetcher to run every hour at minute 1
-		plugin.addJobSchedule(
+		module.addJobSchedule(
 			'templates:fetch',
 			{ pattern: '0 1 * * * *' }
 		);
 	},
 	jobs: {
-		'templates:fetch': async (job, plugin) => {
-			plugin.getInternalEmitter().emit('templates:fetch');
+		'templates:fetch': async (job, module) => {
+			module.getInternalEmitter().emit('templates:fetch');
 			return '';
 		}
 	}

@@ -1,10 +1,11 @@
 const { execa } = require('execa');
 const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
+const Poller = require('../../utils/poller');
 
-const CACHE_TTL = 1 * 60 * 1000; // 1 minute in ms
+const polls = [];
 
-const pollNetworkStatsOnce = async (socket, plugin) => {
+const getNetworkStats = async (module) => {
 	try {
 		const networkStats = await si.networkStats();
 		let networkInterfaceStats = networkStats[0];
@@ -14,39 +15,39 @@ const pollNetworkStatsOnce = async (socket, plugin) => {
 		if (networkInterfaceStats.tx_sec === null) {
 			networkInterfaceStats.tx_sec = 0;
 		}
-		plugin.setState('networkStats', networkInterfaceStats);
+		module.setState('networkStats', networkInterfaceStats);
 	} catch (error) {
-		plugin.setState('networkStats', false);
+		module.setState('networkStats', false);
 	}
 
-	plugin.getNsp().emit('host:network:stats', plugin.getState('networkStats'));
+	module.getNsp().emit('host:network:stats', module.getState('networkStats'));
 };
 
-const pollCpuStatsOnce = async (socket, plugin) => {
+const getCpuStats = async (module) => {
 	try {
 		const currentLoad = await si.currentLoad();
 		const cpuTemperature = await si.cpuTemperature();
 		const fan = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true, reject: false });
-		plugin.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
+		module.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
 	} catch (error) {
-		plugin.setState('cpuStats', false);
+		module.setState('cpuStats', false);
 	}
 
-	plugin.getNsp().emit('host:cpu:stats', plugin.getState('cpuStats'));
+	module.getNsp().emit('host:cpu:stats', module.getState('cpuStats'));
 };
 
-const pollMemoryOnce = async (socket, plugin) => {
+const getMemory = async (module) => {
 	try {
 		const memory = await si.mem();
-		plugin.setState('memory', memory);
+		module.setState('memory', memory);
 	} catch (error) {
-		plugin.setState('memory', false);
+		module.setState('memory', false);
 	}
 
-	plugin.getNsp().emit('host:memory', plugin.getState('memory'));
+	module.getNsp().emit('host:memory', module.getState('memory'));
 };
 
-const pollStorageOnce = async (socket, plugin) => {
+const getStorage = async (module) => {
 	try {
 		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false }).pipe('jq');
 		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false }).pipe('jq');
@@ -82,21 +83,21 @@ const pollStorageOnce = async (socket, plugin) => {
 			storage.push(pool);
 		}
 		storage = camelcaseKeys(storage, { deep: true });
-		plugin.setState('storage', storage);
+		module.setState('storage', storage);
 	} catch (error) {
-		plugin.setState('storage', false);
+		module.setState('storage', false);
 	}
 
-	plugin.getNsp().emit('host:storage', plugin.getState('storage'));
+	module.getNsp().emit('host:storage', module.getState('storage'));
 };
 
-const pollDrivesOnce = async (socket, plugin) => {
+const getDrives = async (module) => {
 	try {
 		const responseSmartctl = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true, reject: false });
 		const responseNvme = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true, reject: false });
 		let drives = JSON.parse(responseSmartctl.stdout);
 		let nvme = JSON.parse(responseNvme.stdout);
-		plugin.setState('drives', drives.map((drive, index) => {
+		module.setState('drives', drives.map((drive, index) => {
 			return {
 				name: drive.device.name,
 				model: drive.model_name,
@@ -108,92 +109,30 @@ const pollDrivesOnce = async (socket, plugin) => {
 			};
 		}));
 	} catch (error) {
-		plugin.setState('drives', false);
+		module.setState('drives', false);
 	}
 
-	plugin.getNsp().emit('host:drives', plugin.getState('drives'));
+	module.getNsp().emit('host:drives', module.getState('drives'));
 };
 
-const pollTimeOnce = async (socket, plugin) => {
-	plugin.setState('time', si.time());
-	plugin.getNsp().emit('host:time', plugin.getState('time'));
-};
-
-const poll = (socket, plugin, entity, interval) => {
-	if (polls[entity].polling !== null) {
-		return;
-	}
-
-	const loop = async () => {
-		if (plugin.getNsp().server.engine.clientsCount === 0) {
-			if (!polls[entity].timeouts) {
-				polls[entity].timeouts = setTimeout(() => {
-					clearTimeout(polls[entity].polling);
-					polls[entity].polling = null;
-					polls[entity].timeouts = null;
-					plugin.setState(entity, undefined);
-				}, CACHE_TTL);
-			}
-		} else {
-			if (polls[entity].timeouts) {
-				clearTimeout(polls[entity].timeouts);
-				polls[entity].timeouts = null;
-			}
-		}
-		
-		await polls[entity].callbacks(socket, plugin);
-		if (polls[entity].polling !== null) {
-			polls[entity].polling = setTimeout(loop, interval);
-		}
-	};
-
-	polls[entity].polling = true;
-	loop();
-};
-
-const polls = {
-	networkStats: {
-		callbacks: pollNetworkStatsOnce,
-		polling: null,
-		timeouts: null
-	},
-	cpuStats: {
-		callbacks: pollCpuStatsOnce,
-		polling: null,
-		timeouts: null
-	},
-	memory: {
-		callbacks: pollMemoryOnce,
-		polling: null,
-		timeouts: null
-	},
-	storage: {
-		callbacks: pollStorageOnce,
-		polling: null,
-		timeouts: null
-	},
-	drives: {
-		callbacks: pollDrivesOnce,
-		polling: null,
-		timeouts: null
-	},
-	time: {
-		callbacks: pollTimeOnce,
-		polling: null,
-		timeouts: null
-	}
-};
-
-const startPolling = (socket, plugin) => {
-	poll(socket, plugin, 'networkStats', 2000);
-	poll(socket, plugin, 'cpuStats', 5000);
-	poll(socket, plugin, 'memory', 10000);
-	poll(socket, plugin, 'storage', 60000);
-	poll(socket, plugin, 'drives', 60000);
-	poll(socket, plugin, 'time', 60000);
+const getTime = async (module) => {
+	module.setState('time', si.time());
+	module.getNsp().emit('host:time', module.getState('time'));
 };
 
 module.exports = {
 	name: 'polling',
-	startPolling
+	register: (module) => {
+		polls.push(new Poller(module, getNetworkStats, 2000));
+		polls.push(new Poller(module, getCpuStats, 5000));
+		polls.push(new Poller(module, getMemory, 10000));
+		polls.push(new Poller(module, getStorage, 60000));
+		polls.push(new Poller(module, getDrives, 60000));
+		polls.push(new Poller(module, getTime, 60000));
+	},
+	startPolling: () => {
+		polls.forEach((poll) => {
+			poll.start();
+		});
+	}
 };

@@ -5,20 +5,20 @@ const FileWatcher = require('../../utils/file_watcher');
 let powerSourceWatcher;
 let upgradeLogsWatcher;
 
-const watchPowerSource = async (plugin) => {
+const watchPowerSource = async (module) => {
 	const readFile = async () => {
 		let data = await fs.promises.readFile('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
-			if (plugin.getState('ups') === undefined) {
-				plugin.setState('ups', {});
+			if (module.getState('ups') === undefined) {
+				module.setState('ups', {});
 			}
-			plugin.setState('ups', { ...plugin.getState('ups'), powerSource: data });
-			plugin.getNsp().emit('host:ups', plugin.getState('ups'));
+			module.setState('ups', { ...module.getState('ups'), powerSource: data });
+			module.getNsp().emit('host:ups', module.getState('ups'));
 		}
 	};
 
-	if (plugin.i2c === false) {
+	if (module.i2c === false) {
 		return;
 	}
 
@@ -41,13 +41,13 @@ const watchPowerSource = async (plugin) => {
 		});
 };
 
-const watchUpgradeLog = async (plugin) => {
+const watchUpgradeLog = async (module) => {
 	const readFile = async () => {
-		let data = await fs.promises.readFile(plugin.upgradeFile, { encoding: 'utf8', flag: 'r' });
+		let data = await fs.promises.readFile(module.upgradeFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
-			plugin.setState('upgrade', { ...plugin.getState('upgrade'), steps: data.split('\n') });
-			plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
+			module.setState('upgrade', { ...module.getState('upgrade'), steps: data.split('\n') });
+			module.getNsp().emit('host:upgrade', module.getState('upgrade'));
 		}
 	};
 
@@ -56,20 +56,20 @@ const watchUpgradeLog = async (plugin) => {
 	}
 
 	try {
-		await fs.promises.access(plugin.upgradeFile);
+		await fs.promises.access(module.upgradeFile);
 	} catch (error) {
-		await touch(plugin.upgradeFile);
+		await touch(module.upgradeFile);
 	}
 
-	if (plugin.getState('upgrade') === undefined) {
-		plugin.setState('upgrade', {
+	if (module.getState('upgrade') === undefined) {
+		module.setState('upgrade', {
 			state: 'running',
 			steps: []
 		});
 		await readFile();
 	}
 
-	upgradeLogsWatcher = new FileWatcher(plugin.upgradeFile);
+	upgradeLogsWatcher = new FileWatcher(module.upgradeFile);
 	upgradeLogsWatcher
 		.onChange(async (event, path) => {
 			await readFile();
@@ -78,8 +78,8 @@ const watchUpgradeLog = async (plugin) => {
 
 module.exports = {
 	name: 'watcher',
-	register(plugin) {
-		watchPowerSource(plugin);
+	register(module) {
+		watchPowerSource(module);
 	},
 	watchUpgradeLog
 };

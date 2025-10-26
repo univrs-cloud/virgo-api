@@ -1,9 +1,9 @@
 const changeCase = require('change-case');
 const DataService = require('../../database/data_service');
 
-const createBookmark = async (job, plugin) => {
+const createBookmark = async (job, module) => {
 	const config = job.data.config;
-	await plugin.updateJobProgress(job, `${config?.title} bookmark is creating...`);
+	await module.updateJobProgress(job, `${config?.title} bookmark is creating...`);
 	const bookmark = {
 		name: changeCase.kebabCase(config.title),
 		category: config.category,
@@ -12,19 +12,19 @@ const createBookmark = async (job, plugin) => {
 		url: config.url
 	};
 	await DataService.setBookmark(bookmark);
-	plugin.getInternalEmitter().emit('configured:updated');
+	module.getInternalEmitter().emit('configured:updated');
 	return `${config.title} bookmark created.`;
 };
 
 module.exports = {
 	name: 'create',
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('bookmark:create', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
 			
-			await plugin.addJob('bookmark:create', { config, username: socket.username });
+			await module.addJob('bookmark:create', { config, username: socket.username });
 		});
 	},
 	jobs: {

@@ -1,10 +1,10 @@
 const dockerode = require('dockerode');
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
 
-class DockerPlugin extends BasePlugin {
+class DockerModule extends BaseModule {
 	#composeDir = '/opt/docker';
 	#appsDataset = 'messier/apps';
 	#appsDir;
@@ -47,7 +47,7 @@ class DockerPlugin extends BasePlugin {
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(socket, this);
+		pollingPlugin.startPolling(this);
 
 		if (this.getState('configured')) {
 			this.getNsp().emit('app:configured', this.getState('configured'));
@@ -94,5 +94,5 @@ class DockerPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new DockerPlugin();
+	return new DockerModule();
 };

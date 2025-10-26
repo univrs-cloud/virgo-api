@@ -1,11 +1,11 @@
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 
-class BookmarkPlugin extends BasePlugin {
+class BookmarkModule extends BaseModule {
 	constructor() {
 		super('bookmark');
 	}
 }
 
 module.exports = () => {
-	return new BookmarkPlugin();
+	return new BookmarkModule();
 };

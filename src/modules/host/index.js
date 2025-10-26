@@ -4,9 +4,9 @@ const touch = require('touch');
 const { execa } = require('execa');
 const si = require('systeminformation');
 const { version } = require('../../../package.json');
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 
-class HostPlugin extends BasePlugin {
+class HostModule extends BaseModule {
 	#etcHosts = '/etc/hosts';
 	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
 	#upgradeFile = '/var/www/virgo-api/upgrade.log';
@@ -83,7 +83,7 @@ class HostPlugin extends BasePlugin {
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(socket, this);
+		pollingPlugin.startPolling(this);
 		
 		this.checkUpgrade(socket);
 
@@ -176,7 +176,7 @@ class HostPlugin extends BasePlugin {
 			return;
 		}
 	
-		// This will be handled by the watcher sub-plugin
+		// This will be handled by the watcher plugin
 		const watcherPlugin = this.getPlugin('watcher');
 		if (watcherPlugin) {
 			watcherPlugin.watchUpgradeLog(this);
@@ -289,5 +289,5 @@ class HostPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new HostPlugin();
+	return new HostModule();
 };

@@ -1,7 +1,7 @@
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
 
-class WeatherPlugin extends BasePlugin {
+class WeatherModule extends BaseModule {
 	#fetchDelay = 10000;
 	#fetchRetries = 3;
 	#request = null;
@@ -105,5 +105,5 @@ class WeatherPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new WeatherPlugin();
+	return new WeatherModule();
 };

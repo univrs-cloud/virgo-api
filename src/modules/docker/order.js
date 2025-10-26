@@ -2,7 +2,7 @@ const DataService = require('../../database/data_service');
 
 module.exports = {
 	name: 'order',
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('app:order', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
@@ -11,7 +11,7 @@ module.exports = {
 			for (const item of config) {
 				await DataService.setConfigurationOrder(item.id, item.type, item.order);
 			};
-			plugin.getInternalEmitter().emit('configured:updated');
+			module.getInternalEmitter().emit('configured:updated');
 		});
 	}
 };

@@ -9,9 +9,9 @@ const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
 
-const checkForUpdates = async (plugin) => {
+const checkForUpdates = async (module) => {
 	let updates = [];
-	plugin.setState('updates', updates);
+	module.setState('updates', updates);
 	let images = await docker.listImages({ all: true, digests: true });
 	images = camelcaseKeys(images, { deep: true });
 	let containers = await docker.listContainers({ all: true });
@@ -58,10 +58,10 @@ const checkForUpdates = async (plugin) => {
 		
 		if (localDigest !== remoteDigest) {
 			updates.push({ imageName: imageName, containerId: id });
-			plugin.setState('updates', updates);
+			module.setState('updates', updates);
 		}
 	}
-	plugin.getNsp().emit('app:updates', plugin.getState('updates'));
+	module.getNsp().emit('app:updates', module.getState('updates'));
 	return ``;
 
 	function getRegistry(imageName) {
@@ -144,82 +144,82 @@ const checkForUpdates = async (plugin) => {
 	}
 };
 
-const updateApp = async (job, plugin) => {
+const updateApp = async (job, module) => {
 	const config = job.data.config;
 	const existingApp = await DataService.getApplication(config?.name);
 	if (!existingApp) {
 		throw new Error(`App not found.`);
 	}
 
-	const container = plugin.getState('containers')?.find((container) => { return container.name === config.name });
+	const container = module.getState('containers')?.find((container) => { return container.name === config.name });
 	if (!container) {
 		throw new Error(`Container for app '${config.name}' not found.`);
 	}
 	
 	const composeProject = container.labels.comDockerComposeProject;
 	const composeProjectDir = container.labels.comDockerComposeProjectWorkingDir;
-	const composeProjectContainers = plugin.getState('containers')?.filter((container) => {
+	const composeProjectContainers = module.getState('containers')?.filter((container) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});
-	await plugin.updateJobProgress(job, `${existingApp.title} update starting...`);
-	const template = plugin.getState('templates')?.find((template) => { return template.name === config.name; });
+	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
+	const template = module.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
 		try {
-			const response = await fetch(plugin.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+			const response = await fetch(module.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
 			if (response.ok) {
 				const stack = await response.text();
-				await plugin.updateJobProgress(job, `Writing ${template.title} project template...`);
+				await module.updateJobProgress(job, `Writing ${template.title} project template...`);
 				await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 				const icon = template.logo.split('/').pop();
 				const responseIcon = await fetch(template.logo);
 				if (responseIcon.ok) {
-					await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(plugin.appIconsDir, icon)));
+					await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.appIconsDir, icon)));
 					const updatedApp = { ...existingApp, icon: icon };
 					await DataService.setApplication(updatedApp);
-					plugin.getInternalEmitter().emit('configured:updated');
+					module.getInternalEmitter().emit('configured:updated');
 				}
 			}
 		} catch (error) {}
 	}
 
-	await plugin.updateJobProgress(job, `Downloading ${existingApp.title} updates...`);
+	await module.updateJobProgress(job, `Downloading ${existingApp.title} updates...`);
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
-			await plugin.updateJobProgress(job, chunk.toString());
+			await module.updateJobProgress(job, chunk.toString());
 		}
 	});
-	await plugin.updateJobProgress(job, `Installing ${existingApp.title} updates...`);
+	await module.updateJobProgress(job, `Installing ${existingApp.title} updates...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
 		callback: async (chunk) => {
-			await plugin.updateJobProgress(job, chunk.toString());
+			await module.updateJobProgress(job, chunk.toString());
 		}
 	});
-	await plugin.updateJobProgress(job, `Cleaning up...`);
+	await module.updateJobProgress(job, `Cleaning up...`);
 	await docker.pruneImages();
-	let updates = plugin.getState('updates')?.filter((update) => {
+	let updates = module.getState('updates')?.filter((update) => {
 		return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
 	});
-	plugin.setState('updates', updates);
-	plugin.getNsp().emit('app:updates', plugin.getState('updates'));
+	module.setState('updates', updates);
+	module.getNsp().emit('app:updates', module.getState('updates'));
 	return `${existingApp.title} updated.`;
 };
 
 module.exports = {
 	name: 'update',
-	register(plugin) {
-		checkForUpdates(plugin);
+	register(module) {
+		checkForUpdates(module);
 
 		// Schedule updates checker to run daily at midnight
-		plugin.addJobSchedule(
+		module.addJobSchedule(
 			'updates:check',
 			{ pattern: '0 0 0 * * *' }
 		);
 	},
-	onConnection(socket, plugin) {
-		if (plugin.getState('updates')) {
-			plugin.getNsp().emit('app:updates', plugin.getState('updates'));
+	onConnection(socket, module) {
+		if (module.getState('updates')) {
+			module.getNsp().emit('app:updates', module.getState('updates'));
 		}
 		
 		socket.on('app:update', async (config) => {
@@ -227,12 +227,12 @@ module.exports = {
 				return;
 			}
 
-			await plugin.addJob('app:update', { config, username: socket.username });
+			await module.addJob('app:update', { config, username: socket.username });
 		});
 	},
 	jobs: {
-		'updates:check': async (job, plugin) => {
-			checkForUpdates(plugin);
+		'updates:check': async (job, module) => {
+			checkForUpdates(module);
 			return '';
 		},
 		'app:update': updateApp

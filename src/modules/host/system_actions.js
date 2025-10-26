@@ -1,44 +1,44 @@
 const fs = require('fs');
 const { execa } = require('execa');
 
-const checkUpdates = async (socket, plugin) => {
+const checkUpdates = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
-	if (plugin.getState('checkUpdates')) {
+	if (module.getState('checkUpdates')) {
 		return;
 	}
 
-	plugin.setState('checkUpdates', true);
-	plugin.getNsp().to(`user:${socket.username}`).emit('host:updates:check', plugin.getState('checkUpdates'));
+	module.setState('checkUpdates', true);
+	module.getNsp().to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
-		plugin.setState('checkUpdates', false);
-		plugin.updates(socket);
+		module.setState('checkUpdates', false);
+		module.updates(socket);
 	} catch (error) {
-		plugin.setState('checkUpdates', false);
-		plugin.getNsp().to(`user:${socket.username}`).emit('host:updates:check', plugin.getState('checkUpdates'));
+		module.setState('checkUpdates', false);
+		module.getNsp().to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	}
 };
 
-const upgrade = async (socket, plugin) => {
+const upgrade = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
-	if (plugin.upgradePid !== null) {
+	if (module.upgradePid !== null) {
 		return;
 	}
 
-	plugin.setState('upgrade', {
+	module.setState('upgrade', {
 		state: 'running',
 		steps: []
 	});
 	
-	const watcherPlugin = plugin.getPlugin('watcher');
+	const watcherPlugin = module.getPlugin('watcher');
 	if (watcherPlugin) {
-		watcherPlugin.watchUpgradeLog(plugin);
+		watcherPlugin.watchUpgradeLog(module);
 	}
 
 	try {
@@ -50,90 +50,90 @@ const upgrade = async (socket, plugin) => {
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			`"echo $$ > ${plugin.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${plugin.upgradeFile}"`
+			`"echo $$ > ${module.upgradePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.upgradeFile}"`
 		], { shell: true });
-		await plugin.checkUpgrade(socket);
+		await module.checkUpgrade(socket);
 	} catch (error) {
-		const watcherPlugin = plugin.getPlugin('watcher');
+		const watcherPlugin = module.getPlugin('watcher');
 		if (watcherPlugin && watcherPlugin.upgradeLogsWatcher) {
 			await watcherPlugin.upgradeLogsWatcher.stop();
 			watcherPlugin.upgradeLogsWatcher = undefined;
 		}
-		clearInterval(plugin.checkUpgradeIntervalId);
-		plugin.checkUpgradeIntervalId = null;
-		plugin.setState('upgrade', { ...plugin.getState('upgrade'), state: 'failed' });
-		plugin.getNsp().emit('host:upgrade', plugin.getState('upgrade'));
-		plugin.updates(socket);
+		clearInterval(module.checkUpgradeIntervalId);
+		module.checkUpgradeIntervalId = null;
+		module.setState('upgrade', { ...module.getState('upgrade'), state: 'failed' });
+		module.getNsp().emit('host:upgrade', module.getState('upgrade'));
+		module.updates(socket);
 	}
 };
 
-const completeUpgrade = (socket, plugin) => {
+const completeUpgrade = (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 	
-	plugin.setState('upgrade', undefined);
-	plugin.upgradePid = null;
-	fs.closeSync(fs.openSync(plugin.upgradePidFile, 'w'));
-	fs.closeSync(fs.openSync(plugin.upgradeFile, 'w'));
-	plugin.getNsp().emit('host:upgrade', null);
+	module.setState('upgrade', undefined);
+	module.upgradePid = null;
+	fs.closeSync(fs.openSync(module.upgradePidFile, 'w'));
+	fs.closeSync(fs.openSync(module.upgradeFile, 'w'));
+	module.getNsp().emit('host:upgrade', null);
 };
 
-const reboot = async (socket, plugin) => {
+const reboot = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
-	if (plugin.getState('reboot') !== undefined) {
+	if (module.getState('reboot') !== undefined) {
 		return;
 	}
 
 	try {
 		await execa('reboot');
-		plugin.setState('reboot', true);
+		module.setState('reboot', true);
 	} catch (error) {
-		plugin.setState('reboot', false);
+		module.setState('reboot', false);
 	}
 
-	plugin.getNsp().emit('host:reboot', plugin.getState('reboot'));
+	module.getNsp().emit('host:reboot', module.getState('reboot'));
 };
 
-const shutdown = async (socket, plugin) => {
+const shutdown = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
-	if (plugin.getState('shutdown') !== undefined) {
+	if (module.getState('shutdown') !== undefined) {
 		return;
 	}
 
 	try {
 		await execa('shutdown', ['-h', 'now']);
-		plugin.setState('shutdown', true);
+		module.setState('shutdown', true);
 	} catch (error) {
-		plugin.setState('shutdown', false);
+		module.setState('shutdown', false);
 	}
 
-	plugin.getNsp().emit('host:shutdown', plugin.getState('shutdown'));
+	module.getNsp().emit('host:shutdown', module.getState('shutdown'));
 };
 
 module.exports = {
 	name: 'system_actions',
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('host:updates:check', () => { 
-			checkUpdates(socket, plugin); 
+			checkUpdates(socket, module); 
 		});
 		socket.on('host:upgrade', () => { 
-			upgrade(socket, plugin); 
+			upgrade(socket, module); 
 		});
 		socket.on('host:upgrade:complete', () => { 
-			completeUpgrade(socket, plugin); 
+			completeUpgrade(socket, module); 
 		});
 		socket.on('host:reboot', () => { 
-			reboot(socket, plugin); 
+			reboot(socket, module); 
 		});
 		socket.on('host:shutdown', () => { 
-			shutdown(socket, plugin); 
+			shutdown(socket, module); 
 		});
 	}
 };

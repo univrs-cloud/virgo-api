@@ -1,14 +1,14 @@
 const changeCase = require('change-case');
 const DataService = require('../../database/data_service');
 
-const updateBookmark = async (job, plugin) => {
+const updateBookmark = async (job, module) => {
 	const config = job.data.config;
 	const existingBookmark = await DataService.getBookmark(config?.name);
 	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);
 	}
 
-	await plugin.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
+	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
 	const bookmark = {
 		name: changeCase.kebabCase(config.title),
 		category: config.category,
@@ -18,19 +18,19 @@ const updateBookmark = async (job, plugin) => {
 		order: existingBookmark.order
 	};
 	await DataService.setBookmark(bookmark);
-	plugin.getInternalEmitter().emit('configured:updated');
+	module.getInternalEmitter().emit('configured:updated');
 	return `${existingBookmark.title} bookmark updated.`;
 };
 
 module.exports = {
 	name: 'update',
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('bookmark:update', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
 			
-			await plugin.addJob('bookmark:update', { config, username: socket.username });
+			await module.addJob('bookmark:update', { config, username: socket.username });
 		});
 	},
 	jobs: {

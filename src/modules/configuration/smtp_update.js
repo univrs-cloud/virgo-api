@@ -32,9 +32,9 @@ ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"
 `;
 };
 
-const updateSmtp = async (job, plugin) => {
+const updateSmtp = async (job, module) => {
 	let config = job.data.config;
-	await plugin.updateJobProgress(job, `Saving notification server...`);
+	await module.updateJobProgress(job, `Saving notification server...`);
 	
 	if (!config?.recipients) {
 		config.recipients = [];
@@ -44,7 +44,7 @@ const updateSmtp = async (job, plugin) => {
 	}
 
 	await DataService.setConfiguration('smtp', config);
-	plugin.getInternalEmitter().emit('configuration:updated');
+	module.getInternalEmitter().emit('configuration:updated');
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');
@@ -53,9 +53,9 @@ const updateSmtp = async (job, plugin) => {
 };
 
 module.exports = {
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('configuration:smtp:update', async (config) => {
-			await plugin.addJob('smtp:update', { config, username: socket.username });
+			await module.addJob('smtp:update', { config, username: socket.username });
 		});
 	},
 	jobs: {

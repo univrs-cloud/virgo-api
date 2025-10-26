@@ -2,9 +2,9 @@ const fs = require('fs');
 const { execa } = require('execa');
 const ini = require('ini');
 const checkDiskSpace = require('check-disk-space').default;
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 
-class SharePlugin extends BasePlugin {
+class ShareModule extends BaseModule {
 	#configurationFiles = [
 		'/etc/samba/smb.conf',
 		'/messier/.shares'
@@ -68,5 +68,5 @@ class SharePlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new SharePlugin();
+	return new ShareModule();
 };

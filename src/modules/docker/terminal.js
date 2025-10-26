@@ -4,20 +4,20 @@ const dockerode = require('dockerode');
 
 const docker = new dockerode();
 
-const terminalConnect = async (socket, id, plugin) => {
+const terminalConnect = async (socket, containerId) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
 	try {
-		const container = docker.getContainer(id);
+		const container = docker.getContainer(containerId);
 		if (!container) {
 			return;
 		}
 
-		let shell = await findContainerShell(id);
+		let shell = await findContainerShell(containerId);
 		if (!shell) {
-			plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'No compatible shell found in container.');
+			socket.emit('terminal:error', 'No compatible shell found in container.');
 			return;
 		}
 		
@@ -43,8 +43,8 @@ const terminalConnect = async (socket, id, plugin) => {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		stdout.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
-		stderr.on('data', (data) => { plugin.getNsp().to(`user:${socket.username}`).emit('terminal:output', data.toString('utf8')) });
+		stdout.on('data', (data) => { socket.emit('terminal:output', data.toString('utf8')) });
+		stderr.on('data', (data) => { socket.emit('terminal:output', data.toString('utf8')) });
 		docker.modem.demuxStream(terminalStream, stdout, stderr);
 		// Pipe client input to the container
 		socket.on('terminal:input', (data) => {
@@ -63,10 +63,10 @@ const terminalConnect = async (socket, id, plugin) => {
 		socket.on('disconnect', () => {
 			terminalStream.destroy();
 		});
-		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:connected');
+		socket.emit('terminal:connected');
 	} catch (error) {
 		console.error(error);
-		plugin.getNsp().to(`user:${socket.username}`).emit('terminal:error', 'Failed to start container terminal stream.');
+		socket.emit('terminal:error', 'Failed to start container terminal stream.');
 	}
 };
 
@@ -85,9 +85,9 @@ const findContainerShell = async (id) => {
 
 module.exports = {
 	name: 'terminal',
-	onConnection(socket, plugin) {
-		socket.on('terminal:connect', (id) => { 
-			terminalConnect(socket, id, plugin); 
+	onConnection(socket, module) {
+		socket.on('terminal:connect', (containerId) => { 
+			terminalConnect(socket, containerId); 
 		});
 	}
 };

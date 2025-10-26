@@ -1,17 +1,17 @@
 module.exports = {
 	name: 'scheduled',
-	register(plugin) {
-		plugin.checkForUpdates();
+	register(module) {
+		module.checkForUpdates();
 		
 		// Schedule updates checker to run daily at midnight
-		plugin.addJobSchedule(
+		module.addJobSchedule(
 			'updates:check',
 			{ pattern: '0 0 0 * * *' }
 		);
 	},
 	jobs: {
-		'updates:check': async (job, plugin) => {
-			plugin.checkForUpdates();
+		'updates:check': async (job, module) => {
+			module.checkForUpdates();
 			return '';
 		}
 	}

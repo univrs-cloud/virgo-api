@@ -5,7 +5,7 @@ const { getIO } = require('../socket');
 const eventEmitter = require('../utils/event_emitter');
 const config = require('../../config');
 
-class BasePlugin {
+class BaseModule {
 	#name;
 	#io;
 	#nsp;
@@ -182,4 +182,4 @@ class BasePlugin {
 	}
 }
 
-module.exports = BasePlugin;
+module.exports = BaseModule;

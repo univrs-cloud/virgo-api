@@ -1,6 +1,6 @@
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 
-class JobPlugin extends BasePlugin {
+class JobModule extends BaseModule {
 	#queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'bookmark-jobs', 'user-jobs', 'share-jobs'];
 
 	constructor() {
@@ -13,5 +13,5 @@ class JobPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new JobPlugin();
+	return new JobModule();
 };

@@ -4,7 +4,7 @@ const FileWatcher = require('../../utils/file_watcher');
 
 let configurationWatcher;
 
-const watchConfigurations = (plugin) => {
+const watchConfigurations = (module) => {
 	const isPathWatched = (pathToCheck) => {
 		const watchedPaths = configurationWatcher.getWatched();
 		const dir = pathToCheck.split('/').slice(0, -1).join('/') || '/';
@@ -25,10 +25,10 @@ const watchConfigurations = (plugin) => {
 	configurationWatcher
 		.onChange(async (event, path) => {
 			await execa('smbcontrol', ['all', 'reload-config']);
-			plugin.getInternalEmitter().emit('shares:updated');
+			module.getInternalEmitter().emit('shares:updated');
 		});
 
-	plugin.configurationFiles.forEach(configurationPath => {
+	module.configurationFiles.forEach(configurationPath => {
 		try {
 			fs.accessSync(configurationPath);
 			configurationWatcher.add(configurationPath);
@@ -39,7 +39,7 @@ const watchConfigurations = (plugin) => {
 
 	const retryInterval = setInterval(() => {
 		let allWatched = true;
-		plugin.configurationFiles.forEach(configurationPath => {
+		module.configurationFiles.forEach(configurationPath => {
 			try {
 				fs.accessSync(configurationPath);
 				// If path exists but not being watched, add it
@@ -61,7 +61,7 @@ const watchConfigurations = (plugin) => {
 
 module.exports = {
 	name: 'watcher',
-	register(plugin) {
-		watchConfigurations(plugin);
+	register(module) {
+		watchConfigurations(module);
 	}
 };

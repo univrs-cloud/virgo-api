@@ -1,8 +1,8 @@
-const BasePlugin = require('../base');
+const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
 const configurationManager = require('./configuration_manager');
 
-class ConfigurationPlugin extends BasePlugin {
+class ConfigurationModule extends BaseModule {
 	constructor() {
 		super('configuration');
 
@@ -30,5 +30,5 @@ class ConfigurationPlugin extends BasePlugin {
 }
 
 module.exports = () => {
-	return new ConfigurationPlugin();
+	return new ConfigurationModule();
 };

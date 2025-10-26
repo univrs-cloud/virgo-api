@@ -3,9 +3,9 @@ const { Queue, QueueEvents } = require('bullmq');
 
 module.exports = {
 	name: 'watcher',
-	register(plugin) {
+	register(module) {
         const eventsToListen = ['waiting', 'progress'];
-		plugin.queues.forEach((queueName) => {
+		module.queues.forEach((queueName) => {
 			const queue = new Queue(queueName);
 			const queueEvents = new QueueEvents(queueName);
 			eventsToListen.forEach((event) => {
@@ -13,9 +13,9 @@ module.exports = {
 					try {
 						let job = await queue.getJob(response.jobId);
 						if (job) {
-							for (const socket of plugin.getNsp().sockets.values()) {
+							for (const socket of module.getNsp().sockets.values()) {
 								if (socket.isAuthenticated && socket.isAdmin) {
-									plugin.getNsp().to(`user:${socket.username}`).emit('job', job);
+									module.getNsp().to(`user:${socket.username}`).emit('job', job);
 								}
 							}
 						}
@@ -26,10 +26,10 @@ module.exports = {
 			});
 		});
 	},
-	async onConnection(socket, plugin) {
+	async onConnection(socket, module) {
 		const states = ['wait', 'paused', 'delayed', 'active'];
 		let jobs = [];
-		for (const queueName of plugin.queues) {
+		for (const queueName of module.queues) {
 			const queue = new Queue(queueName);
 			const queuedJobs = await queue.getJobs(states);	
 			jobs = [...jobs, ...queuedJobs];

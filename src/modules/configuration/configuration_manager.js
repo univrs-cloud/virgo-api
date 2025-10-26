@@ -1,6 +1,6 @@
-const emitToSocket = (socket, plugin) => {
+const emitToSocket = (socket, module) => {
 	try {
-		const configuration = plugin.getState('configuration') || {};
+		const configuration = module.getState('configuration') || {};
 		let userConfiguration = { ...configuration };
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			delete userConfiguration.smtp;
@@ -11,15 +11,15 @@ const emitToSocket = (socket, plugin) => {
 	}
 };
 
-const broadcast = (plugin) => {
+const broadcast = (module) => {
 	try {
-		const configuration = plugin.getState('configuration') || {};
-		for (const socket of plugin.getNsp().sockets.values()) {
+		const configuration = module.getState('configuration') || {};
+		for (const socket of module.getNsp().sockets.values()) {
 			let userConfiguration = { ...configuration };
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete userConfiguration.smtp;
 			}
-			plugin.getNsp().to(`user:${socket.username}`).emit('configuration', userConfiguration);
+			module.getNsp().to(`user:${socket.username}`).emit('configuration', userConfiguration);
 		}
 	} catch (error) {
 		console.error(`Error broadcasting configuration:`, error);

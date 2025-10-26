@@ -1,20 +1,20 @@
-const createShare = async (job, plugin) => {
+const createShare = async (job, module) => {
 	const config = job.data.config;
-	await plugin.updateJobProgress(job, `Creating share ${config.name}...`);
+	await module.updateJobProgress(job, `Creating share ${config.name}...`);
 	// TODO: Implement actual share creation logic
-	plugin.getInternalEmitter().emit('shares:updated');
+	module.getInternalEmitter().emit('shares:updated');
 	return `Share ${config.name} created.`;
 };
 
 module.exports = {
 	name: 'create',
-	onConnection(socket, plugin) {
+	onConnection(socket, module) {
 		socket.on('share:create', async (config) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
 
-			await plugin.addJob('share:create', { config, username: socket.username });
+			await module.addJob('share:create', { config, username: socket.username });
 		});
 	},
 	jobs: {
