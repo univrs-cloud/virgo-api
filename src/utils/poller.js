@@ -5,6 +5,7 @@ class Poller {
 	#interval;
 	#isRunning = false;
 	#idleTimeout = null;
+	#pollingTimeout = null;
 	
 	constructor(module, callback, interval) {
 		this.#module = module;
@@ -24,23 +25,21 @@ class Poller {
 	}
 
 	#stop() {
-		if (this.#idleTimeout) {
-			clearTimeout(this.#idleTimeout);
-		}
-		this.#idleTimeout = null;
 		this.#isRunning = false;
+		clearTimeout(this.#idleTimeout);
+		this.#idleTimeout = null;
+		clearTimeout(this.#pollingTimeout);
+		this.#pollingTimeout = null;
 	}
 
 	async #loop() {
 		const hasClients = this.#module.getNsp().server.engine.clientsCount > 0;
 		if (!hasClients) {
 			if (this.#idleTimeout === null) {
-				this.#idleTimeout = setTimeout(() => {
-					this.#stop();
-				}, this.#CACHE_TTL);
+				this.#idleTimeout = setTimeout(() => { this.#stop(); }, this.#CACHE_TTL);
 			}
 		} else {
-			if (this.#idleTimeout) {
+			if (this.#idleTimeout !== null) {
 				clearTimeout(this.#idleTimeout);
 				this.#idleTimeout = null;
 			}
@@ -53,7 +52,7 @@ class Poller {
 		}
 
 		if (this.#isRunning) {
-			setTimeout(() => { this.#loop(); }, this.#interval);
+			this.#pollingTimeout = setTimeout(() => { this.#loop(); }, this.#interval);
 		}
 	}
 }
