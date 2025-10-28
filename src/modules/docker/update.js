@@ -23,7 +23,7 @@ const checkForUpdates = async (module) => {
 			continue;
 		}
 
-		const [, localDigest] = image.repoDigests[(image.repoDigests.length === 1 ? 0 : 1)].split('@');
+		const localDigests = (image.repoDigests ?? []).map((repoDigest) => { return repoDigest?.split('@')[1] ?? null; });
 		const container = docker.getContainer(id);
 		let inspect = await container.inspect();
 		inspect = camelcaseKeys(inspect, { deep: true });
@@ -56,7 +56,7 @@ const checkForUpdates = async (module) => {
 			continue;
 		}
 		
-		if (localDigest !== remoteDigest) {
+		if (!localDigests.includes(remoteDigest)) {
 			updates.push({ imageName: imageName, containerId: id });
 			module.setState('updates', updates);
 		}
@@ -81,64 +81,70 @@ const checkForUpdates = async (module) => {
 		return { repoPath, tag };
 	}
 
-	async function getDockerHubDigest(image) {
-		const { repoPath, tag } = parseDockerHubRepo(image);
-		const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
+	async function getDockerHubDigest(image, platform = { os: 'linux', architecture: 'arm64' }) {
 		try {
-			const response = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, {
-				headers: {
-					method: 'HEAD',
-					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
-				}
-			});
-			return response.headers.get('docker-content-digest');
-		} catch (err) {
+			const { repoPath, tag } = parseDockerHubRepo(image);
+			const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
+			const tokenData = await tokenResponse.json();
+			const headers = {
+				Method: 'HEAD',
+				Authorization: `Bearer ${tokenData.token}`,
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+			};
+			const manifestResponse = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, { headers });
+			if (!manifestResponse.ok) {
+				throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
+			}
+
+			return manifestResponse.headers.get('docker-content-digest');
+		} catch (error) {
+			console.warn(error.message);
 			return null;
 		}
 	}
 
-	async function getGHCRDigest(image) {
-		const [imageName, tag = 'latest'] = image.split(':');
-		const repoPath = imageName.replace('ghcr.io/', '');
-		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
+	async function getGHCRDigest(image, platform = { os: 'linux', architecture: 'arm64' }) {
 		try {
-			const response = await fetch(`https://ghcr.io/v2/${repoPath}/manifests/${tag}`, {
-				headers: {
-					method: 'HEAD',
-					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
-				}
-			});
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+			const [imageName, tag = 'latest'] = image.split(':');
+			const repoPath = imageName.replace('ghcr.io/', '');
+			const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+			const tokenData = await tokenResponse.json();
+			const headers = {
+				Method: 'HEAD',
+				Authorization: `Bearer ${tokenData.token}`,
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+			};
+			const manifestResponse = await fetch(`https://ghcr.io/v2/${repoPath}/manifests/${tag}`, { headers });
+			if (!manifestResponse.ok) {
+				throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
 			}
-			return response.headers.get('docker-content-digest');
-		} catch (err) {
+
+			return manifestResponse.headers.get('docker-content-digest');
+		} catch (error) {
+			console.warn(error.message);
 			return null;
 		}
 	}
 
-	async function getLSCRDigest(image) {
-		const [imageName, tag = 'latest'] = image.split(':');
-		const repoPath = imageName.replace('lscr.io/', '');
-		const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
+	async function getLSCRDigest(image, platform = { os: 'linux', architecture: 'arm64' }) {
 		try {
-			const response = await fetch(`https://lscr.io/v2/${repoPath}/manifests/${tag}`, {
-				headers: {
-					method: 'HEAD',
-					Authorization: `Bearer ${tokenData.token}`,
-					Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v1+json,application/vnd.oci.image.index.v1+json'
-				}
-			});
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+			const [imageName, tag = 'latest'] = image.split(':');
+			const repoPath = imageName.replace('lscr.io/', '');
+			const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+			const tokenData = await tokenResponse.json();
+			const headers = {
+				Method: 'HEAD',
+				Authorization: `Bearer ${tokenData.token}`,
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+			};
+			const manifestResponse = await fetch(`https://lscr.io/v2/${repoPath}/manifests/${tag}`, { headers });
+			if (!manifestResponse.ok) {
+				throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
 			}
-			return response.headers.get('docker-content-digest');
-		} catch (err) {
+
+			return manifestResponse.headers.get('docker-content-digest');
+		} catch (error) {
+			console.warn(error.message);
 			return null;
 		}
 	}
