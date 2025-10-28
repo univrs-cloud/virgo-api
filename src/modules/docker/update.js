@@ -19,7 +19,6 @@ const checkForUpdates = async (module) => {
 	for (const { id, imageId } of containers) {
 		const image = images.find((image) => { return image.id === imageId });
 		if (image.repoDigests.length === 0) {
-			// console.log(`${imageName} has no local digest (likely built locally).`);
 			continue;
 		}
 
@@ -93,7 +92,7 @@ const checkForUpdates = async (module) => {
 			};
 			const manifestResponse = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, { headers });
 			if (!manifestResponse.ok) {
-				throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
+				throw new Error(`HTTP ${manifestResponse.status} manifest ${repoPath}`);
 			}
 
 			return manifestResponse.headers.get('docker-content-digest');
