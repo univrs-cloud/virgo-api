@@ -83,12 +83,12 @@ const checkForUpdates = async (module) => {
 	async function getDockerHubDigest(image, platform = { os: 'linux', architecture: 'arm64' }) {
 		try {
 			const { repoPath, tag } = parseDockerHubRepo(image);
-			const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
+			const tokenResponse = await fetch(`https://auth.docker.io/token?scope=repository:${repoPath}:pull`);
 			const tokenData = await tokenResponse.json();
 			const headers = {
 				Method: 'HEAD',
 				Authorization: `Bearer ${tokenData.token}`,
-				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
 			};
 			const manifestResponse = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, { headers });
 			if (!manifestResponse.ok) {
@@ -106,12 +106,12 @@ const checkForUpdates = async (module) => {
 		try {
 			const [imageName, tag = 'latest'] = image.split(':');
 			const repoPath = imageName.replace('ghcr.io/', '');
-			const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+			const tokenResponse = await fetch(`https://ghcr.io/token?scope=repository:${repoPath}:pull`);
 			const tokenData = await tokenResponse.json();
 			const headers = {
 				Method: 'HEAD',
 				Authorization: `Bearer ${tokenData.token}`,
-				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
 			};
 			const manifestResponse = await fetch(`https://ghcr.io/v2/${repoPath}/manifests/${tag}`, { headers });
 			if (!manifestResponse.ok) {
@@ -129,12 +129,12 @@ const checkForUpdates = async (module) => {
 		try {
 			const [imageName, tag = 'latest'] = image.split(':');
 			const repoPath = imageName.replace('lscr.io/', '');
-			const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repoPath}:pull`);
+			const tokenResponse = await fetch(`https://ghcr.io/token?scope=repository:${repoPath}:pull`);
 			const tokenData = await tokenResponse.json();
 			const headers = {
 				Method: 'HEAD',
 				Authorization: `Bearer ${tokenData.token}`,
-				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json'
+				Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
 			};
 			const manifestResponse = await fetch(`https://lscr.io/v2/${repoPath}/manifests/${tag}`, { headers });
 			if (!manifestResponse.ok) {
