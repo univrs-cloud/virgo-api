@@ -83,7 +83,7 @@ const checkForUpdates = async (module) => {
 	async function getDockerHubDigest(image, platform = { os: 'linux', architecture: 'arm64' }) {
 		try {
 			const { repoPath, tag } = parseDockerHubRepo(image);
-			const tokenResponse = await fetch(`https://auth.docker.io/token?scope=repository:${repoPath}:pull`);
+			const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
 			const tokenData = await tokenResponse.json();
 			const headers = {
 				Method: 'HEAD',
