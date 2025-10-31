@@ -20,13 +20,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '22'
 
       - name: Install dependencies
         run: |
           rm -rf ./node_modules
           npm install
-          npm install raspi-i2c --ignore-scripts --verbose
+          npm install raspi-i2c --ignore-scripts
 
       - name: Build .deb package
         run: npm run deb
