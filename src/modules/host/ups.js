@@ -1,13 +1,13 @@
-let i2c;
+const i2c = require('i2c-bus');
+let bus;
 try {
-	({ I2C } = require('raspi-i2c'));
-	i2c = new I2C();
+	bus = i2c.openSync(1);
 } catch (error) {
-	i2c = false;
+	bus = false;
 }
 
 const checkUps = async (module) => {
-	if (i2c === false) {
+	if (bus === false) {
 		module.setState('ups', 'remote i/o error');
 		module.getNsp().emit('host:ups', module.getState('ups'));
 		return;
@@ -19,7 +19,7 @@ const checkUps = async (module) => {
 
 	let batteryCharge;
 	try {
-		batteryCharge = i2c.readByteSync(0x36, 4);
+		batteryCharge = bus.readByteSync(0x36, 0x04);
 	} catch (error) {
 		batteryCharge = false;
 	}
@@ -33,7 +33,7 @@ module.exports = {
 	register(module) {
 		checkUps(module);
 		
-		if (i2c !== false) {
+		if (bus !== false) {
 			module.addJobSchedule(
 				'ups:check',
 				{ pattern: '0 */10 * * * *' }

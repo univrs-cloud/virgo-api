@@ -41,6 +41,7 @@
 		"express": "^5.1.0",
 		"express-rate-limit": "^8.2.0",
 		"express-validator": "^7.3.0",
+		"i2c-bus": "^5.2.3",
 		"ini": "^6.0.0",
 		"js-yaml": "^4.1.0",
 		"kelvin-to-celsius": "^1.1.0",
@@ -51,10 +52,6 @@
 		"sqlite3": "^5.1.7",
 		"systeminformation": "^5.27.11",
 		"touch": "^3.1.1"
-	},
-	"optionalDependencies": {
-		"raspi": "^6.0.1",
-		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
 		"@types/node": "^24.9.2",
