@@ -24,6 +24,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          rm -rf ./node_modules
           npm install
           npm install raspi-i2c --ignore-scripts
 
