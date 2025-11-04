@@ -28,10 +28,11 @@
 		"node": ">=22.20.0",
 		"npm": ">=10.9.3"
 	},
+	"cpu": ["arm64"],
 	"dependencies": {
-		"bcryptjs": "^3.0.2",
+		"bcryptjs": "^3.0.3",
 		"bullmq": "^5.63.0",
-		"camelcase-keys": "^10.0.0",
+		"camelcase-keys": "^10.0.1",
 		"change-case": "^5.4.4",
 		"check-disk-space": "^3.4.0",
 		"chokidar": "^4.0.3",
@@ -39,7 +40,7 @@
 		"dockerode": "^4.0.9",
 		"execa": "^9.6.0",
 		"express": "^5.1.0",
-		"express-rate-limit": "^8.2.0",
+		"express-rate-limit": "^8.2.1",
 		"express-validator": "^7.3.0",
 		"ini": "^6.0.0",
 		"js-yaml": "^4.1.0",
@@ -57,7 +58,7 @@
 		"raspi-i2c": "^6.2.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.9.2",
+		"@types/node": "^24.10.0",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
