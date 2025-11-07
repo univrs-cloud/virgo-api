@@ -33,7 +33,7 @@ class Poller {
 	}
 
 	async #loop() {
-		const hasClients = this.#module.getNsp().server.engine.clientsCount > 0;
+		const hasClients = this.#module.nsp.server.engine.clientsCount > 0;
 		if (!hasClients) {
 			if (this.#idleTimeout === null) {
 				this.#idleTimeout = setTimeout(() => { this.#stop(); }, this.#CACHE_TTL);
