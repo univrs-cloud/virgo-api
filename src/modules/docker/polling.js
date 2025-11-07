@@ -18,7 +18,7 @@ const getContainers = async (module) => {
 		module.setState('containers', false);
 	}
 
-	module.getNsp().emit('app:containers', module.getState('containers'));
+	module.nsp.emit('app:containers', module.getState('containers'));
 };
 
 module.exports = {

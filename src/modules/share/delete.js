@@ -2,7 +2,7 @@ const deleteShare = async (job, module) => {
 	const config = job.data.config;
 	await module.updateJobProgress(job, `Deleting share ${config.name}...`);
 	// TODO: Implement actual share deletion logic
-	module.getInternalEmitter().emit('shares:updated');
+	module.eventEmitter.emit('shares:updated');
 	return `Share ${config.name} deleted.`;
 };
 

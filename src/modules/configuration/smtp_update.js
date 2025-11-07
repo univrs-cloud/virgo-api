@@ -44,7 +44,7 @@ const updateSmtp = async (job, module) => {
 	}
 
 	await DataService.setConfiguration('smtp', config);
-	module.getInternalEmitter().emit('configuration:updated');
+	module.eventEmitter.emit('configuration:updated');
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');

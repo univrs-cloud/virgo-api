@@ -8,7 +8,7 @@ const DataService = require('../../database/data_service');
 
 const installApp = async (job, module) => {
 	const config = job.data.config;
-	const template = module.getState('templates')?.find((template) => { return template.id === config.id; });
+	const template = module.getState('templates')?.find((template) => { return template.id === config?.id; });
 	if (!template) {
 		throw new Error(`App template not found.`);
 	}
@@ -46,7 +46,7 @@ const installApp = async (job, module) => {
 	}
 	
 	const stack = await response.text();
-	let env = Object.entries(config.env).map(([key, value]) => `${key}='${value}'`).join('\n');
+	let env = Object.entries(config?.env || {}).map(([key, value]) => `${key}='${value}'`).join('\n');
 	const composeProjectDir = path.join(module.composeDir, template.name);
 	await module.updateJobProgress(job, `Making ${template.title} project directory...`);
 	await fs.promises.mkdir(composeProjectDir, { recursive: true });
@@ -76,7 +76,7 @@ const installApp = async (job, module) => {
 	};
 	await module.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
-	module.getInternalEmitter().emit('configured:updated');
+	module.eventEmitter.emit('configured:updated');
 	return `${template.title} installed.`;
 };
 

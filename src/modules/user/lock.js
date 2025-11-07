@@ -2,7 +2,7 @@ const { execa } = require('execa');
 
 const lockUser = async (job, module) => {
 	const config = job.data.config;
-	const user = module.getState('users').find((user) => { return user.username === config.username; });
+	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}
@@ -17,7 +17,7 @@ const lockUser = async (job, module) => {
 	await execa('smbpasswd', ['-d', config.username]);
 	await module.updateJobProgress(job, `Locking Authelia user ${config.username}...`);
 	await module.toggleAutheliaUserLock(config.username, true);
-	module.getInternalEmitter().emit('users:updated');
+	module.eventEmitter.emit('users:updated');
 	return `${config.username} locked.`;
 };
 

@@ -9,7 +9,7 @@ const deleteBookmark = async (job, module) => {
 	
 	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is deleting...`);
 	await DataService.deleteBookmark(config.name);
-	module.getInternalEmitter().emit('configured:updated');
+	module.eventEmitter.emit('configured:updated');
 	return `${existingBookmark.title} bookmark deleted.`;
 };
 

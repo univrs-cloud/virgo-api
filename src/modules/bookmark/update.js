@@ -18,7 +18,7 @@ const updateBookmark = async (job, module) => {
 		order: existingBookmark.order
 	};
 	await DataService.setBookmark(bookmark);
-	module.getInternalEmitter().emit('configured:updated');
+	module.eventEmitter.emit('configured:updated');
 	return `${existingBookmark.title} bookmark updated.`;
 };
 

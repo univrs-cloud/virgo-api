@@ -10,7 +10,7 @@ module.exports = {
 	},
 	jobs: {
 		'templates:fetch': async (job, module) => {
-			module.getInternalEmitter().emit('templates:fetch');
+			module.eventEmitter.emit('templates:fetch');
 			return '';
 		}
 	}

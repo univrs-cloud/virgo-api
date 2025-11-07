@@ -18,14 +18,14 @@ class DockerModule extends BaseModule {
 		this.#loadConfigured();
 		this.#loadTemplates();
 
-		this.getInternalEmitter()
+		this.eventEmitter
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
-				this.getNsp().emit('app:configured', this.getState('configured'));
+				this.nsp.emit('app:configured', this.getState('configured'));
 			})
 			.on('templates:fetch', async () => {
 				await this.#loadTemplates();
-				this.getNsp().emit('app:templates', this.getState('templates'));
+				this.nsp.emit('app:templates', this.getState('templates'));
 			});
 	}
 
@@ -50,19 +50,19 @@ class DockerModule extends BaseModule {
 		pollingPlugin.startPolling(this);
 
 		if (this.getState('configured')) {
-			this.getNsp().emit('app:configured', this.getState('configured'));
+			this.nsp.emit('app:configured', this.getState('configured'));
 		}
 		if (this.getState('containers')) {
-			this.getNsp().emit('app:containers', this.getState('containers'));
+			this.nsp.emit('app:containers', this.getState('containers'));
 		}
 		if (this.getState('templates')) {
-			this.getNsp().emit('app:templates', this.getState('templates'));
+			this.nsp.emit('app:templates', this.getState('templates'));
 		}
 	}
 
 	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
 		const { hostname, pathname } = new URL(repositoryUrl);
-		const [owner, repository] = pathname.split('/').filter(Boolean);
+		const [owner, repository] = pathname?.split('/')?.filter(Boolean);
 		if (hostname.includes('github.com')) {
 			const rawHostname = hostname.replace('github.com', 'raw.githubusercontent.com');
 			return `https://${rawHostname}/${owner}/${repository}/${branch}/${filePath}`;

@@ -12,7 +12,7 @@ const createBookmark = async (job, module) => {
 		url: config.url
 	};
 	await DataService.setBookmark(bookmark);
-	module.getInternalEmitter().emit('configured:updated');
+	module.eventEmitter.emit('configured:updated');
 	return `${config.title} bookmark created.`;
 };
 

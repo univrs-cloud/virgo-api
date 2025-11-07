@@ -11,14 +11,14 @@ const checkUpdates = async (socket, module) => {
 	}
 
 	module.setState('checkUpdates', true);
-	module.getNsp().to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+	module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		module.setState('checkUpdates', false);
 		module.updates(socket);
 	} catch (error) {
 		module.setState('checkUpdates', false);
-		module.getNsp().to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+		module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	}
 };
 
@@ -62,7 +62,7 @@ const upgrade = async (socket, module) => {
 		clearInterval(module.checkUpgradeIntervalId);
 		module.checkUpgradeIntervalId = null;
 		module.setState('upgrade', { ...module.getState('upgrade'), state: 'failed' });
-		module.getNsp().emit('host:upgrade', module.getState('upgrade'));
+		module.nsp.emit('host:upgrade', module.getState('upgrade'));
 		module.updates(socket);
 	}
 };
@@ -76,7 +76,7 @@ const completeUpgrade = (socket, module) => {
 	module.upgradePid = null;
 	fs.closeSync(fs.openSync(module.upgradePidFile, 'w'));
 	fs.closeSync(fs.openSync(module.upgradeFile, 'w'));
-	module.getNsp().emit('host:upgrade', null);
+	module.nsp.emit('host:upgrade', null);
 };
 
 const reboot = async (socket, module) => {
@@ -95,7 +95,7 @@ const reboot = async (socket, module) => {
 		module.setState('reboot', false);
 	}
 
-	module.getNsp().emit('host:reboot', module.getState('reboot'));
+	module.nsp.emit('host:reboot', module.getState('reboot'));
 };
 
 const shutdown = async (socket, module) => {
@@ -114,7 +114,7 @@ const shutdown = async (socket, module) => {
 		module.setState('shutdown', false);
 	}
 
-	module.getNsp().emit('host:shutdown', module.getState('shutdown'));
+	module.nsp.emit('host:shutdown', module.getState('shutdown'));
 };
 
 module.exports = {

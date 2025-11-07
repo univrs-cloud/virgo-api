@@ -20,7 +20,7 @@ const getNetworkStats = async (module) => {
 		module.setState('networkStats', false);
 	}
 
-	module.getNsp().emit('host:network:stats', module.getState('networkStats'));
+	module.nsp.emit('host:network:stats', module.getState('networkStats'));
 };
 
 const getCpuStats = async (module) => {
@@ -33,7 +33,7 @@ const getCpuStats = async (module) => {
 		module.setState('cpuStats', false);
 	}
 
-	module.getNsp().emit('host:cpu:stats', module.getState('cpuStats'));
+	module.nsp.emit('host:cpu:stats', module.getState('cpuStats'));
 };
 
 const getMemory = async (module) => {
@@ -44,21 +44,19 @@ const getMemory = async (module) => {
 		module.setState('memory', false);
 	}
 
-	module.getNsp().emit('host:memory', module.getState('memory'));
+	module.nsp.emit('host:memory', module.getState('memory'));
 };
 
 const getStorage = async (module) => {
 	try {
-		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false }).pipe('jq');
-		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false }).pipe('jq');
+		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false });
+		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false });
 		const filesystems = await si.fsSize();
-		const pools = JSON.parse(poolsStatus.stdout).pools;
-		let storage = Object.values(JSON.parse(poolsList.stdout).pools).map((pool) => {
+		const pools = JSON.parse(poolsStatus.stdout)?.pools || {};
+		let storage = Object.values(JSON.parse(poolsList.stdout)?.pools || {}).map((pool) => {
 			return { ...pool, ...pools[pool.name] };
 		});
-		let filesystem = filesystems.find((filesystem) => {
-			return filesystem.mount === '/';
-		});
+		let filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
 		if (filesystem) {
 			let pool = {
 				name: 'system',
@@ -88,7 +86,7 @@ const getStorage = async (module) => {
 		module.setState('storage', false);
 	}
 
-	module.getNsp().emit('host:storage', module.getState('storage'));
+	module.nsp.emit('host:storage', module.getState('storage'));
 };
 
 const getDrives = async (module) => {
@@ -112,12 +110,12 @@ const getDrives = async (module) => {
 		module.setState('drives', false);
 	}
 
-	module.getNsp().emit('host:drives', module.getState('drives'));
+	module.nsp.emit('host:drives', module.getState('drives'));
 };
 
 const getTime = async (module) => {
 	module.setState('time', si.time());
-	module.getNsp().emit('host:time', module.getState('time'));
+	module.nsp.emit('host:time', module.getState('time'));
 };
 
 module.exports = {

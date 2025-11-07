@@ -18,9 +18,7 @@ const performAppAction = async (job, module) => {
 
 	await module.updateJobProgress(job, `${existingApp.title} app is ${config.action}ing...`);
 
-	const container = module.getState('containers')?.find((container) => {
-		return container.names.includes(`/${config.name}`);
-	});
+	const container = module.getState('containers')?.find((container) => { return container.names.includes(`/${config.name}`); });
 	const composeProject = container.labels.comDockerComposeProject ?? false;
 	if (composeProject === false) {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
@@ -29,7 +27,7 @@ const performAppAction = async (job, module) => {
 	await execa('docker', ['compose', '-p', composeProject, config.action]);
 	if (config.action === 'down') {
 		await DataService.deleteApplication(config.name);
-		module.getInternalEmitter().emit('configured:updated');
+		module.eventEmitter.emit('configured:updated');
 	}
 	
 	return `${existingApp.title} app ${config.action}ed.`;
@@ -41,9 +39,7 @@ const performServiceAction = async (job, module) => {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}
 
-	const container = module.getState('containers')?.find((container) => {
-		return container.id === config?.id;
-	});
+	const container = module.getState('containers')?.find((container) => { return container.id === config?.id; });
 	if (!container) {
 		throw new Error(`Service not found.`);
 	}

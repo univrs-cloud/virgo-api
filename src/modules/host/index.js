@@ -29,7 +29,7 @@ class HostModule extends BaseModule {
 				const { stdout } = await execa('zfs', ['version', '-j'], { reject: false });
 				const parsed = JSON.parse(stdout);
 				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
-				this.setState('system', { ...this.getState('system'), ...system, zfs });
+				this.setState('system', { ...this.getState('system'), system, zfs });
 			} catch (error) {
 				console.error(error);
 			}
@@ -41,15 +41,15 @@ class HostModule extends BaseModule {
 		this.#loadNetworkInterface();
 		this.#loadDefaultGateway();
 
-		this.getInternalEmitter()
+		this.eventEmitter
 			.on('host:network:identifier:updated', async () => {
 				await this.#loadNetworkIdentifier();
-				this.getNsp().emit('host:system', this.getState('system'));
+				this.nsp.emit('host:system', this.getState('system'));
 			})
 			.on('host:network:interface:updated', async () => {
 				await this.#loadNetworkInterface();
 				await this.#loadDefaultGateway();
-				this.getNsp().emit('host:system', this.getState('system'));
+				this.nsp.emit('host:system', this.getState('system'));
 			});
 	}
 
@@ -88,39 +88,39 @@ class HostModule extends BaseModule {
 		this.checkUpgrade(socket);
 
 		if (this.getState('reboot') === undefined) {
-			this.getNsp().emit('host:reboot', false);
+			this.nsp.emit('host:reboot', false);
 		}
 		if (this.getState('shutdown') === undefined) {
-			this.getNsp().emit('host:shutdown', false);
+			this.nsp.emit('host:shutdown', false);
 		}
 		if (this.getState('checkUpdates')) {
 			if (socket.isAuthenticated && socket.isAdmin) {
-				this.getNsp().to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
+				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
 			}
 		}
 		if (this.getState('updates')) {
-			this.getNsp().to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? this.getState('updates') : []));
+			this.nsp.to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? this.getState('updates') : []));
 		}
 		if (this.getState('system')) {
-			this.getNsp().emit('host:system', this.getState('system'));
+			this.nsp.emit('host:system', this.getState('system'));
 		}
 		if (this.getState('networkStats')) {
-			this.getNsp().emit('host:network:stats', this.getState('networkStats'));
+			this.nsp.emit('host:network:stats', this.getState('networkStats'));
 		}
 		if (this.getState('cpuStats')) {
-			this.getNsp().emit('host:cpu:stats', this.getState('cpuStats'));
+			this.nsp.emit('host:cpu:stats', this.getState('cpuStats'));
 		}
 		if (this.getState('memory')) {
-			this.getNsp().emit('host:memory', this.getState('memory'));
+			this.nsp.emit('host:memory', this.getState('memory'));
 		}
 		if (this.getState('storage')) {
-			this.getNsp().emit('host:storage', this.getState('storage'));
+			this.nsp.emit('host:storage', this.getState('storage'));
 		}
 		if (this.getState('drives')) {
-			this.getNsp().emit('host:drives', this.getState('drives'));
+			this.nsp.emit('host:drives', this.getState('drives'));
 		}
 		if (this.getState('time')) {
-			this.getNsp().emit('host:time', this.getState('time'));
+			this.nsp.emit('host:time', this.getState('time'));
 		}
 	}
 
@@ -142,7 +142,7 @@ class HostModule extends BaseModule {
 							upgradableTo: parts[4].split('~')[0]
 						}
 					};
-				}).filter(Boolean));
+				})?.filter(Boolean));
 			} else {
 				this.setState('updates', []);
 			}
@@ -150,10 +150,10 @@ class HostModule extends BaseModule {
 			this.setState('updates', false);
 		}
 	
-		for (const socket of this.getNsp().sockets.values()) {
+		for (const socket of this.nsp.sockets.values()) {
 			if (socket.isAuthenticated && socket.isAdmin) {
-				this.getNsp().to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
-				this.getNsp().to(`user:${socket.username}`).emit('host:updates', this.getState('updates'));
+				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
+				this.nsp.to(`user:${socket.username}`).emit('host:updates', this.getState('updates'));
 			}
 		};
 		return ``;
@@ -172,7 +172,7 @@ class HostModule extends BaseModule {
 
 		if (this.upgradePid === null) {
 			this.setState('upgrade', undefined);
-			this.getNsp().emit('host:upgrade', null);
+			this.nsp.emit('host:upgrade', null);
 			return;
 		}
 	
@@ -199,7 +199,7 @@ class HostModule extends BaseModule {
 				watcherPlugin.upgradeLogsWatcher = undefined;
 			}
 			this.setState('upgrade', { ...this.getState('upgrade'), state: 'succeeded' });
-			this.getNsp().emit('host:upgrade', this.getState('upgrade'));
+			this.nsp.emit('host:upgrade', this.getState('upgrade'));
 			this.updates(socket);
 		}, 1000);
 	}
@@ -237,12 +237,12 @@ class HostModule extends BaseModule {
 
 	updates(socket) {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
-			this.getNsp().to(`user:${socket.username}`).emit('host:updates', false);
+			this.nsp.to(`user:${socket.username}`).emit('host:updates', false);
 			return;
 		}
 	
 		if (this.upgradePid === null) {
-			this.getNsp().emit('host:upgrade', null);
+			this.nsp.emit('host:upgrade', null);
 		}
 		this.checkForUpdates();
 	}

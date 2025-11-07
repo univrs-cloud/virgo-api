@@ -9,7 +9,7 @@ try {
 const checkUps = async (module) => {
 	if (i2c === false) {
 		module.setState('ups', 'remote i/o error');
-		module.getNsp().emit('host:ups', module.getState('ups'));
+		module.nsp.emit('host:ups', module.getState('ups'));
 		return;
 	}
 
@@ -25,7 +25,7 @@ const checkUps = async (module) => {
 	}
 	module.setState('ups', { ...module.getState('ups'), batteryCharge });
 	
-	module.getNsp().emit('host:ups', module.getState('ups'));
+	module.nsp.emit('host:ups', module.getState('ups'));
 };
 
 module.exports = {

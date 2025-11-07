@@ -5,7 +5,7 @@ const linuxUser = require('linux-sys-user').promise();
 
 const deleteUser = async (job, module) => {
 	const config = job.data.config;
-	const user = module.getState('users').find((user) => { return user.username === config.username; });
+	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}
@@ -20,7 +20,7 @@ const deleteUser = async (job, module) => {
 	await execa('smbpasswd', ['-s', '-x', config.username]);
 	await module.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
-	module.getInternalEmitter().emit('users:updated');
+	module.eventEmitter.emit('users:updated');
 	return `User ${config.username} deleted.`
 
 	async function deleteAutheliaUser() {

@@ -15,10 +15,10 @@ class ShareModule extends BaseModule {
 
 		this.#loadShares();
 
-		this.getInternalEmitter()
+		this.eventEmitter
 			.on('shares:updated', async () => {
 				await this.#loadShares();
-				this.getNsp().emit('shares', this.getState('shares'));
+				this.nsp.emit('shares', this.getState('shares'));
 			});
 	}
 
@@ -28,7 +28,7 @@ class ShareModule extends BaseModule {
 
 	onConnection(socket) {
 		if (this.getState('shares')) {
-			this.getNsp().emit('shares', this.getState('shares'));
+			this.nsp.emit('shares', this.getState('shares'));
 		}
 	}
 

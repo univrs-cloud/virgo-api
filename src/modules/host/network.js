@@ -15,9 +15,7 @@ ${ip}	${fqdn} ${hostname}
 
 const getConnectionNameForInterface = async (name) => {
 	const { stdout } = await execa('nmcli', ['-t', '-f', 'NAME,DEVICE', 'connection', 'show']);
-	const line = stdout
-		.split('\n')
-		.find((line) => line.endsWith(`:${name}`));
+	const line = stdout.split('\n').find((line) => line.endsWith(`:${name}`));
 	return line?.split(':')[0];
 };
 
@@ -42,7 +40,7 @@ const updateIdentifier = async (job, module) => {
 	} catch (error) {
 		throw new Error(`Host was not updated.`);
 	}
-	module.getInternalEmitter().emit('host:network:identifier:updated');
+	module.eventEmitter.emit('host:network:identifier:updated');
 	return `Host updated.`;
 };
 
@@ -64,7 +62,7 @@ const updateInterface = async (job, module) => {
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
 	}
-	module.getInternalEmitter().emit('host:network:interface:updated');
+	module.eventEmitter.emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };
 

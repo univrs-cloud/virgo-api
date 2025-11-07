@@ -11,7 +11,7 @@ module.exports = {
 			for (const item of config) {
 				await DataService.setConfigurationOrder(item.id, item.type, item.order);
 			};
-			module.getInternalEmitter().emit('configured:updated');
+			module.eventEmitter.emit('configured:updated');
 		});
 	}
 };

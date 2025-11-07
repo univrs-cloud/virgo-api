@@ -14,7 +14,7 @@ const watchPowerSource = async (module) => {
 				module.setState('ups', {});
 			}
 			module.setState('ups', { ...module.getState('ups'), powerSource: data });
-			module.getNsp().emit('host:ups', module.getState('ups'));
+			module.nsp.emit('host:ups', module.getState('ups'));
 		}
 	};
 
@@ -47,7 +47,7 @@ const watchUpgradeLog = async (module) => {
 		data = data.trim();
 		if (data !== '') {
 			module.setState('upgrade', { ...module.getState('upgrade'), steps: data.split('\n') });
-			module.getNsp().emit('host:upgrade', module.getState('upgrade'));
+			module.nsp.emit('host:upgrade', module.getState('upgrade'));
 		}
 	};
 

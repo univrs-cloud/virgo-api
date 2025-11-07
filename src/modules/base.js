@@ -9,7 +9,7 @@ class BaseModule {
 	#name;
 	#io;
 	#nsp;
-	#internalEmitter;
+	#eventEmitter;
 	#state = {};
 	#queue;
 	#worker;
@@ -19,7 +19,7 @@ class BaseModule {
 		this.#name = name;
 		this.#io = getIO();
 		this.#nsp = this.#io.of(`/${this.#name}`);
-		this.#internalEmitter = eventEmitter;
+		this.#eventEmitter = eventEmitter;
 
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
@@ -30,16 +30,16 @@ class BaseModule {
 		});
 	}
 
-	getNsp() {
+	get nsp() {
 		return this.#nsp;
 	}
 
-	getInternalEmitter() {
-		return this.#internalEmitter;
+	get eventEmitter() {
+		return this.#eventEmitter;
 	}
 
 	getState(key) {
-		return this.#state[key];
+		return structuredClone(this.#state[key]);
 	}
 
 	setState(key, state) {
@@ -163,7 +163,7 @@ class BaseModule {
 
 	#loadPlugins() {
 		const pluginDir = path.join(__dirname, this.#name);
-		const pluginFiles = fs.readdirSync(pluginDir).filter((file) => { return file.endsWith('.js') && file !== 'index.js'; });
+		const pluginFiles = fs.readdirSync(pluginDir)?.filter((file) => { return file.endsWith('.js') && file !== 'index.js'; });
 		for (const file of pluginFiles) {
 			try {
 				const plugin = require(path.join(pluginDir, file));

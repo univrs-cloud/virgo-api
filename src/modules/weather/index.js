@@ -11,7 +11,7 @@ class WeatherModule extends BaseModule {
 
 		this.fetchWeather();
 
-		this.getInternalEmitter()
+		this.eventEmitter
 			.on('configuration:location:updated', async () => {
 				await this.fetchWeather();
 			});
@@ -39,7 +39,7 @@ class WeatherModule extends BaseModule {
 
 	onConnection(socket) {
 		if (this.getState('weather')) {
-			this.getNsp().emit('weather', this.getState('weather'));
+			this.nsp.emit('weather', this.getState('weather'));
 		}
 	}
 
@@ -95,7 +95,7 @@ class WeatherModule extends BaseModule {
 		if (weather) {
 			this.fetchRetries = 3;
 			this.setState('weather', weather);
-			this.getNsp().emit('weather', this.getState('weather'));
+			this.nsp.emit('weather', this.getState('weather'));
 		} else {
 			console.error(`Failed to fetch weather data after all retry attempts`);
 		}

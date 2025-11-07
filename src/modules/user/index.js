@@ -13,15 +13,15 @@ class UserModule extends BaseModule {
 
 		this.#loadUsers();
 		
-		this.getInternalEmitter()
+		this.eventEmitter
 			.on('users:updated', async () => {
 				await this.#loadUsers();
-				this.getNsp().sockets.forEach((socket) => {
+				this.nsp.sockets.forEach((socket) => {
 					if (socket.isAuthenticated) {
 						if (!socket.isAdmin) {
-							this.getNsp().to(`user:${socket.username}`).emit('users', this.getState('users').filter((user) => { return user.username === socket.username; }));
+							this.nsp.to(`user:${socket.username}`).emit('users', this.getState('users')?.filter((user) => { return user.username === socket.username; }));
 						} else {
-							this.getNsp().to(`user:${socket.username}`).emit('users', this.getState('users'));
+							this.nsp.to(`user:${socket.username}`).emit('users', this.getState('users'));
 						}
 					}
 				});
@@ -40,9 +40,9 @@ class UserModule extends BaseModule {
 		if (this.getState('users')) {
 			if (socket.isAuthenticated) {
 				if (!socket.isAdmin) {
-					this.getNsp().to(`user:${socket.username}`).emit('users', this.getState('users').filter((user) => { return user.username === socket.username; }));
+					this.nsp.to(`user:${socket.username}`).emit('users', this.getState('users')?.filter((user) => { return user.username === socket.username; }));
 				} else {
-					this.getNsp().to(`user:${socket.username}`).emit('users', this.getState('users'));
+					this.nsp.to(`user:${socket.username}`).emit('users', this.getState('users'));
 				}
 			}
 		}

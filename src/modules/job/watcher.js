@@ -13,9 +13,9 @@ module.exports = {
 					try {
 						let job = await queue.getJob(response.jobId);
 						if (job) {
-							for (const socket of module.getNsp().sockets.values()) {
+							for (const socket of module.nsp.sockets.values()) {
 								if (socket.isAuthenticated && socket.isAdmin) {
-									module.getNsp().to(`user:${socket.username}`).emit('job', job);
+									module.nsp.to(`user:${socket.username}`).emit('job', job);
 								}
 							}
 						}

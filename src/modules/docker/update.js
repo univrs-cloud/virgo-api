@@ -18,11 +18,11 @@ const checkForUpdates = async (module) => {
 	containers = camelcaseKeys(containers, { deep: true });
 	for (const { id, imageId } of containers) {
 		const image = images.find((image) => { return image.id === imageId });
-		if (image.repoDigests.length === 0) {
+		if (!Array.isArray(image?.repoDigests) || image.repoDigests.length === 0) {
 			continue;
 		}
 
-		const localDigests = (image.repoDigests ?? []).map((repoDigest) => { return repoDigest?.split('@')[1] ?? null; });
+		const localDigests = image.repoDigests.map((repoDigest) => { return repoDigest.split('@')[1] ?? null; });
 		const container = docker.getContainer(id);
 		let inspect = await container.inspect();
 		inspect = camelcaseKeys(inspect, { deep: true });
@@ -60,7 +60,7 @@ const checkForUpdates = async (module) => {
 			module.setState('updates', updates);
 		}
 	}
-	module.getNsp().emit('app:updates', module.getState('updates'));
+	module.nsp.emit('app:updates', module.getState('updates'));
 	return ``;
 
 	function getRegistry(imageName) {
@@ -181,7 +181,7 @@ const updateApp = async (job, module) => {
 					await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.appIconsDir, icon)));
 					const updatedApp = { ...existingApp, icon: icon };
 					await DataService.setApplication(updatedApp);
-					module.getInternalEmitter().emit('configured:updated');
+					module.eventEmitter.emit('configured:updated');
 				}
 			}
 		} catch (error) {}
@@ -207,7 +207,7 @@ const updateApp = async (job, module) => {
 		return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
 	});
 	module.setState('updates', updates);
-	module.getNsp().emit('app:updates', module.getState('updates'));
+	module.nsp.emit('app:updates', module.getState('updates'));
 	return `${existingApp.title} updated.`;
 };
 
@@ -224,7 +224,7 @@ module.exports = {
 	},
 	onConnection(socket, module) {
 		if (module.getState('updates')) {
-			module.getNsp().emit('app:updates', module.getState('updates'));
+			module.nsp.emit('app:updates', module.getState('updates'));
 		}
 		
 		socket.on('app:update', async (config) => {

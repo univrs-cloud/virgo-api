@@ -8,7 +8,7 @@ class ConfigurationModule extends BaseModule {
 
 		this.#loadConfiguration();
 
-	this.getInternalEmitter()
+	this.eventEmitter
 		.on('configuration:updated', async () => {
 			await this.#loadConfiguration();
 			configurationManager.broadcast(this);

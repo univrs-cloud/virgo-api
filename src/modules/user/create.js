@@ -6,7 +6,7 @@ const linuxUser = require('linux-sys-user').promise();
 
 const createUser = async (job, module) => {
 	const config = job.data.config;
-	const user = module.getState('users').find((user) => { return user.username === config.username; });
+	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
 	if (user) {
 		throw new Error(`User already exists.`);
 	}
@@ -23,7 +23,7 @@ const createUser = async (job, module) => {
 	await module.setSambaUserPassword(config.username, config.password);
 	await module.updateJobProgress(job, `Creating Authelia user ${config.username}...`);
 	await createAutheliaUser();
-	module.getInternalEmitter().emit('users:updated');
+	module.eventEmitter.emit('users:updated');
 	return `User ${config.username} created.`
 
 	async function createAutheliaUser () {

@@ -4,8 +4,8 @@ const updateLocation = async (job, module) => {
 	const config = job.data.config;
 	await module.updateJobProgress(job, `Saving location...`);	
 	await DataService.setConfiguration('location', config);
-	module.getInternalEmitter().emit('configuration:updated');
-	module.getInternalEmitter().emit('configuration:location:updated');
+	module.eventEmitter.emit('configuration:updated');
+	module.eventEmitter.emit('configuration:location:updated');
 	return `Location saved.`;
 };
 
