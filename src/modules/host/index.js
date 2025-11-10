@@ -29,7 +29,7 @@ class HostModule extends BaseModule {
 				const { stdout } = await execa('zfs', ['version', '-j'], { reject: false });
 				const parsed = JSON.parse(stdout);
 				let zfs = { version: parsed.zfs_version.kernel.replace('zfs-kmod-', '') };
-				this.setState('system', { ...this.getState('system'), system, zfs });
+				this.setState('system', { ...this.getState('system'), ...system, zfs });
 			} catch (error) {
 				console.error(error);
 			}
