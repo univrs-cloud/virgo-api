@@ -187,20 +187,39 @@ const updateApp = async (job, module) => {
 		} catch (error) {}
 	}
 
-	await module.updateJobProgress(job, `Downloading ${existingApp.title} updates...`);
+	await module.updateJobProgress(job, `Downloading ${existingApp.title}...`);
+	let pullProgress = {};
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
-		callback: async (chunk) => {
-			await module.updateJobProgress(job, chunk.toString());
+		composeOptions: [['--progress', 'json']],
+		callback: (chunk) => {
+			const data = chunk.toString('utf8');
+			data.split('\n').forEach((line) => {
+				if (!line.trim()) {
+					return;
+				}
+
+				try {
+					const obj = JSON.parse(line);
+					const key = obj.parent_id ?? obj.id;
+					if (!key) { 
+						return;
+					}
+					
+					pullProgress[key] = obj;
+				} catch (error) {}
+			});
+			module.updateJobProgress(job, `Downloading ${existingApp.title}...`, pullProgress);
 		}
 	});
-	await module.updateJobProgress(job, `Installing ${existingApp.title} updates...`);
+	await module.updateJobProgress(job, `Updating ${existingApp.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
-		callback: async (chunk) => {
-			await module.updateJobProgress(job, chunk.toString());
+		callback: (chunk) => {
+			module.updateJobProgress(job, chunk.toString());
 		}
 	});
+
 	await module.updateJobProgress(job, `Cleaning up...`);
 	await docker.pruneImages();
 	let updates = module.getState('updates')?.filter((update) => {

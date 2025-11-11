@@ -79,10 +79,10 @@ class BaseModule {
 		}
 	}
 
-	async updateJobProgress(job, message) {
+	async updateJobProgress(job, message, progress = {}) {
 		try {
 			const state = await job.getState();
-			await job.updateProgress({ state, message });
+			await job.updateProgress({ state, message, progress });
 		} catch (error) {
 			console.error(`Failed to update job progress:`, error);
 		}

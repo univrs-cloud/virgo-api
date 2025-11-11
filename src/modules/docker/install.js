@@ -54,11 +54,37 @@ const installApp = async (job, module) => {
 	await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 	await module.updateJobProgress(job, `Writing ${template.title} project configuration...`);
 	await fs.promises.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
+	
+	await module.updateJobProgress(job, `Downloading ${existingApp.title}...`);
+	let pullProgress = {};
+	await dockerCompose.pullAll({
+		cwd: composeProjectDir,
+		composeOptions: [['--progress', 'json']],
+		callback: (chunk) => {
+			const data = chunk.toString('utf8');
+			data.split('\n').forEach((line) => {
+				if (!line.trim()) {
+					return;
+				}
+
+				try {
+					const obj = JSON.parse(line);
+					const key = obj.parent_id ?? obj.id;
+					if (!key) { 
+						return;
+					}
+					
+					pullProgress[key] = obj;
+				} catch (error) {}
+			});
+			module.updateJobProgress(job, `Downloading ${existingApp.title}...`, pullProgress);
+		}
+	});
 	await module.updateJobProgress(job, `Installing ${template.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
-		callback: async (chunk) => {
-			await module.updateJobProgress(job, chunk.toString());
+		callback: (chunk) => {
+			module.updateJobProgress(job, chunk.toString());
 		}
 	});
 
