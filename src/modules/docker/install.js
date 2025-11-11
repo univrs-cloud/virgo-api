@@ -55,7 +55,7 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Writing ${template.title} project configuration...`);
 	await fs.promises.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
 	
-	await module.updateJobProgress(job, `Downloading ${existingApp.title}...`);
+	await module.updateJobProgress(job, `Downloading ${template.title}...`);
 	let pullProgress = {};
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
@@ -77,7 +77,7 @@ const installApp = async (job, module) => {
 					pullProgress[key] = obj;
 				} catch (error) {}
 			});
-			module.updateJobProgress(job, `Downloading ${existingApp.title}...`, pullProgress);
+			module.updateJobProgress(job, `Downloading ${template.title}...`, pullProgress);
 		}
 	});
 	await module.updateJobProgress(job, `Installing ${template.title}...`);
