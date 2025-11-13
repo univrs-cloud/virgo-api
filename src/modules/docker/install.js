@@ -4,6 +4,7 @@ const { execa } = require('execa');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
 const dockerCompose = require('docker-compose');
+const dockerPullProgressParser = require('../../utils/docker_pull_progress_parser');
 const DataService = require('../../database/data_service');
 
 const installApp = async (job, module) => {
@@ -56,39 +57,15 @@ const installApp = async (job, module) => {
 	await fs.promises.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
 	
 	await module.updateJobProgress(job, `Downloading ${template.title}...`);
-	let pullProgress = {};
+	const parsePullProgress = dockerPullProgressParser();
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
 		composeOptions: [['--progress', 'json']],
 		callback: (chunk) => {
-			const data = chunk.toString('utf8');
-			data.split('\n').forEach((line) => {
-				if (!line.trim()) {
-					return;
-				}
-
-				try {
-					const obj = JSON.parse(line);
-					if (!obj.id) {
-						return;
-					}
-					
-					if (!obj.parent_id) {
-						pullProgress[obj.id] = pullProgress[obj.id] || { layers: {} };
-						Object.assign(pullProgress[obj.id], obj);
-					} else {
-						const parent = (pullProgress[obj.parent_id] ||= { layers: {} });
-						const layer = (parent.layers[obj.id] ||= {});
-						Object.assign(layer, obj);
-						if (typeof obj.total === 'number' && obj.total > 0) {
-							layer.current = obj.current ?? layer.current ?? 0;
-							layer.total = obj.total ?? layer.total ?? 0;
-						}
-						layer.percent = layer.total ? Math.min(100, Math.round((layer.current / layer.total) * 100)) : layer.percent ?? 0;
-					}
-				} catch (error) {}
-			});
-			module.updateJobProgress(job, `Downloading ${template.title}...`, pullProgress);
+			const progress = parsePullProgress(chunk);
+			if (progress) {
+				module.updateJobProgress(job, `Downloading ${template.title}...`, progress);
+			}
 		}
 	});
 	await module.updateJobProgress(job, `Installing ${template.title}...`);
