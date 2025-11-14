@@ -2,8 +2,7 @@
 
 set -o pipefail
 
-ischroot
-if [ $? == 1 ]; then
+if ! ischroot; then
 	latest_version=$(/usr/local/bin/n ls-remote 22 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 	installed_versions=$(/usr/local/bin/node -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 	if echo "$installed_versions" | grep -qx "$latest_version"; then
@@ -16,8 +15,13 @@ if [ $? == 1 ]; then
 	fi
 fi
 
+file_path="/etc/mail.rc"
+line_to_add="set mta=/usr/bin/msmtp"
+if ! grep -Fxq "$line_to_add" "$file_path"; then
+	echo "$line_to_add" >> "$file_path"
+fi
+
 #debconf-set-selections <<EOF
 #msmtp msmtp/apparmor boolean false
 #EOF
-
 #apt install msmtp-mta -y
