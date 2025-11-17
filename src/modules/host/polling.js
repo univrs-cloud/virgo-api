@@ -49,13 +49,14 @@ const getMemory = async (module) => {
 
 const getStorage = async (module) => {
 	try {
-		const poolsList = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false });
-		const poolsStatus = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false });
-		const filesystems = await si.fsSize();
-		const pools = JSON.parse(poolsStatus.stdout)?.pools || {};
-		let storage = Object.values(JSON.parse(poolsList.stdout)?.pools || {}).map((pool) => {
-			return { ...pool, ...pools[pool.name] };
+		const { stdout: zpoolList } = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false });
+		const { stdout: zpoolStatus } = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false });
+		const pools = JSON.parse(zpoolList)?.pools || {};
+		const statuses = JSON.parse(zpoolStatus)?.pools || {};
+		let storage = Object.values(pools).map((pool) => {
+			return { ...pool, ...statuses[pool.name] };
 		});
+		const filesystems = await si.fsSize();
 		let filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
 		if (filesystem) {
 			let pool = {

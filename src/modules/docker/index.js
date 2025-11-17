@@ -55,6 +55,9 @@ class DockerModule extends BaseModule {
 		if (this.getState('containers')) {
 			this.nsp.emit('app:containers', this.getState('containers'));
 		}
+		if (this.getState('appsResourceMetrics')) {
+			this.nsp.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+		}
 		if (this.getState('templates')) {
 			this.nsp.emit('app:templates', this.getState('templates'));
 		}
@@ -73,8 +76,8 @@ class DockerModule extends BaseModule {
 
 	async #loadConfigured() {
 		try {
-			const configuration = await DataService.getConfigured();
-			this.setState('configured', { configuration });
+			const configured = await DataService.getConfigured();
+			this.setState('configured', configured);
 		} catch (error) {
 			this.setState('configured', false);
 			console.error(`Error loading configured:`, error);
