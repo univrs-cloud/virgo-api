@@ -53,9 +53,20 @@ const getStorage = async (module) => {
 		const { stdout: zpoolStatus } = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false });
 		const pools = JSON.parse(zpoolList)?.pools || {};
 		const statuses = JSON.parse(zpoolStatus)?.pools || {};
-		let storage = Object.values(pools).map((pool) => {
-			return { ...pool, ...statuses[pool.name] };
-		});
+		let storage = [];
+		for (const pool of Object.values(pools)) {
+				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r',  pool.name, '-jp', '--json-int'], { reject: false });
+				const datasets = JSON.parse(zfsList)?.datasets || {};
+				const datasetsSize = Object.values(datasets).reduce((sum, dataset) => {
+					return sum + (dataset?.properties?.usedbydataset?.value || 0);
+				}, 0);
+				const snapshotsSize = Object.values(datasets).reduce((sum, dataset) => {
+					return sum + (dataset?.properties?.usedbysnapshots?.value || 0);
+				}, 0);
+				pool.properties.usedbydatasets = { value: datasetsSize };
+				pool.properties.usedbysnapshots = { value: snapshotsSize };
+				storage.push({ ...pool, ...statuses[pool.name] });
+		}
 		const filesystems = await si.fsSize();
 		let filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
 		if (filesystem) {
