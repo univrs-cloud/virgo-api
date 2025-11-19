@@ -26,15 +26,18 @@ const getAppsResourceMetrics = async (module) => {
 	let appsResourceMetrics = [];
 	let apps = (module.getState('configured') || []).filter((item) => { return item.type === 'app'; });
 	try {
-		const { stdout: zfsList } = await execa('zfs', ['list', '-jp', '--json-int'], { reject: false });
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int'], { reject: false });
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 		for (const app of apps) {
-			const dataset = datasets[`messier/apps/${app.name}`];
+			const dataset = Object.values(datasets).find((dataset) => { return dataset.name === `messier/apps/${app.name}`; });
 			appsResourceMetrics.push({
 				name: app.name,
 				cpu: 0,
 				ram: 0,
-				storage: dataset?.properties?.used?.value ?? 0
+				storage: {
+					dataset: dataset?.properties?.usedbydataset?.value ?? 0,
+					snapshots: dataset?.properties?.usedbysnapshots?.value ?? 0
+				}
 			});
 		}
 		module.setState('appsResourceMetrics', appsResourceMetrics);

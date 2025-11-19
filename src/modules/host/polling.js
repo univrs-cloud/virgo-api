@@ -49,13 +49,13 @@ const getMemory = async (module) => {
 
 const getStorage = async (module) => {
 	try {
-		const { stdout: zpoolList } = await execa('zpool', ['list', '-jp', '--json-int'], { reject: false });
-		const { stdout: zpoolStatus } = await execa('zpool', ['status', '-jp', '--json-int'], { reject: false });
+		const { stdout: zpoolList } = await execa('zpool', ['list', '-j', '--json-int'], { reject: false });
+		const { stdout: zpoolStatus } = await execa('zpool', ['status', '-j', '--json-int'], { reject: false });
 		const pools = JSON.parse(zpoolList)?.pools || {};
 		const statuses = JSON.parse(zpoolStatus)?.pools || {};
 		let storage = [];
 		for (const pool of Object.values(pools)) {
-				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r',  pool.name, '-jp', '--json-int'], { reject: false });
+				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r',  pool.name, '-j', '--json-int'], { reject: false });
 				const datasets = JSON.parse(zfsList)?.datasets || {};
 				const datasetsSize = Object.values(datasets).reduce((sum, dataset) => {
 					return sum + (dataset?.properties?.usedbydataset?.value || 0);
