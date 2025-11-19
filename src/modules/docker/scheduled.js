@@ -101,7 +101,7 @@ const checkForUpdates = async (module) => {
 			continue;
 		}
 
-		const localDigests = image.repoDigests.map((repoDigest) => { return repoDigest.split('@')[1] ?? null; });
+		const localDigests = image.repoDigests.map((repoDigest) => { return repoDigest.split('@')[1] || null; });
 		const container = docker.getContainer(id);
 		let inspect = await container.inspect();
 		inspect = camelcaseKeys(inspect, { deep: true });

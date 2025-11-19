@@ -35,8 +35,8 @@ const getAppsResourceMetrics = async (module) => {
 				cpu: 0,
 				ram: 0,
 				storage: {
-					dataset: dataset?.properties?.usedbydataset?.value ?? 0,
-					snapshots: dataset?.properties?.usedbysnapshots?.value ?? 0
+					dataset: dataset?.properties?.usedbydataset?.value || 0,
+					snapshots: dataset?.properties?.usedbysnapshots?.value || 0
 				}
 			});
 		}

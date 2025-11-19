@@ -19,7 +19,7 @@ const performAppAction = async (job, module) => {
 	await module.updateJobProgress(job, `${existingApp.title} app is ${config.action}ing...`);
 
 	const container = module.getState('containers')?.find((container) => { return container.names.includes(`/${config.name}`); });
-	const composeProject = container.labels.comDockerComposeProject ?? false;
+	const composeProject = container.labels.comDockerComposeProject || false;
 	if (composeProject === false) {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
 	}

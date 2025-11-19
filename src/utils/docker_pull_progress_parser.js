@@ -27,8 +27,8 @@ const dockerPullProgressParser = () => {
 					const layer = (parent.layers[obj.id] ||= {});
 					Object.assign(layer, obj);
 					if (typeof obj.total === 'number' && obj.total > 0) {
-						layer.current = obj.current ?? layer.current ?? 0;
-						layer.total = obj.total ?? layer.total ?? 0;
+						layer.current = obj?.current || layer?.current || 0;
+						layer.total = obj?.total || layer?.total || 0;
 						layer.percent = (layer.current / layer.total) * 100
 					}
 
