@@ -14,14 +14,3 @@ if ! ischroot; then
 		echo "Node updated."
 	fi
 fi
-
-file_path="/etc/mail.rc"
-line_to_add="set mta=/usr/bin/msmtp"
-if ! grep -Fxq "$line_to_add" "$file_path"; then
-	echo "$line_to_add" >> "$file_path"
-fi
-
-#debconf-set-selections <<EOF
-#msmtp msmtp/apparmor boolean false
-#EOF
-#apt install msmtp-mta -y

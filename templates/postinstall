@@ -14,3 +14,10 @@ systemctl enable virgo-api.service
 if ! ischroot; then
 	systemctl start virgo-api.service
 fi
+
+# this must be done in post install, after the dependencies have been installed
+file_path="/etc/mail.rc"
+line_to_add="set mta=/usr/bin/msmtp"
+if ! grep -Fxq "$line_to_add" "$file_path"; then
+	echo "$line_to_add" >> "$file_path"
+fi
