@@ -8,14 +8,16 @@ const BaseModule = require('../base');
 
 class HostModule extends BaseModule {
 	#etcHosts = '/etc/hosts';
-	#upgradePidFile = '/var/www/virgo-api/upgrade.pid';
-	#upgradeFile = '/var/www/virgo-api/upgrade.log';
-	#upgradePid = null;
-	#checkUpgradeIntervalId = null;
+	#rebootRequiredFile = '/run/reboot-required';
+	#updatePidFile = '/var/www/virgo-api/update.pid';
+	#updateFile = '/var/www/virgo-api/update.log';
+	#updatePid = null;
+	#checkUpdateIntervalId = null;
 
 	constructor() {
 		super('host');
 
+		this.checkUpdate();
 		this.setState('system', {
 			api: {
 				version: version
@@ -59,42 +61,35 @@ class HostModule extends BaseModule {
 		return this.#etcHosts;
 	}
 
-	get upgradePidFile() {
-		return this.#upgradePidFile;
+	get updatePidFile() {
+		return this.#updatePidFile;
 	}
 
-	get upgradeFile() {
-		return this.#upgradeFile;
+	get updatFile() {
+		return this.#updateFile;
 	}
 
-	get upgradePid() {
-		return this.#upgradePid;
+	get updatePid() {
+		return this.#updatePid;
 	}
 
-	set upgradePid(value) {
-		this.#upgradePid = value;
+	set updatePid(value) {
+		this.#updatePid = value;
 	}
 
-	get checkUpgradeIntervalId() {
-		return this.#checkUpgradeIntervalId;
+	get checkUpdateIntervalId() {
+		return this.#checkUpdateIntervalId;
 	}
 
-	set checkUpgradeIntervalId(value) {
-		this.#checkUpgradeIntervalId = value;
+	set checkUpdateIntervalId(value) {
+		this.#checkUpdateIntervalId = value;
 	}
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin.startPolling(this);
-		
-		this.checkUpgrade(socket);
 
-		if (this.getState('reboot') === undefined) {
-			this.nsp.emit('host:reboot', false);
-		}
-		if (this.getState('shutdown') === undefined) {
-			this.nsp.emit('host:shutdown', false);
-		}
+		this.nsp.emit('host:update', this.getState('update'));
 		if (this.getState('checkUpdates')) {
 			if (socket.isAuthenticated && socket.isAdmin) {
 				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
@@ -124,6 +119,58 @@ class HostModule extends BaseModule {
 		if (this.getState('time')) {
 			this.nsp.emit('host:time', this.getState('time'));
 		}
+		if (this.getState('reboot') === undefined) {
+			this.nsp.emit('host:reboot', false);
+		}
+		if (this.getState('shutdown') === undefined) {
+			this.nsp.emit('host:shutdown', false);
+		}
+	}
+
+	async checkUpdate() {
+		try {
+			await fs.promises.access(this.updatePidFile);
+		} catch (error) {
+			await touch(this.updatePidFile);
+		}
+
+		let updatePid = await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' });
+		updatePid = updatePid.trim();
+		this.updatePid = (updatePid === '' ? null : parseInt(updatePid, 10));
+
+		if (this.updatePid === null) {
+			this.setState('update', null);
+			return;
+		}
+		
+		let updateLogsWatcher;
+		const watcherPlugin = this.getPlugin('watcher');
+		if (watcherPlugin) {
+			updateLogsWatcher = await watcherPlugin.watchUpdateLog(this);
+		}
+	
+		if (this.checkUpdateIntervalId !== null) {
+			return;
+		}
+	
+		this.checkUpdateIntervalId = setInterval(async () => {
+			if (await this.isUpdateInProgress()) {
+				return;
+			}
+	
+			clearInterval(this.checkUpdateIntervalId);
+			this.checkUpdateIntervalId = null;
+			await updateLogsWatcher?.stop();
+			
+			let isRebootRequired = false;
+			try {
+				await fs.promises.access(this.#rebootRequiredFile);
+				isRebootRequired = true;
+			} catch (error) { }
+			this.setState('update', { ...this.getState('update'), isRebootRequired, state: 'succeeded' });
+			this.nsp.emit('host:update', this.getState('update'));
+			this.checkForUpdates();
+		}, 1000);
 	}
 
 	async checkForUpdates() {
@@ -161,56 +208,11 @@ class HostModule extends BaseModule {
 		return ``;
 	}
 
-	async checkUpgrade(socket) {
+	async isUpdateInProgress() {
 		try {
-			await fs.promises.access(this.upgradePidFile);
-		} catch (error) {
-			await touch(this.upgradePidFile);
-		}
-
-		let upgradePid = await fs.promises.readFile(this.upgradePidFile, { encoding: 'utf8', flag: 'r' });
-		upgradePid = upgradePid.trim();
-		this.upgradePid = (upgradePid === '' ? null : parseInt(upgradePid, 10));
-
-		if (this.upgradePid === null) {
-			this.setState('upgrade', undefined);
-			this.nsp.emit('host:upgrade', null);
-			return;
-		}
-	
-		// This will be handled by the watcher plugin
-		const watcherPlugin = this.getPlugin('watcher');
-		if (watcherPlugin) {
-			watcherPlugin.watchUpgradeLog(this);
-		}
-	
-		if (this.checkUpgradeIntervalId !== null) {
-			return;
-		}
-	
-		this.checkUpgradeIntervalId = setInterval(async () => {
-			if (await this.isUpgradeInProgress()) {
-				return;
-			}
-	
-			clearInterval(this.checkUpgradeIntervalId);
-			this.checkUpgradeIntervalId = null;
-			const watcherPlugin = this.getPlugin('watcher');
-			if (watcherPlugin && watcherPlugin.upgradeLogsWatcher) {
-				await watcherPlugin.upgradeLogsWatcher.stop();
-				watcherPlugin.upgradeLogsWatcher = undefined;
-			}
-			this.setState('upgrade', { ...this.getState('upgrade'), state: 'succeeded' });
-			this.nsp.emit('host:upgrade', this.getState('upgrade'));
-			this.updates(socket);
-		}, 1000);
-	}
-
-	async isUpgradeInProgress() {
-		try {
-			if (this.upgradePid !== null) {
+			if (this.updatePid !== null) {
 				try {
-					process.kill(this.upgradePid, 0);
+					process.kill(this.updatePid, 0);
 					return true;
 				} catch (error) {
 					// PID is dead, but check if apt-get is still running (systemd upgrade case)
@@ -222,8 +224,8 @@ class HostModule extends BaseModule {
 					const pids = stdout.trim().split('\n');
 					if (pids.length > 0 && pids[0] !== '') {
 						// Update the PID to the actual running process
-						this.upgradePid = parseInt(pids[0], 10);
-						await fs.promises.writeFile(this.upgradePidFile, this.upgradePid, 'utf8');
+						this.updatePid = parseInt(pids[0], 10);
+						await fs.promises.writeFile(this.updatePidFile, this.updatePid, 'utf8');
 						return true;
 					}
 				} catch (error) {
@@ -235,18 +237,6 @@ class HostModule extends BaseModule {
 		} catch (error) {
 			return false;
 		}
-	}
-
-	updates(socket) {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			this.nsp.to(`user:${socket.username}`).emit('host:updates', false);
-			return;
-		}
-	
-		if (this.upgradePid === null) {
-			this.nsp.emit('host:upgrade', null);
-		}
-		this.checkForUpdates();
 	}
 
 	async #loadNetworkIdentifier() {

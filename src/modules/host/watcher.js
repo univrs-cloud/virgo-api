@@ -3,7 +3,7 @@ const touch = require('touch');
 const FileWatcher = require('../../utils/file_watcher');
 
 let powerSourceWatcher;
-let upgradeLogsWatcher;
+let updateLogsWatcher;
 
 const watchPowerSource = async (module) => {
 	const readFile = async () => {
@@ -23,7 +23,7 @@ const watchPowerSource = async (module) => {
 	}
 
 	if (powerSourceWatcher) {
-		return;
+		return powerSourceWatcher;
 	}
 
 	try {
@@ -41,39 +41,40 @@ const watchPowerSource = async (module) => {
 		});
 };
 
-const watchUpgradeLog = async (module) => {
+const watchUpdateLog = async (module) => {
 	const readFile = async () => {
-		let data = await fs.promises.readFile(module.upgradeFile, { encoding: 'utf8', flag: 'r' });
+		let data = await fs.promises.readFile(module.updatFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
-			module.setState('upgrade', { ...module.getState('upgrade'), steps: data.split('\n') });
-			module.nsp.emit('host:upgrade', module.getState('upgrade'));
+			module.setState('update', { ...module.getState('update'), steps: data.split('\n') });
+			module.nsp.emit('host:update', module.getState('update'));
 		}
 	};
 
-	if (upgradeLogsWatcher) {
-		return;
+	if (updateLogsWatcher) {
+		return updateLogsWatcher;
 	}
 
 	try {
-		await fs.promises.access(module.upgradeFile);
+		await fs.promises.access(module.updatFile);
 	} catch (error) {
-		await touch(module.upgradeFile);
+		await touch(module.updatFile);
 	}
 
-	if (module.getState('upgrade') === undefined) {
-		module.setState('upgrade', {
+	if (module.getState('update') === undefined) {
+		module.setState('update', {
 			state: 'running',
 			steps: []
 		});
 		await readFile();
 	}
 
-	upgradeLogsWatcher = new FileWatcher(module.upgradeFile);
-	upgradeLogsWatcher
+	updateLogsWatcher = new FileWatcher(module.updatFile);
+	updateLogsWatcher
 		.onChange(async (event, path) => {
 			await readFile();
 		});
+	return updateLogsWatcher;
 };
 
 const register = (module) => {
@@ -83,5 +84,5 @@ const register = (module) => {
 module.exports = {
 	name: 'watcher',
 	register,
-	watchUpgradeLog
+	watchUpdateLog
 };

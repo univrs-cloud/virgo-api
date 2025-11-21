@@ -18,7 +18,7 @@ const watchConfigurations = (module) => {
 	}
 	
 	if (configurationWatcher) {
-		return;
+		return configurationWatcher;
 	}
 
 	configurationWatcher = new FileWatcher([]);
