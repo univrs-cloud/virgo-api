@@ -21,17 +21,19 @@ const lockUser = async (job, module) => {
 	return `${config.username} locked.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('user:lock', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('user:lock', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'lock',
-	onConnection(socket, module) {
-		socket.on('user:lock', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('user:lock', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'user:lock': lockUser
 	}

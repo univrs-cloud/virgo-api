@@ -16,17 +16,19 @@ const createBookmark = async (job, module) => {
 	return `${config.title} bookmark created.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('bookmark:create', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('bookmark:create', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'create',
-	onConnection(socket, module) {
-		socket.on('bookmark:create', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('bookmark:create', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'bookmark:create': createBookmark
 	}

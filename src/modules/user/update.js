@@ -33,21 +33,23 @@ const updateUser = async (job, module) => {
 	}
 };
 
+const onConnection = (socket, module) => {
+	socket.on('user:update', async (config) => {
+		if (!socket.isAuthenticated) {
+			return;
+		}
+
+		if (!socket.isAdmin && socket.username !== config.username) {
+			return;
+		}
+		
+		await module.addJob('user:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'update',
-	onConnection(socket, module) {
-		socket.on('user:update', async (config) => {
-			if (!socket.isAuthenticated) {
-				return;
-			}
-
-			if (!socket.isAdmin && socket.username !== config.username) {
-				return;
-			}
-			
-			await module.addJob('user:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'user:update': updateUser
 	}

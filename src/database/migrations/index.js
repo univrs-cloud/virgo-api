@@ -5,7 +5,8 @@ const runMigrations = async () => {
 		// Run migrations in order
 		await require('./000_move_database_location')();
 		await require('./001_migrate_configuration')();
-		await require('./002_migrate_data');
+		await require('./002_migrate_data')();
+		await require('./003_update_notification_configuration_files')();
 		
 		console.log(`All migrations completed successfully!`);
 	} catch (error) {

@@ -9,12 +9,14 @@ const updateLocation = async (job, module) => {
 	return `Location saved.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('configuration:location:update', async (config) => {
+		await module.addJob('location:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
-	onConnection(socket, module) {
-		socket.on('configuration:location:update', async (config) => {
-			await module.addJob('location:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'location:update': updateLocation
 	}

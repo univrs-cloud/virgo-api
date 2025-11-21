@@ -49,24 +49,26 @@ const performServiceAction = async (job, module) => {
 	return `${container.name} service ${config.action}ed.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('app:performAction', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('app:performAction', { config, username: socket.username });
+	});
+	socket.on('app:service:performAction', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('app:service:performAction', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'perform_action',
-	onConnection(socket, module) {
-		socket.on('app:performAction', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('app:performAction', { config, username: socket.username });
-		});
-		socket.on('app:service:performAction', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('app:service:performAction', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'app:performAction': performAppAction,
 		'app:service:performAction': performServiceAction

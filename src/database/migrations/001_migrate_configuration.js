@@ -39,7 +39,7 @@ const migrateConfiguration = async () => {
 	}
 };
 
-// Run migration if this file is executed directly
+// Run if this file is executed directly
 if (require.main === module) {
 	migrateConfiguration();
 }

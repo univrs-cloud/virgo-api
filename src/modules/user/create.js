@@ -44,17 +44,19 @@ const createUser = async (job, module) => {
 	};
 };
 
+const onConnection = (socket, module) => {
+	socket.on('user:create', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('user:create', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'create',
-	onConnection(socket, module) {
-		socket.on('user:create', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('user:create', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'user:create': createUser
 	}

@@ -28,23 +28,27 @@ const checkUps = async (module) => {
 	module.nsp.emit('host:ups', module.getState('ups'));
 };
 
+const register = (module) => {
+	checkUps(module);
+	
+	if (i2c !== false) {
+		module.addJobSchedule(
+			'ups:check',
+			{ pattern: '0 */10 * * * *' }
+		);
+	}
+};
+
+const onConnection = (socket, module) => {
+	if (module.getState('ups')) {
+		socket.emit('host:ups', module.getState('ups'));
+	}
+};
+
 module.exports = {
 	name: 'ups',
-	register(module) {
-		checkUps(module);
-		
-		if (i2c !== false) {
-			module.addJobSchedule(
-				'ups:check',
-				{ pattern: '0 */10 * * * *' }
-			);
-		}
-	},
-	onConnection(socket, module) {
-		if (module.getState('ups')) {
-			socket.emit('host:ups', module.getState('ups'));
-		}
-	},
+	register,
+	onConnection,
 	jobs: {
 		'ups:check': async (job, module) => {
 			checkUps(module);

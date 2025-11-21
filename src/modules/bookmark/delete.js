@@ -13,17 +13,19 @@ const deleteBookmark = async (job, module) => {
 	return `${existingBookmark.title} bookmark deleted.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('bookmark:delete', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('bookmark:delete', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'delete',
-	onConnection(socket, module) {
-		socket.on('bookmark:delete', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('bookmark:delete', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'bookmark:delete': deleteBookmark
 	}

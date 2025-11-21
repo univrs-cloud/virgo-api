@@ -66,24 +66,26 @@ const updateInterface = async (job, module) => {
 	return `Network interface updated.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('host:network:identifier:update', async (config) => { 
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:network:identifier:update', { config, username: socket.username });
+	});
+	socket.on('host:network:interface:update', async (config) => { 
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:network:interface:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'system_actions',
-	onConnection(socket, module) {
-		socket.on('host:network:identifier:update', async (config) => { 
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('host:network:identifier:update', { config, username: socket.username });
-		});
-		socket.on('host:network:interface:update', async (config) => { 
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('host:network:interface:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'host:network:identifier:update': updateIdentifier,
 		'host:network:interface:update': updateInterface

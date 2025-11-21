@@ -48,15 +48,19 @@ const getAppsResourceMetrics = async (module) => {
 	module.nsp.emit('app:resourceMetrics', module.getState('appsResourceMetrics'));
 };
 
+const register = (module) => {
+	polls.push(new Poller(module, getContainers, 2000));
+	polls.push(new Poller(module, getAppsResourceMetrics, 10000));
+};
+
+const startPolling = () => {
+	polls.forEach((poll) => {
+		poll.start();
+	});
+};
+
 module.exports = {
 	name: 'polling',
-	register: (module) => {
-		polls.push(new Poller(module, getContainers, 2000));
-		polls.push(new Poller(module, getAppsResourceMetrics, 10000));
-	},
-	startPolling: () => {
-		polls.forEach((poll) => {
-			poll.start();
-		});
-	}
+	register,
+	startPolling
 };

@@ -130,19 +130,23 @@ const getTime = async (module) => {
 	module.nsp.emit('host:time', module.getState('time'));
 };
 
+const register = (module) => {
+	polls.push(new Poller(module, getNetworkStats, 2000));
+	polls.push(new Poller(module, getCpuStats, 5000));
+	polls.push(new Poller(module, getMemory, 10000));
+	polls.push(new Poller(module, getStorage, 60000));
+	polls.push(new Poller(module, getDrives, 60000));
+	polls.push(new Poller(module, getTime, 60000));
+};
+
+const startPolling = () => {
+	polls.forEach((poll) => {
+		poll.start();
+	});
+};
+
 module.exports = {
 	name: 'polling',
-	register: (module) => {
-		polls.push(new Poller(module, getNetworkStats, 2000));
-		polls.push(new Poller(module, getCpuStats, 5000));
-		polls.push(new Poller(module, getMemory, 10000));
-		polls.push(new Poller(module, getStorage, 60000));
-		polls.push(new Poller(module, getDrives, 60000));
-		polls.push(new Poller(module, getTime, 60000));
-	},
-	startPolling: () => {
-		polls.forEach((poll) => {
-			poll.start();
-		});
-	}
+	register,
+	startPolling
 };

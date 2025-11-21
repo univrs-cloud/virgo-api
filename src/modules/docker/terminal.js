@@ -83,11 +83,13 @@ const findContainerShell = async (id) => {
 	return null;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('terminal:connect', (containerId) => { 
+		terminalConnect(socket, containerId); 
+	});
+};
+
 module.exports = {
 	name: 'terminal',
-	onConnection(socket, module) {
-		socket.on('terminal:connect', (containerId) => { 
-			terminalConnect(socket, containerId); 
-		});
-	}
+	onConnection
 };

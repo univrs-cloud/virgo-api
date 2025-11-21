@@ -47,7 +47,7 @@ save_seen=/var/lib/apt/listchanges.db
 `;
 }
 
-const updateSmtp = async (job, module) => {
+const updateSmtpConfiguration = async (job, module) => {
 	let config = job.data.config;
 	await module.updateJobProgress(job, `Saving notification server...`);
 	
@@ -60,21 +60,37 @@ const updateSmtp = async (job, module) => {
 
 	await DataService.setConfiguration('smtp', config);
 	module.eventEmitter.emit('configuration:updated');
-	
-	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
-	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');
-	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(config), 'utf8');
-	await execa('systemctl', ['restart', 'zfs-zed']);
 	return `Notification server saved.`;
 };
 
+const updateNotificationConfigurationFiles = async () => {
+	const configuration = await DataService.getConfiguration();
+	if (configuration.smtp === null) {
+		return;
+	}
+	
+	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(configuration.smtp), 'utf8');
+	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(configuration.smtp), 'utf8');
+	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(configuration.smtp), 'utf8');
+	await execa('systemctl', ['restart', 'zfs-zed']);
+};
+
+const register = (module) => {
+	module.eventEmitter
+		.on('configuration:updated', updateNotificationConfigurationFiles);
+};
+
+const onConnection = (socket, module) => {
+	socket.on('configuration:smtp:update', async (config) => {
+		await module.addJob('smtp:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
-	onConnection(socket, module) {
-		socket.on('configuration:smtp:update', async (config) => {
-			await module.addJob('smtp:update', { config, username: socket.username });
-		});
-	},
+	register,
+	onConnection,
+	updateNotificationConfigurationFiles,
 	jobs: {
-		'smtp:update': updateSmtp
+		'smtp:update': updateSmtpConfiguration
 	}
 };

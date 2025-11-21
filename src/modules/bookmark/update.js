@@ -22,17 +22,19 @@ const updateBookmark = async (job, module) => {
 	return `${existingBookmark.title} bookmark updated.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('bookmark:update', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('bookmark:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'update',
-	onConnection(socket, module) {
-		socket.on('bookmark:update', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('bookmark:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'bookmark:update': updateBookmark
 	}

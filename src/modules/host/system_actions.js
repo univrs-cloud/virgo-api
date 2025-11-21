@@ -117,23 +117,25 @@ const shutdown = async (socket, module) => {
 	module.nsp.emit('host:shutdown', module.getState('shutdown'));
 };
 
+const onConnection = (socket, module) => {
+	socket.on('host:updates:check', () => { 
+		checkUpdates(socket, module); 
+	});
+	socket.on('host:upgrade', () => { 
+		upgrade(socket, module); 
+	});
+	socket.on('host:upgrade:complete', () => { 
+		completeUpgrade(socket, module); 
+	});
+	socket.on('host:reboot', () => { 
+		reboot(socket, module); 
+	});
+	socket.on('host:shutdown', () => { 
+		shutdown(socket, module); 
+	});
+};
+
 module.exports = {
 	name: 'system_actions',
-	onConnection(socket, module) {
-		socket.on('host:updates:check', () => { 
-			checkUpdates(socket, module); 
-		});
-		socket.on('host:upgrade', () => { 
-			upgrade(socket, module); 
-		});
-		socket.on('host:upgrade:complete', () => { 
-			completeUpgrade(socket, module); 
-		});
-		socket.on('host:reboot', () => { 
-			reboot(socket, module); 
-		});
-		socket.on('host:shutdown', () => { 
-			shutdown(socket, module); 
-		});
-	}
+	onConnection
 };

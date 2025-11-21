@@ -143,28 +143,32 @@ const checkForUpdates = async (module) => {
 	return ``;
 };
 
+const register = (module) => {
+	checkForUpdates(module);
+
+	// Schedule updates checker to run daily at midnight
+	module.addJobSchedule(
+		'updates:check',
+		{ pattern: '0 0 0 * * *' }
+	);
+
+	// Schedule templates fetcher to run every hour at minute 1
+	module.addJobSchedule(
+		'templates:fetch',
+		{ pattern: '0 1 * * * *' }
+	);
+};
+
+const onConnection = (socket, module) => {
+	if (module.getState('updates')) {
+		module.nsp.emit('app:updates', module.getState('updates'));
+	}
+};
+
 module.exports = {
 	name: 'scheduled',
-	register(module) {
-		checkForUpdates(module);
-
-		// Schedule updates checker to run daily at midnight
-		module.addJobSchedule(
-			'updates:check',
-			{ pattern: '0 0 0 * * *' }
-		);
-
-		// Schedule templates fetcher to run every hour at minute 1
-		module.addJobSchedule(
-			'templates:fetch',
-			{ pattern: '0 1 * * * *' }
-		);
-	},
-	onConnection(socket, module) {
-		if (module.getState('updates')) {
-			module.nsp.emit('app:updates', module.getState('updates'));
-		}
-	},
+	register,
+	onConnection,
 	jobs: {
 		'updates:check': async (job, module) => {
 			checkForUpdates(module);

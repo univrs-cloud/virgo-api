@@ -42,11 +42,13 @@ const logsConnect = async (socket, containerId) => {
 	}
 };
 
+const onConnection = (socket, module) => {
+	socket.on('logs:connect', (containerId) => { 
+		logsConnect(socket, containerId); 
+	});
+};
+
 module.exports = {
 	name: 'logs',
-	onConnection(socket, module) {
-		socket.on('logs:connect', (containerId) => { 
-			logsConnect(socket, containerId); 
-		});
-	}
+	onConnection
 };

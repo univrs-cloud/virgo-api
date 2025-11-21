@@ -34,17 +34,19 @@ const deleteUser = async (job, module) => {
 	}
 };
 
+const onConnection = (socket, module) => {
+	socket.on('user:delete', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
+		await module.addJob('user:delete', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'delete',
-	onConnection(socket, module) {
-		socket.on('user:delete', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-			
-			await module.addJob('user:delete', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'user:delete': deleteUser
 	}

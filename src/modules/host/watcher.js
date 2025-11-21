@@ -76,10 +76,12 @@ const watchUpgradeLog = async (module) => {
 		});
 };
 
+const register = (module) => {
+	watchPowerSource(module);
+};
+
 module.exports = {
 	name: 'watcher',
-	register(module) {
-		watchPowerSource(module);
-	},
+	register,
 	watchUpgradeLog
 };

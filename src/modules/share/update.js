@@ -6,17 +6,19 @@ const updateShare = async (job, module) => {
 	return `Share ${config.name} updated.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('share:update', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('share:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'update',
-	onConnection(socket, module) {
-		socket.on('share:update', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('share:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'share:update': updateShare
 	}

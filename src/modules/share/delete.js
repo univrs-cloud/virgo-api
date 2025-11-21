@@ -6,17 +6,19 @@ const deleteShare = async (job, module) => {
 	return `Share ${config.name} deleted.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('share:delete', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('share:delete', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'delete',
-	onConnection(socket, module) {
-		socket.on('share:delete', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('share:delete', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'share:delete': deleteShare
 	}

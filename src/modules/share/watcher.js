@@ -59,9 +59,11 @@ const watchConfigurations = (module) => {
 	}, 10000);
 }
 
+const register = (module) => {
+	watchConfigurations(module);
+};
+
 module.exports = {
 	name: 'watcher',
-	register(module) {
-		watchConfigurations(module);
-	}
+	register
 };

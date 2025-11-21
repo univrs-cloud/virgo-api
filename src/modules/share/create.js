@@ -6,17 +6,19 @@ const createShare = async (job, module) => {
 	return `Share ${config.name} created.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('share:create', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('share:create', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'create',
-	onConnection(socket, module) {
-		socket.on('share:create', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('share:create', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'share:create': createShare
 	}

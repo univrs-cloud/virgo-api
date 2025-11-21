@@ -1,11 +1,13 @@
+const register = (module) => {
+	module.addJobSchedule(
+		'weather:fetch',
+		{ pattern: '0 1 * * * *' }
+	);
+};
+
 module.exports = {
 	name: 'fetch',
-	register(module) {
-		module.addJobSchedule(
-			'weather:fetch',
-			{ pattern: '0 1 * * * *' }
-		);
-	},
+	register,
 	jobs: {
 		'weather:fetch': async (job, module) => {
 			module.fetchRetries = 3;

@@ -79,4 +79,9 @@ const migrateData = async () => {
 	}
 };
 
+// Run if this file is executed directly
+if (require.main === module) {
+	migrateData();
+}
+
 module.exports = migrateData;

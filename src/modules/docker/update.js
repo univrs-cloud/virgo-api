@@ -77,17 +77,19 @@ const updateApp = async (job, module) => {
 	return `${existingApp.title} updated.`;
 };
 
+const onConnection = (socket, module) => {
+	socket.on('app:update', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('app:update', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'update',
-	onConnection(socket, module) {
-		socket.on('app:update', async (config) => {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				return;
-			}
-
-			await module.addJob('app:update', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'app:update': updateApp
 	}

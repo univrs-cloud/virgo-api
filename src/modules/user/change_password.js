@@ -34,21 +34,23 @@ const changePassword = async (job, module) => {
 	}
 };
 
+const onConnection = (socket, module) => {
+	socket.on('user:password', async (config) => {
+		if (!socket.isAuthenticated) {
+			return;
+		}
+
+		if (!socket.isAdmin && socket.username !== config.username) {
+			return;
+		}
+		
+		await module.addJob('user:changePassword', { config, username: socket.username });
+	});
+};
+
 module.exports = {
 	name: 'change_password',
-	onConnection(socket, module) {
-		socket.on('user:password', async (config) => {
-			if (!socket.isAuthenticated) {
-				return;
-			}
-
-			if (!socket.isAdmin && socket.username !== config.username) {
-				return;
-			}
-			
-			await module.addJob('user:changePassword', { config, username: socket.username });
-		});
-	},
+	onConnection,
 	jobs: {
 		'user:changePassword': changePassword
 	}
