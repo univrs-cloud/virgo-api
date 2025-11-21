@@ -15,7 +15,7 @@ const migrateData = async () => {
 		
 		console.log(`Starting migration from JSON to database...`);
 		
-		// Initialize database (already done by configuration migration, but safe to call)
+		// Initialize database
 		await DataService.initialize();
 		
 		// Read JSON data
