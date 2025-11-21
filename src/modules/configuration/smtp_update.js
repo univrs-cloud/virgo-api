@@ -4,6 +4,7 @@ const DataService = require('../../database/data_service');
 
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
+const aptListchangesConfigurationFile = '/etc/apt/listchanges.conf';
 
 const generateMsmtpConfig = (config) => {
 	return `defaults
@@ -33,6 +34,19 @@ ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"
 `;
 };
 
+const generateAptListchangesConfig = (config) => {
+	return `[apt]
+frontend=mail
+which=both
+email_address="${config.recipients.join(' ')}"
+email_format=html
+confirm=false
+headers=false
+reverse=false
+save_seen=/var/lib/apt/listchanges.db
+`;
+}
+
 const updateSmtp = async (job, module) => {
 	let config = job.data.config;
 	await module.updateJobProgress(job, `Saving notification server...`);
@@ -49,6 +63,7 @@ const updateSmtp = async (job, module) => {
 	
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(config), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(config), 'utf8');
+	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(config), 'utf8');
 	await execa('systemctl', ['restart', 'zfs-zed']);
 	return `Notification server saved.`;
 };
