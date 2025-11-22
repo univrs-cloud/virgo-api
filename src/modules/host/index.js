@@ -46,6 +46,13 @@ class HostModule extends BaseModule {
 		this.#loadDefaultGateway();
 
 		this.eventEmitter
+			.on('host:updates:updated', () => {
+				for (const socket of this.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
+						this.nsp.to(`user:${socket.username}`).emit('host:updates', this.getState('updates'));
+					}
+				};
+			})
 			.on('host:network:identifier:updated', async () => {
 				await this.#loadNetworkIdentifier();
 				this.nsp.emit('host:system', this.getState('system'));
@@ -89,7 +96,9 @@ class HostModule extends BaseModule {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin.startPolling(this);
 
-		this.nsp.emit('host:update', this.getState('update'));
+		if (this.getState('update')) {
+			this.nsp.emit('host:update', this.getState('update'));
+		}
 		if (this.getState('checkUpdates')) {
 			if (socket.isAuthenticated && socket.isAdmin) {
 				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
@@ -170,11 +179,11 @@ class HostModule extends BaseModule {
 
 			this.setState('update', { ...this.getState('update'), isRebootRequired, state: 'succeeded' });
 			this.nsp.emit('host:update', this.getState('update'));
-			this.checkForUpdates();
+			this.generateUpdates();
 		}, 1000);
 	}
 
-	async checkForUpdates() {
+	async generateUpdates() {
 		try {
 			const response = await execa('apt-show-versions', ['-u']);
 			const updates = response.stdout.trim();
@@ -189,7 +198,7 @@ class HostModule extends BaseModule {
 						package: parts[0].split(':')[0],
 						version: {
 							installed: parts[1].split('~')[0],
-							upgradableTo: parts[4].split('~')[0]
+							updatableTo: parts[4].split('~')[0]
 						}
 					};
 				})?.filter(Boolean));
@@ -199,14 +208,7 @@ class HostModule extends BaseModule {
 		} catch (error) {
 			this.setState('updates', false);
 		}
-	
-		for (const socket of this.nsp.sockets.values()) {
-			if (socket.isAuthenticated && socket.isAdmin) {
-				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
-				this.nsp.to(`user:${socket.username}`).emit('host:updates', this.getState('updates'));
-			}
-		};
-		return ``;
+		this.eventEmitter.emit('host:updates:updated');
 	}
 
 	async isUpdateInProgress() {

@@ -1,5 +1,5 @@
 const register = (module) => {
-	module.checkForUpdates();
+	module.generateUpdates();
 	
 	// Schedule updates checker to run daily at midnight
 	module.addJobSchedule(
@@ -13,8 +13,8 @@ module.exports = {
 	register,
 	jobs: {
 		'updates:check': async (job, module) => {
-			module.checkForUpdates();
-			return '';
+			module.generateUpdates();
+			return ``;
 		}
 	}
 };

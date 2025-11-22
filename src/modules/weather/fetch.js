@@ -11,8 +11,8 @@ module.exports = {
 	jobs: {
 		'weather:fetch': async (job, module) => {
 			module.fetchRetries = 3;
-			module.fetchWeather();
-			return '';
+			await module.fetchWeather();
+			return ``;
 		}
 	}
 };

@@ -140,7 +140,6 @@ const checkForUpdates = async (module) => {
 		}
 	}
 	module.nsp.emit('app:updates', module.getState('updates'));
-	return ``;
 };
 
 const register = (module) => {
@@ -171,12 +170,12 @@ module.exports = {
 	onConnection,
 	jobs: {
 		'updates:check': async (job, module) => {
-			checkForUpdates(module);
-			return '';
+			await checkForUpdates(module);
+			return ``;
 		},
 		'templates:fetch': async (job, module) => {
 			module.eventEmitter.emit('templates:fetch');
-			return '';
+			return ``;
 		}
 	}
 };

@@ -15,7 +15,8 @@ const checkUpdates = async (socket, module) => {
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		module.setState('checkUpdates', false);
-		module.checkForUpdates();
+		module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+		module.generateUpdates();
 	} catch (error) {
 		module.setState('checkUpdates', false);
 		module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
@@ -44,8 +45,8 @@ const update = async (socket, module) => {
 
 	try {
 		await execa('systemd-run', [
-			'--unit=upgrade-system',
-			'--description="System upgrade"',
+			'--unit=system-update',
+			'--description="System update"',
 			'--wait',
 			'--collect',
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
@@ -61,7 +62,7 @@ const update = async (socket, module) => {
 		await updateLogsWatcher?.stop();
 		module.setState('update', { ...module.getState('update'), state: 'failed' });
 		module.nsp.emit('host:update', module.getState('update'));
-		module.checkForUpdates();
+		module.generateUpdates();
 	}
 };
 
