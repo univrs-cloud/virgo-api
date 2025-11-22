@@ -43,7 +43,7 @@ const watchPowerSource = async (module) => {
 
 const watchUpdateLog = async (module) => {
 	const readFile = async () => {
-		let data = await fs.promises.readFile(module.updatFile, { encoding: 'utf8', flag: 'r' });
+		let data = await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' });
 		data = data.trim();
 		if (data !== '') {
 			module.setState('update', { ...module.getState('update'), steps: data.split('\n') });
@@ -56,9 +56,9 @@ const watchUpdateLog = async (module) => {
 	}
 
 	try {
-		await fs.promises.access(module.updatFile);
+		await fs.promises.access(module.updateFile);
 	} catch (error) {
-		await touch(module.updatFile);
+		await touch(module.updateFile);
 	}
 
 	if (module.getState('update') === undefined) {
@@ -69,10 +69,13 @@ const watchUpdateLog = async (module) => {
 		await readFile();
 	}
 
-	updateLogsWatcher = new FileWatcher(module.updatFile);
+	updateLogsWatcher = new FileWatcher(module.updateFile);
 	updateLogsWatcher
 		.onChange(async (event, path) => {
-			await readFile();
+			readFile();
+		})
+		.onStop(() => {
+			updateLogsWatcher = null;
 		});
 	return updateLogsWatcher;
 };

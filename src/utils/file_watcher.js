@@ -8,6 +8,7 @@ class FileWatcher {
 		ignoreInitial: true
 	};
 	#callbacks = [];
+	#onStopCallback;
 	#toWatch = [];
 
 	constructor(toWatch, options = {}) {
@@ -39,6 +40,7 @@ class FileWatcher {
 		if (this.#watcher) {
 			await this.#watcher.close();
 			this.#watcher = null;
+			this.#onStopCallback();
 		}
 		return this;
 	}
@@ -74,6 +76,13 @@ class FileWatcher {
 				console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
 			}
 		});
+		return this;
+	}
+
+	onStop(callback) {
+		if (typeof callback === 'function') {
+			this.#onStopCallback = callback;
+		}
 		return this;
 	}
 

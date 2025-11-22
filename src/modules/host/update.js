@@ -31,6 +31,12 @@ const update = async (socket, module) => {
 		return;
 	}
 
+	let updateLogsWatcher;
+	const watcherPlugin = module.getPlugin('watcher');
+	if (watcherPlugin) {
+		updateLogsWatcher = await watcherPlugin.watchUpdateLog(module);
+	}
+
 	module.setState('update', {
 		state: 'running',
 		steps: []
@@ -45,13 +51,14 @@ const update = async (socket, module) => {
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updatFile}"`
+			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}"`
 		], { shell: true });
 		await module.checkUpdate();
 	} catch (error) {
-		console.log(error);
+		console.error(error);
 		clearInterval(module.checkUpdateIntervalId);
 		module.checkUpdateIntervalId = null;
+		await updateLogsWatcher?.stop();
 		module.setState('update', { ...module.getState('update'), state: 'failed' });
 		module.nsp.emit('host:update', module.getState('update'));
 		module.checkForUpdates();
@@ -64,7 +71,7 @@ const completeUpdate = (socket, module) => {
 	}
 	
 	fs.closeSync(fs.openSync(module.updatePidFile, 'w'));
-	fs.closeSync(fs.openSync(module.updatFile, 'w'));
+	fs.closeSync(fs.openSync(module.updateFile, 'w'));
 	module.updatePid = null;
 	module.setState('update', undefined);
 	module.nsp.emit('host:update', module.getState('update'));

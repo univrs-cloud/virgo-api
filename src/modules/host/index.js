@@ -65,7 +65,7 @@ class HostModule extends BaseModule {
 		return this.#updatePidFile;
 	}
 
-	get updatFile() {
+	get updateFile() {
 		return this.#updateFile;
 	}
 
@@ -143,14 +143,14 @@ class HostModule extends BaseModule {
 			return;
 		}
 		
+		if (this.checkUpdateIntervalId !== null) {
+			return;
+		}
+
 		let updateLogsWatcher;
 		const watcherPlugin = this.getPlugin('watcher');
 		if (watcherPlugin) {
 			updateLogsWatcher = await watcherPlugin.watchUpdateLog(this);
-		}
-	
-		if (this.checkUpdateIntervalId !== null) {
-			return;
 		}
 	
 		this.checkUpdateIntervalId = setInterval(async () => {
@@ -167,6 +167,7 @@ class HostModule extends BaseModule {
 				await fs.promises.access(this.#rebootRequiredFile);
 				isRebootRequired = true;
 			} catch (error) { }
+
 			this.setState('update', { ...this.getState('update'), isRebootRequired, state: 'succeeded' });
 			this.nsp.emit('host:update', this.getState('update'));
 			this.checkForUpdates();
