@@ -17,7 +17,6 @@ class HostModule extends BaseModule {
 	constructor() {
 		super('host');
 
-		this.checkUpdate();
 		this.setState('system', {
 			api: {
 				version: version
@@ -96,9 +95,7 @@ class HostModule extends BaseModule {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin.startPolling(this);
 
-		if (this.getState('update')) {
-			this.nsp.emit('host:update', this.getState('update'));
-		}
+		this.checkUpdate();
 		if (this.getState('checkUpdates')) {
 			if (socket.isAuthenticated && socket.isAdmin) {
 				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
@@ -146,9 +143,10 @@ class HostModule extends BaseModule {
 		let updatePid = await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' });
 		updatePid = updatePid.trim();
 		this.updatePid = (updatePid === '' ? null : parseInt(updatePid, 10));
-
+		
 		if (this.updatePid === null) {
 			this.setState('update', null);
+			this.nsp.emit('host:update', this.getState('update'));
 			return;
 		}
 		
