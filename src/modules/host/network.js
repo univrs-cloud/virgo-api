@@ -84,7 +84,7 @@ const onConnection = (socket, module) => {
 };
 
 module.exports = {
-	name: 'system_actions',
+	name: 'network',
 	onConnection,
 	jobs: {
 		'host:network:identifier:update': updateIdentifier,
