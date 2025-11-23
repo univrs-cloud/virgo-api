@@ -143,8 +143,8 @@ class HostModule extends BaseModule {
 
 	async checkUpdate() {
 		try {
-			let updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
-			this.updatePid = (updatePid === '' ? null : parseInt(updatePid, 10));
+			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
+			this.updatePid = (updatePid === '' ? null : parseInt(updatePid));
 		} catch (error) {}
 		
 		if (this.updatePid === null) {
@@ -176,7 +176,7 @@ class HostModule extends BaseModule {
 			try {
 				await fs.promises.access(this.#rebootRequiredFile);
 				isRebootRequired = true;
-			} catch (error) { }
+			} catch (error) {}
 
 			let exitCode = 0;
 			try {

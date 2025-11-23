@@ -7,7 +7,10 @@ let updateLogsWatcher;
 
 const watchPowerSource = async (module) => {
 	const readFile = async () => {
-		let data = (await fs.promises.readFile('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' })).trim();
+		let data = '';
+		try {
+			data = (await fs.promises.readFile('/tmp/ups_power_source', { encoding: 'utf8', flag: 'r' })).trim();
+		} catch (error) {}
 		if (data !== '') {
 			if (module.getState('ups') === undefined) {
 				module.setState('ups', {});
@@ -42,7 +45,10 @@ const watchPowerSource = async (module) => {
 
 const watchUpdateLog = async (module) => {
 	const readFile = async () => {
-		let data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+		let data = '';
+		try {
+			data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+		} catch (error) {}
 		if (data !== '') {
 			module.setState('update', { ...module.getState('update'), steps: data.split('\n') });
 			module.nsp.emit('host:update', module.getState('update'));
