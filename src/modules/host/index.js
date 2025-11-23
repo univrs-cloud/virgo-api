@@ -143,14 +143,9 @@ class HostModule extends BaseModule {
 
 	async checkUpdate() {
 		try {
-			await fs.promises.access(this.updatePidFile);
-		} catch (error) {
-			await touch(this.updatePidFile);
-		}
-
-		let updatePid = await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' });
-		updatePid = updatePid.trim();
-		this.updatePid = (updatePid === '' ? null : parseInt(updatePid, 10));
+			let updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
+			this.updatePid = (updatePid === '' ? null : parseInt(updatePid, 10));
+		} catch (error) {}
 		
 		if (this.updatePid === null) {
 			this.setState('update', null);
@@ -183,8 +178,11 @@ class HostModule extends BaseModule {
 				isRebootRequired = true;
 			} catch (error) { }
 
-			const existCode = parseInt((await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim());
-			const state = (existCode === 0 ? 'succeeded' : 'failed');
+			let exitCode = 0;
+			try {
+				exitCode = parseInt((await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim());
+			} catch (error) {}
+			const state = (exitCode === 0 ? 'succeeded' : 'failed');
 			this.setState('update', { ...this.getState('update'), isRebootRequired, state });
 			this.nsp.emit('host:update', this.getState('update'));
 
