@@ -52,7 +52,7 @@ const update = async (socket, module) => {
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}"`
+			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}; echo $? > ${module.updateExitStatusFile}"`
 		], { shell: true });
 		await module.checkUpdate();
 	} catch (error) {
@@ -60,6 +60,7 @@ const update = async (socket, module) => {
 		clearInterval(module.checkUpdateIntervalId);
 		module.checkUpdateIntervalId = null;
 		await updateLogsWatcher?.stop();
+		
 		module.setState('update', { ...module.getState('update'), state: 'failed' });
 		module.nsp.emit('host:update', module.getState('update'));
 		module.generateUpdates();
@@ -71,6 +72,7 @@ const completeUpdate = (socket, module) => {
 		return;
 	}
 	
+	fs.closeSync(fs.openSync(module.updateExitStatusFile, 'w'));
 	fs.closeSync(fs.openSync(module.updatePidFile, 'w'));
 	fs.closeSync(fs.openSync(module.updateFile, 'w'));
 	module.updatePid = null;

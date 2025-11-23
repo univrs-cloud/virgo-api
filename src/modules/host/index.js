@@ -9,6 +9,7 @@ const BaseModule = require('../base');
 class HostModule extends BaseModule {
 	#etcHosts = '/etc/hosts';
 	#rebootRequiredFile = '/run/reboot-required';
+	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
 	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updateFile = '/var/www/virgo-api/update.log';
 	#updatePid = null;
@@ -67,6 +68,10 @@ class HostModule extends BaseModule {
 		return this.#etcHosts;
 	}
 
+	get updateExitStatusFile() {
+		return this.#updateExitStatusFile;
+	}
+
 	get updatePidFile() {
 		return this.#updatePidFile;
 	}
@@ -96,6 +101,9 @@ class HostModule extends BaseModule {
 		pollingPlugin.startPolling(this);
 
 		this.checkUpdate();
+		if (this.getState('update') !== undefined) {
+			this.nsp.emit('host:update', this.getState('update'));
+		}
 		if (this.getState('checkUpdates')) {
 			if (socket.isAuthenticated && socket.isAdmin) {
 				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
@@ -175,8 +183,11 @@ class HostModule extends BaseModule {
 				isRebootRequired = true;
 			} catch (error) { }
 
-			this.setState('update', { ...this.getState('update'), isRebootRequired, state: 'succeeded' });
+			const existCode = parseInt((await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim());
+			const state = (existCode === 0 ? 'succeeded' : 'failed');
+			this.setState('update', { ...this.getState('update'), isRebootRequired, state });
 			this.nsp.emit('host:update', this.getState('update'));
+
 			this.generateUpdates();
 		}, 1000);
 	}
