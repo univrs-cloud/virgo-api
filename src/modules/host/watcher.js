@@ -50,7 +50,7 @@ const watchUpdateLog = async (module) => {
 			data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
 		} catch (error) {}
 		if (data !== '') {
-			module.setState('update', { ...module.getState('update'), steps: data.split('\n') });
+			module.setState('update', { ...module.getState('update'), steps: data.split('\n'), state: 'running' });
 			module.nsp.emit('host:update', module.getState('update'));
 		}
 	};
@@ -67,8 +67,8 @@ const watchUpdateLog = async (module) => {
 
 	if (module.getState('update') === undefined) {
 		module.setState('update', {
-			state: 'running',
-			steps: []
+			steps: [],
+			state: 'running'
 		});
 		await readFile();
 	}

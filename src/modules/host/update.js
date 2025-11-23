@@ -39,8 +39,8 @@ const update = async (socket, module) => {
 	}
 
 	module.setState('update', {
-		state: 'running',
-		steps: []
+		steps: [],
+		state: 'running'
 	});
 
 	try {
