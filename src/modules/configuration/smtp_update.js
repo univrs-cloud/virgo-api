@@ -9,10 +9,9 @@ const aptListchangesConfigurationFile = '/etc/apt/listchanges.conf';
 const generateMsmtpConfig = (config) => {
 	return `defaults
 ${(config.username && config.password ? 'auth on' : 'auth off')}
-tls on
-tls_starttls ${(parseInt(config.port) === 465 ? 'off' : 'on' )}
+tls ${(config.encryption === 'ssl' ? 'on' : 'off' )}
+tls_starttls ${(config.encryption === 'ssl' ? 'off' : 'on' )}
 tls_certcheck off
-${(config.encryption === 'ssl' ? 'ssl-verify off' : '')}
 
 account alerts
 host ${config.address}
