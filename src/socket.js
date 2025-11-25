@@ -10,6 +10,11 @@ const initializeSocket = (server) => {
 	io = new Server(server, {
 		path: '/api'
 	});
+
+	io.engine.on("connection", (rawSocket) => {
+		rawSocket.request = null;
+	});	  
+
 	return io;
 };
 

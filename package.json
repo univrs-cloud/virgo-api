@@ -56,16 +56,18 @@
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
+		"bufferutil": "*",
 		"raspi": "^6.0.1",
-		"raspi-i2c": "^6.2.4"
+		"raspi-i2c": "^6.2.4",
+		"utf-8-validate": "*"
 	},
 	"devDependencies": {
 		"@types/node": "^24.10.1",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
-		"glob": "^11.0.3",
-		"node-gyp": "^11.4.2",
-		"validator": "^13.15.20"
+		"glob": "^13.0.0",
+		"node-gyp": "^12.1.0",
+		"validator": "^13.15.23"
 	}
 }
