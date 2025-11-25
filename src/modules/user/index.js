@@ -52,7 +52,7 @@ class UserModule extends BaseModule {
 		try {
 			const proc = execa('smbpasswd', ['-s', '-a', username]);
 			proc.stdin.write(`${password}\n${password}\n`);
-  			proc.stdin.end();
+			proc.stdin.end();
 			await proc;
 		} catch (error) {
 			console.log(error);

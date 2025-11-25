@@ -55,7 +55,7 @@ const getStorage = async (module) => {
 		const statuses = JSON.parse(zpoolStatus)?.pools || {};
 		let storage = [];
 		for (const pool of Object.values(pools)) {
-				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r',  pool.name, '-j', '--json-int'], { reject: false });
+				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', pool.name, '-j', '--json-int'], { reject: false });
 				const datasets = JSON.parse(zfsList)?.datasets || {};
 				const datasetsSize = Object.values(datasets).reduce((sum, dataset) => {
 					return sum + (dataset?.properties?.usedbydataset?.value || 0);

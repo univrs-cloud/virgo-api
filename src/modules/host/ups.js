@@ -52,7 +52,7 @@ module.exports = {
 	jobs: {
 		'ups:check': async (job, module) => {
 			checkUps(module);
-			return  ``;
+			return ``;
 		}
 	}
 };
