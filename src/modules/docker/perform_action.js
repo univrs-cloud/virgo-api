@@ -16,7 +16,7 @@ const performAppAction = async (job, module) => {
 		throw new Error(`App not found.`);
 	}
 
-	const actionVerbs = module.nlp.conjucate(config.action);
+	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${existingApp.title} app is ${actionVerbs.gerund}...`);
 	const container = module.getState('containers')?.find((container) => { return container.names.includes(`/${config.name}`); });
 	const composeProject = container?.labels?.comDockerComposeProject ?? false;
@@ -49,7 +49,7 @@ const performServiceAction = async (job, module) => {
 		throw new Error(`Service not found.`);
 	}
 
-	const actionVerbs = module.nlp.conjucate(config.action);
+	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${container.name} service is ${actionVerbs.gerund}...`);
 	await docker.getContainer(container.id)[config.action]();
 	return `${container.name} service ${actionVerbs.pastTense}.`;
