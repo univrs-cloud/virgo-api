@@ -3,7 +3,7 @@ const dockerode = require('dockerode');
 const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'down'];
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'remove'];
 
 const performAppAction = async (job, module) => {
 	const config = job.data.config;
@@ -16,22 +16,26 @@ const performAppAction = async (job, module) => {
 		throw new Error(`App not found.`);
 	}
 
-	await module.updateJobProgress(job, `${existingApp.title} app is ${config.action}ing...`);
-
+	const actionVerbs = module.nlp.conjucate(config.action);
+	await module.updateJobProgress(job, `${existingApp.title} app is ${actionVerbs.gerund}...`);
 	const container = module.getState('containers')?.find((container) => { return container.names.includes(`/${config.name}`); });
-	const composeProject = container.labels.comDockerComposeProject || false;
+	const composeProject = container?.labels?.comDockerComposeProject ?? false;
 	if (composeProject === false) {
-		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
+		throw new Error(`${existingApp.title} app is not set up to perform ${config.action} action.`);
 	}
-
-	const action = (config.action !== 'recreate' ? [config.action] : ['up', '-d', '--force-recreate']);
+	let action = [config.action];
+	if (config.action === 'recreate') {
+		action = ['up', '-d', '--force-recreate'];
+	}
+	if (config.action === 'remove') {
+		action = ['down'];
+	}
 	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
 	if (config.action === 'down') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
 	}
-	
-	return `${existingApp.title} app ${config.action}ed.`;
+	return `${existingApp.title} app ${actionVerbs.pastTense}.`;
 };
 
 const performServiceAction = async (job, module) => {
@@ -45,9 +49,10 @@ const performServiceAction = async (job, module) => {
 		throw new Error(`Service not found.`);
 	}
 
-	await module.updateJobProgress(job, `${container.name} service is ${config.action}ing...`);
+	const actionVerbs = module.nlp.conjucate(config.action);
+	await module.updateJobProgress(job, `${container.name} service is ${actionVerbs.gerund}...`);
 	await docker.getContainer(container.id)[config.action]();
-	return `${container.name} service ${config.action}ed.`;
+	return `${container.name} service ${actionVerbs.pastTense}.`;
 };
 
 const onConnection = (socket, module) => {

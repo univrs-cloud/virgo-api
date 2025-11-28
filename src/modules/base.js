@@ -3,6 +3,7 @@ const path = require('path');
 const { Queue, Worker } = require('bullmq');
 const { getIO } = require('../socket');
 const eventEmitter = require('../utils/event_emitter');
+const nlp = require('../utils/nlp');
 const config = require('../../config');
 
 class BaseModule {
@@ -36,6 +37,10 @@ class BaseModule {
 
 	get eventEmitter() {
 		return this.#eventEmitter;
+	}
+
+	get nlp() {
+		return nlp;
 	}
 
 	getState(key) {
