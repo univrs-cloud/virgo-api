@@ -3,7 +3,7 @@ const dockerode = require('dockerode');
 const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'down'];
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'down'];
 
 const performAppAction = async (job, module) => {
 	const config = job.data.config;
@@ -24,7 +24,8 @@ const performAppAction = async (job, module) => {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action}.`);
 	}
 
-	await execa('docker', ['compose', '-p', composeProject, config.action]);
+	const action = (config.action !== 'recreate' ? [config.action] : ['up', '-d', '--force-recreate']);
+	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
 	if (config.action === 'down') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');

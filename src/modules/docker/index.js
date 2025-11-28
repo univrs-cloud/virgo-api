@@ -1,3 +1,4 @@
+const path = require('path');
 const dockerode = require('dockerode');
 const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
@@ -33,6 +34,12 @@ class DockerModule extends BaseModule {
 		return this.#composeDir;
 	}
 
+	get composeFile() {
+		return (composeProject) => {
+			return path.join(this.composeDir, composeProject, 'docker-compose.yml');
+		};
+	}
+
 	get appsDataset() {
 		return this.#appsDataset;
 	}
@@ -47,7 +54,7 @@ class DockerModule extends BaseModule {
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(this);
+		pollingPlugin?.startPolling(this);
 
 		if (this.getState('configured')) {
 			this.nsp.emit('app:configured', this.getState('configured'));

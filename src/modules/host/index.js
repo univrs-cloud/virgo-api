@@ -98,7 +98,7 @@ class HostModule extends BaseModule {
 
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin.startPolling(this);
+		pollingPlugin?.startPolling(this);
 
 		this.checkUpdate();
 		if (this.getState('update') !== undefined) {
