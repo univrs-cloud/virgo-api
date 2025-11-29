@@ -1,5 +1,5 @@
 const fs = require('fs');
-const DataService = require('../data_service');
+const DataService = require('../database/data_service');
 
 const migrateData = async () => {
 	const jsonDataPath = '/var/www/virgo-api/data.json';

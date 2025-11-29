@@ -1,5 +1,5 @@
-const DataService = require('../data_service');
-const { updateNotificationConfigurationFiles } = require('../../modules/configuration/smtp_update');
+const DataService = require('../database/data_service');
+const { updateNotificationConfigurationFiles } = require('../modules/configuration/smtp_update');
 
 const updateNotificationConfiguration = async () => {
 	try {
