@@ -16,9 +16,10 @@ if ! grep -Fxq "$line_to_add" "$file_path"; then
 	echo "$line_to_add" >> "$file_path"
 fi
 
-/usr/local/bin/node --input-type=commonjs /var/www/virgo-api/app/src/migrations/run.js
-
 deb-systemd-helper enable virgo-api.service
 if ! ischroot; then
+	cd /var/www/virgo-api/app/src/migrations
+	/usr/local/bin/node run.js
+
 	deb-systemd-helper start virgo-api.service
 fi
