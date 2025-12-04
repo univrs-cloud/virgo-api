@@ -147,7 +147,7 @@ const register = (module) => {
 
 	// Schedule updates checker to run daily at midnight
 	module.addJobSchedule(
-		'updates:check',
+		'app:updates:check',
 		{ pattern: '0 0 0 * * *' }
 	);
 
@@ -169,7 +169,7 @@ module.exports = {
 	register,
 	onConnection,
 	jobs: {
-		'updates:check': async (job, module) => {
+		'app:updates:check': async (job, module) => {
 			await checkForUpdates(module);
 			return ``;
 		},
