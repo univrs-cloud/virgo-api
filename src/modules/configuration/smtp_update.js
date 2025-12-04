@@ -35,14 +35,15 @@ ZED_SYSLOG_SUBCLASS_EXCLUDE="history_event"
 
 const generateAptListchangesConfig = (config) => {
 	return `[apt]
-frontend=mail
+frontend=log
 which=both
 email_address="${config.recipients.join(' ')}"
 email_format=html
 confirm=false
 headers=false
 reverse=false
-save_seen=/var/lib/apt/listchanges.db
+save_seen=/var/lib/apt/listchanges
+no_network=true
 `;
 }
 
