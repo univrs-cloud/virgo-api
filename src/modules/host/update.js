@@ -14,13 +14,11 @@ const checkUpdates = async (socket, module) => {
 	module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
-		module.setState('checkUpdates', false);
-		module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
-		module.generateUpdates();
+		await module.generateUpdates();
 	} catch (error) {
-		module.setState('checkUpdates', false);
-		module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 	}
+	module.setState('checkUpdates', false);
+	module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
 };
 
 const update = async (socket, module) => {
