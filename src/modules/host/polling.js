@@ -173,7 +173,7 @@ const register = (module) => {
 	polls.push(new Poller(module, getStorage, 60000));
 	polls.push(new Poller(module, getDrives, 60000));
 	polls.push(new Poller(module, getTime, 60000));
-	polls.push(new Poller(module, getServices, 5000));
+	polls.push(new Poller(module, getServices, 60000));
 };
 
 const startPolling = () => {
