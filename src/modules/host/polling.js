@@ -130,6 +130,38 @@ const getTime = async (module) => {
 	module.nsp.emit('host:time', module.getState('time'));
 };
 
+const getServices = async (module) => {
+	try {
+		const [{ stdout: serviceUnitsList }, { stdout: serviceUnitFilesList }] = await Promise.all([
+			execa('systemctl', ['list-units', '--type=service', '--all', '--output=json']),
+			execa('systemctl', ['list-unit-files', '--type=service', '--output=json'])
+		]);
+		const serviceUnits = JSON.parse(serviceUnitsList);
+		const serviceUnitFiles = JSON.parse(serviceUnitFilesList);
+		const services = serviceUnits.map((service) => {
+			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === service.unit; });
+			service.unitFileState = serviceUnitFile?.state || 'unknown';
+			service.broken = service.load === 'not-found';
+			let state = `${service.active}:${service.sub}`;
+			if (service.active === 'active' && service.sub === 'running') {
+				state = 'running';
+			} else if (service.active === 'active' && service.sub === 'exited') {
+				state = 'oneshot';
+			} else if (service.active === 'inactive' && service.sub === 'dead') {
+				state = 'stopped';
+			} else if (service.active === 'failed') {
+				state = 'failed';
+			}
+			service.state = state;
+			return service;
+		});
+		module.setState('services', services);
+		module.nsp.emit('host:system:services', module.getState('services'));
+	} catch (error) {
+
+	}
+};
+
 const register = (module) => {
 	polls.push(new Poller(module, getNetworkStats, 2000));
 	polls.push(new Poller(module, getCpuStats, 5000));
@@ -137,6 +169,7 @@ const register = (module) => {
 	polls.push(new Poller(module, getStorage, 60000));
 	polls.push(new Poller(module, getDrives, 60000));
 	polls.push(new Poller(module, getTime, 60000));
+	polls.push(new Poller(module, getServices, 5000));
 };
 
 const startPolling = () => {

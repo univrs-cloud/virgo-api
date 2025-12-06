@@ -81,6 +81,15 @@ const completeUpdate = (socket, module) => {
 };
 
 const onConnection = (socket, module) => {
+	if (module.getState('updates')) {
+		module.nsp.to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? module.getState('updates') : []));
+	}
+	if (module.getState('checkUpdates')) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+		}
+	}
+
 	socket.on('host:updates:check', () => { 
 		checkUpdates(socket, module); 
 	});

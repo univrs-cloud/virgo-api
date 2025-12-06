@@ -55,7 +55,7 @@ class UserModule extends BaseModule {
 			proc.stdin.end();
 			await proc;
 		} catch (error) {
-			console.log(error);
+			console.error(error);
 		}
 	}
 
