@@ -1,6 +1,5 @@
 const os = require('os');
 const fs = require('fs');
-const touch = require('touch');
 const { execa } = require('execa');
 const si = require('systeminformation');
 const { version } = require('../../../package.json');
@@ -104,16 +103,11 @@ class HostModule extends BaseModule {
 		if (this.getState('update') !== undefined) {
 			this.nsp.emit('host:update', this.getState('update'));
 		}
-		if (this.getState('checkUpdates')) {
-			if (socket.isAuthenticated && socket.isAdmin) {
-				this.nsp.to(`user:${socket.username}`).emit('host:updates:check', this.getState('checkUpdates'));
-			}
-		}
-		if (this.getState('updates')) {
-			this.nsp.to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? this.getState('updates') : []));
-		}
 		if (this.getState('system')) {
 			this.nsp.emit('host:system', this.getState('system'));
+		}
+		if (this.getState('services')) {
+			this.nsp.emit('host:system:services', this.getState('services'));
 		}
 		if (this.getState('networkStats')) {
 			this.nsp.emit('host:network:stats', this.getState('networkStats'));
@@ -270,15 +264,6 @@ class HostModule extends BaseModule {
 		}
 	}
 
-	async #loadDefaultGateway() {
-		try {
-			const defaultGateway = await si.networkGatewayDefault();
-			this.setState('system', { ...this.getState('system'), defaultGateway });
-		} catch (error) {
-			this.setState('system', { ...this.getState('system'), defaultGateway: false });
-		}
-	}
-
 	async #loadNetworkInterface() {
 		try {
 			const networkInterface = await si.networkInterfaces('default');
@@ -288,6 +273,14 @@ class HostModule extends BaseModule {
 		}
 	}
 
+	async #loadDefaultGateway() {
+		try {
+			const defaultGateway = await si.networkGatewayDefault();
+			this.setState('system', { ...this.getState('system'), defaultGateway });
+		} catch (error) {
+			this.setState('system', { ...this.getState('system'), defaultGateway: false });
+		}
+	}
 }
 
 module.exports = () => {
