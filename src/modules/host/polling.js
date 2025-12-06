@@ -156,7 +156,11 @@ const getServices = async (module) => {
 			return service;
 		});
 		module.setState('services', services);
-		module.nsp.emit('host:system:services', module.getState('services'));
+		module.nsp.sockets.forEach((socket) => {
+			if (socket.isAuthenticated && socket.isAdmin) {
+				module.nsp.to(`user:${socket.username}`).emit('host:system:services', module.getState('services'));
+			}
+		});
 	} catch (error) {
 
 	}
