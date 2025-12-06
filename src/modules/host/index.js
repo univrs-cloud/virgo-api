@@ -107,7 +107,9 @@ class HostModule extends BaseModule {
 			this.nsp.emit('host:system', this.getState('system'));
 		}
 		if (this.getState('services')) {
-			this.nsp.emit('host:system:services', this.getState('services'));
+			if (socket.isAuthenticated && socket.isAdmin) {
+				this.nsp.to(`user:${socket.username}`).emit('host:system:services', this.getState('services'));
+			}
 		}
 		if (this.getState('networkStats')) {
 			this.nsp.emit('host:network:stats', this.getState('networkStats'));
