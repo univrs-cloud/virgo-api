@@ -6,13 +6,15 @@ class ConfigurationModule extends BaseModule {
 	constructor() {
 		super('configuration');
 
-		this.#loadConfiguration();
-
-	this.eventEmitter
-		.on('configuration:updated', async () => {
+		(async () => {
 			await this.#loadConfiguration();
-			configurationManager.broadcast(this);
-		});
+		})();
+
+		this.eventEmitter
+			.on('configuration:updated', async () => {
+				await this.#loadConfiguration();
+				configurationManager.broadcast(this);
+			});
 	}
 
 	onConnection(socket) {

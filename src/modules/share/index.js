@@ -13,7 +13,9 @@ class ShareModule extends BaseModule {
 	constructor() {
 		super('share');
 
-		this.#loadShares();
+		(async () => {
+			await this.#loadShares();
+		})();
 
 		this.eventEmitter
 			.on('shares:updated', async () => {

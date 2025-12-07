@@ -11,7 +11,9 @@ class UserModule extends BaseModule {
 	constructor() {
 		super('user');
 
-		this.#loadUsers();
+		(async () => {
+			await this.#loadUsers();
+		})();
 		
 		this.eventEmitter
 			.on('users:updated', async () => {

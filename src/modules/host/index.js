@@ -40,9 +40,11 @@ class HostModule extends BaseModule {
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
-		this.#loadNetworkIdentifier();
-		this.#loadNetworkInterface();
-		this.#loadDefaultGateway();
+		(async () => {
+			await this.#loadNetworkIdentifier();
+			await this.#loadNetworkInterface();
+			await this.#loadDefaultGateway();
+		})();
 
 		this.eventEmitter
 			.on('host:updates:updated', () => {

@@ -11,6 +11,10 @@ const updateLocation = async (job, module) => {
 
 const onConnection = (socket, module) => {
 	socket.on('configuration:location:update', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
 		await module.addJob('location:update', { config, username: socket.username });
 	});
 };

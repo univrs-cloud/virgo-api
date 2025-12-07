@@ -1,10 +1,6 @@
 const { execa } = require('execa');
 
-const fetchServices = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-	
+const loadServices = async (module) => {
 	try {
 		const [{ stdout: serviceUnitsList }, { stdout: serviceUnitFilesList }] = await Promise.all([
 			execa('systemctl', ['list-units', '--type=service', '--all', '--output=json']),
@@ -30,10 +26,13 @@ const fetchServices = async (socket, module) => {
 			return service;
 		});
 		module.setState('services', services);
-		socket.emit('host:system:services', module.getState('services'));
 	} catch (error) {
 
 	}
+};
+
+const register = (module) => {
+	loadServices(module);
 };
 
 const onConnection = (socket, module) => {
@@ -43,12 +42,22 @@ const onConnection = (socket, module) => {
 		}
 	}
 
-	socket.on('host:system:services:fetch', () => { 
-		fetchServices(socket, module);
+	socket.on('host:system:services:fetch', async () => { 
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await loadServices(module);
+		for (const socket of module.nsp.sockets.values()) {
+			if (socket.isAuthenticated && socket.isAdmin) {
+				socket.emit('host:system:services', module.getState('services'));
+			}
+		}
 	});
 };
 
 module.exports = {
 	name: 'services',
+	register,
 	onConnection
 };
