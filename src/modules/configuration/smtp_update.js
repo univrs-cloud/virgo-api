@@ -82,6 +82,10 @@ const register = (module) => {
 
 const onConnection = (socket, module) => {
 	socket.on('configuration:smtp:update', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
 		await module.addJob('smtp:update', { config, username: socket.username });
 	});
 };
