@@ -48,7 +48,7 @@ class HostModule extends BaseModule {
 			.on('host:updates:updated', () => {
 				for (const socket of this.nsp.sockets.values()) {
 					if (socket.isAuthenticated && socket.isAdmin) {
-						this.nsp.to(`user:${socket.username}`).emit('host:updates', this.getState('updates'));
+						socket.emit('host:updates', this.getState('updates'));
 					}
 				};
 			})
@@ -105,11 +105,6 @@ class HostModule extends BaseModule {
 		}
 		if (this.getState('system')) {
 			this.nsp.emit('host:system', this.getState('system'));
-		}
-		if (this.getState('services')) {
-			if (socket.isAuthenticated && socket.isAdmin) {
-				this.nsp.to(`user:${socket.username}`).emit('host:system:services', this.getState('services'));
-			}
 		}
 		if (this.getState('networkStats')) {
 			this.nsp.emit('host:network:stats', this.getState('networkStats'));

@@ -17,7 +17,7 @@ const broadcast = (module) => {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;
 			}
-			module.nsp.to(`user:${socket.username}`).emit('configuration', configuration);
+			socket.emit('configuration', configuration);
 		}
 	} catch (error) {
 		console.error(`Error broadcasting configuration:`, error);

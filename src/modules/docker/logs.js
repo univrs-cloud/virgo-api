@@ -43,7 +43,7 @@ const logsConnect = async (socket, containerId) => {
 };
 
 const onConnection = (socket, module) => {
-	socket.on('logs:connect', (containerId) => { 
+	socket.on('logs:connect', (containerId) => {
 		logsConnect(socket, containerId); 
 	});
 };

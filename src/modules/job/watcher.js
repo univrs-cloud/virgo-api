@@ -13,7 +13,7 @@ const register = (module) => {
 					if (job) {
 						for (const socket of module.nsp.sockets.values()) {
 							if (socket.isAuthenticated && socket.isAdmin) {
-								module.nsp.to(`user:${socket.username}`).emit('job', job);
+								socket.emit('job', job);
 							}
 						}
 					}

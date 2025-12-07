@@ -11,14 +11,22 @@ const checkUpdates = async (socket, module) => {
 	}
 
 	module.setState('checkUpdates', true);
-	module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+	for (const socket of module.nsp.sockets.values()) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			socket.emit('host:updates:check', module.getState('checkUpdates'));
+		}
+	}
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		await module.generateUpdates();
 	} catch (error) {
 	}
 	module.setState('checkUpdates', false);
-	module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+	for (const socket of module.nsp.sockets.values()) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			socket.emit('host:updates:check', module.getState('checkUpdates'));
+		}
+	}
 };
 
 const update = async (socket, module) => {
