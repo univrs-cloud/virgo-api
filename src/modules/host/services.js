@@ -36,7 +36,7 @@ const register = (module) => {
 };
 
 const onConnection = (socket, module) => {
-	if (this.getState('services')) {
+	if (module.getState('services')) {
 		if (socket.isAuthenticated && socket.isAdmin) {
 			socket.emit('host:system:services', module.getState('services'));
 		}
