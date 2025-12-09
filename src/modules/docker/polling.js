@@ -50,7 +50,7 @@ const getAppsResourceMetrics = async (module) => {
 
 const register = (module) => {
 	polls.push(new Poller(module, getContainers, 2000));
-	polls.push(new Poller(module, getAppsResourceMetrics, 10000));
+	polls.push(new Poller(module, getAppsResourceMetrics, 60000));
 };
 
 const startPolling = () => {

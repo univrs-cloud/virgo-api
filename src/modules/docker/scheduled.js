@@ -139,7 +139,11 @@ const checkForUpdates = async (module) => {
 			module.setState('updates', updates);
 		}
 	}
-	module.nsp.emit('app:updates', module.getState('updates'));
+	for (const socket of module.nsp.sockets.values()) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			socket.emit('app:updates', module.getState('updates'));
+		}
+	}
 };
 
 const register = (module) => {
@@ -159,8 +163,10 @@ const register = (module) => {
 };
 
 const onConnection = (socket, module) => {
-	if (module.getState('updates')) {
-		module.nsp.emit('app:updates', module.getState('updates'));
+	if (socket.isAuthenticated && socket.isAdmin) {
+		if (module.getState('updates')) {
+			socket.emit('app:updates', module.getState('updates'));
+		}
 	}
 };
 
