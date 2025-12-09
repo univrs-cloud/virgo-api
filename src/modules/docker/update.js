@@ -30,7 +30,7 @@ const updateApp = async (job, module) => {
 	const template = module.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
 		try {
-			const response = await fetch(module.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+			const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
 			if (response.ok) {
 				const stack = await response.text();
 				await module.updateJobProgress(job, `Writing ${template.title} project template...`);

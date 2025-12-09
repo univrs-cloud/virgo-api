@@ -72,17 +72,6 @@ class DockerModule extends BaseModule {
 		}
 	}
 
-	getRawGitHubUrl(repositoryUrl, filePath, branch = 'main') {
-		const { hostname, pathname } = new URL(repositoryUrl);
-		const [owner, repository] = pathname?.split('/')?.filter(Boolean);
-		if (hostname.includes('github.com')) {
-			const rawHostname = hostname.replace('github.com', 'raw.githubusercontent.com');
-			return `https://${rawHostname}/${owner}/${repository}/${branch}/${filePath}`;
-		}
-	
-		throw new Error(`Unsupported apps repository.`);
-	};
-
 	async #loadConfigured() {
 		try {
 			const configured = await DataService.getConfigured();

@@ -41,7 +41,7 @@ const installApp = async (job, module) => {
 		}
 	}
 	await module.updateJobProgress(job, `Downloading ${template.title} project template...`);
-	const response = await fetch(module.getRawGitHubUrl(template.repository.url, template.repository.stackfile));
+	const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
 	if (!response.ok) {
 		throw new Error(`Failed to download app template: ${response.status} ${response.statusText}`);
 	}
