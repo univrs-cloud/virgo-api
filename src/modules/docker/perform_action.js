@@ -31,7 +31,7 @@ const performAppAction = async (job, module) => {
 		action = ['down'];
 	}
 	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
-	if (config.action === 'down') {
+	if (config.action === 'remove') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
 	}
