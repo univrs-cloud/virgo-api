@@ -46,6 +46,7 @@
 		"express": "^5.2.1",
 		"express-rate-limit": "^8.2.1",
 		"express-validator": "^7.3.1",
+		"filesize-parser": "^1.5.1",
 		"ini": "^6.0.0",
 		"js-yaml": "^4.1.1",
 		"kelvin-to-celsius": "^1.1.0",

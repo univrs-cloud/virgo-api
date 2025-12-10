@@ -22,11 +22,17 @@ class DockerModule extends BaseModule {
 		})();
 
 		this.eventEmitter
+			.on('app:containers:fetched', async () => {
+				this.nsp.emit('app:containers', this.getState('containers'));
+			})
+			.on('app:resourceMetrics:fetched', async () => {
+				this.nsp.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+			})
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
 				this.nsp.emit('app:configured', this.getState('configured'));
 			})
-			.on('templates:fetch', async () => {
+			.on('app:templates:fetch', async () => {
 				await this.#loadTemplates();
 				this.nsp.emit('app:templates', this.getState('templates'));
 			});

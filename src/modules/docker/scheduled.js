@@ -157,7 +157,7 @@ const register = (module) => {
 
 	// Schedule templates fetcher to run every hour at minute 1
 	module.addJobSchedule(
-		'templates:fetch',
+		'app:templates:fetch',
 		{ pattern: '0 1 * * * *' }
 	);
 };
@@ -179,8 +179,8 @@ module.exports = {
 			await checkForUpdates(module);
 			return ``;
 		},
-		'templates:fetch': async (job, module) => {
-			module.eventEmitter.emit('templates:fetch');
+		'app:templates:fetch': async (job, module) => {
+			module.eventEmitter.emit('app:templates:fetch');
 			return ``;
 		}
 	}
