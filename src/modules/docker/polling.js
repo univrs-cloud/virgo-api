@@ -32,14 +32,16 @@ const getAppsResourceMetrics = async (module) => {
 
 	let appsResourceMetrics = [];
 	try {
-		const { stdout: dockerStats } = await execa('docker', ['container', 'stats', '--all', '--no-stream', '--no-trunc', '--format', 'json'], { reject: false });
+		const [{ stdout: dockerStats }, { stdout: zfsList }] = await Promise.all([
+			execa('docker', ['container', 'stats', '--all', '--no-stream', '--no-trunc', '--format', 'json']),
+			execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int'])
+		]);
 		const containerStats = dockerStats.split('\n')?.map((line) => { return JSON.parse(line); })?.map((stat) => {
 			stat.CPUPerc = Number(stat.CPUPerc.replace('%', ''));
 			stat.MemPerc = Number(stat.MemPerc.replace('%', ''));
 			stat.MemUsage = filesizeParser(stat.MemUsage.split('/')[0].trim());
 			return camelcaseKeys(stat);
 		});
-		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int'], { reject: false });
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 
 		for (const app of apps) {
@@ -121,7 +123,7 @@ const register = (module) => {
 		});
 	
 	polls.push(new Poller(module, getContainers, 2000));
-	polls.push(new Poller(module, getAppsResourceMetrics, 60000));
+	polls.push(new Poller(module, getAppsResourceMetrics, 10000));
 };
 
 const startPolling = () => {

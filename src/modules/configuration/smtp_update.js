@@ -72,7 +72,7 @@ const updateNotificationConfigurationFiles = async () => {
 	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(configuration.smtp), 'utf8');
 	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(configuration.smtp), 'utf8');
 	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(configuration.smtp), 'utf8');
-	await execa('systemctl', ['restart', 'zfs-zed']);
+	await execa('systemctl', ['restart', 'zfs-zed'], { reject: false });
 };
 
 const register = (module) => {

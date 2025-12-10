@@ -27,7 +27,7 @@ class HostModule extends BaseModule {
 		});
 		si.system(async (system) => {
 			try {
-				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json'], { reject: false });
+				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json']);
 				this.setState('system', {
 					...this.getState('system'),
 					...system,

@@ -27,8 +27,8 @@ const getCpuStats = async (module) => {
 	try {
 		const currentLoad = await si.currentLoad();
 		const cpuTemperature = await si.cpuTemperature();
-		const fan = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true, reject: false });
-		module.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan.stdout ? fan.stdout.trim() : '') });
+		const { stdout: fan } = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true });
+		module.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan ? fan.trim() : '') });
 	} catch (error) {
 		module.setState('cpuStats', false);
 	}
@@ -49,13 +49,15 @@ const getMemory = async (module) => {
 
 const getStorage = async (module) => {
 	try {
-		const { stdout: zpoolList } = await execa('zpool', ['list', '-j', '--json-int'], { reject: false });
-		const { stdout: zpoolStatus } = await execa('zpool', ['status', '-j', '--json-int'], { reject: false });
+		const [{ stdout: zpoolList }, { stdout: zpoolStatus }] = await Promise.all([
+			execa('zpool', ['list', '-j', '--json-int']),
+			execa('zpool', ['status', '-j', '--json-int'])
+		]);
 		const pools = JSON.parse(zpoolList)?.pools || {};
 		const statuses = JSON.parse(zpoolStatus)?.pools || {};
 		let storage = [];
 		for (const pool of Object.values(pools)) {
-				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', pool.name, '-j', '--json-int'], { reject: false });
+				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', pool.name, '-j', '--json-int']);
 				const datasets = JSON.parse(zfsList)?.datasets || {};
 				const datasetsSize = Object.values(datasets).reduce((sum, dataset) => {
 					return sum + (dataset?.properties?.usedbydataset?.value || 0);
@@ -103,10 +105,12 @@ const getStorage = async (module) => {
 
 const getDrives = async (module) => {
 	try {
-		const responseSmartctl = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true, reject: false });
-		const responseNvme = await execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true, reject: false });
-		let drives = JSON.parse(responseSmartctl.stdout);
-		let nvme = JSON.parse(responseNvme.stdout);
+		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
+			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
+			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
+		])
+		let drives = JSON.parse(smartctl);
+		let nvme = JSON.parse(nvmeList);
 		module.setState('drives', drives.map((drive, index) => {
 			return {
 				name: drive.device.name,
