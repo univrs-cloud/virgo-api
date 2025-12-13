@@ -1,7 +1,7 @@
 (async () => {
 	console.log(`Post install running...`);
 	try {
-		await require('./000_setup')();
+		await require('./000_configure_zram')();
 		await require('./001_move_database_location')();
 		await require('./002_migrate_configuration')();
 		await require('./003_migrate_data')();
