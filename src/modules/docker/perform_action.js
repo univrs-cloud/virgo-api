@@ -3,7 +3,7 @@ const dockerode = require('dockerode');
 const DataService = require('../../database/data_service');
 
 const docker = new dockerode();
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'remove'];
+const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 
 const performAppAction = async (job, module) => {
 	const config = job.data.config;
@@ -27,11 +27,11 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'recreate') {
 		action = ['up', '-d', '--force-recreate'];
 	}
-	if (config.action === 'remove') {
+	if (config.action === 'uninstall') {
 		action = ['down'];
 	}
 	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
-	if (config.action === 'remove') {
+	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
 	}
