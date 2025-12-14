@@ -12,11 +12,19 @@ class MetricsModule extends BaseModule {
 		this.eventEmitter
 			.on('metrics:enabled', async () => {
 				await this.#load();
-				this.nsp.emit('metrics', this.getState('metrics'));
+				for (const socket of this.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
+						socket.emit('metrics', this.getState('metrics'));
+					}
+				};
 			})
 			.on('metrics:disabled', async () => {
 				await this.#load();
-				this.nsp.emit('metrics', this.getState('metrics'));
+				for (const socket of this.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
+						socket.emit('metrics', this.getState('metrics'));
+					}
+				};
 			});
 	}
 
@@ -26,7 +34,7 @@ class MetricsModule extends BaseModule {
 				return;
 			}
 	
-			this.nsp.emit('metrics', this.getState('metrics'));
+			socket.emit('metrics', this.getState('metrics'));
 		});
 	}
 

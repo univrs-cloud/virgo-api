@@ -26,7 +26,11 @@ class DockerModule extends BaseModule {
 				this.nsp.emit('app:containers', this.getState('containers'));
 			})
 			.on('app:resourceMetrics:fetched', async () => {
-				this.nsp.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+				for (const socket of this.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
+						socket.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+					}
+				}
 			})
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
@@ -65,16 +69,18 @@ class DockerModule extends BaseModule {
 		pollingPlugin?.startPolling(this);
 
 		if (this.getState('configured')) {
-			this.nsp.emit('app:configured', this.getState('configured'));
+			socket.emit('app:configured', this.getState('configured'));
 		}
 		if (this.getState('containers')) {
-			this.nsp.emit('app:containers', this.getState('containers'));
-		}
-		if (this.getState('appsResourceMetrics')) {
-			this.nsp.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+			socket.emit('app:containers', this.getState('containers'));
 		}
 		if (this.getState('templates')) {
-			this.nsp.emit('app:templates', this.getState('templates'));
+			socket.emit('app:templates', this.getState('templates'));
+		}
+		if (socket.isAuthenticated && socket.isAdmin) {
+			if (this.getState('appsResourceMetrics')) {
+				socket.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
+			}
 		}
 	}
 

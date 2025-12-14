@@ -30,7 +30,7 @@ class ShareModule extends BaseModule {
 
 	onConnection(socket) {
 		if (this.getState('shares')) {
-			this.nsp.emit('shares', this.getState('shares'));
+			socket.emit('shares', this.getState('shares'));
 		}
 	}
 

@@ -88,11 +88,11 @@ const completeUpdate = (socket, module) => {
 
 const onConnection = (socket, module) => {
 	if (module.getState('updates')) {
-		module.nsp.to(`user:${socket.username}`).emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? module.getState('updates') : []));
+		socket.emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? module.getState('updates') : []));
 	}
 	if (socket.isAuthenticated && socket.isAdmin) {
 		if (module.getState('checkUpdates')) {
-			module.nsp.to(`user:${socket.username}`).emit('host:updates:check', module.getState('checkUpdates'));
+			socket.emit('host:updates:check', module.getState('checkUpdates'));
 		}
 	}
 

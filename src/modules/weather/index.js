@@ -39,7 +39,7 @@ class WeatherModule extends BaseModule {
 
 	onConnection(socket) {
 		if (this.getState('weather')) {
-			this.nsp.emit('weather', this.getState('weather'));
+			socket.emit('weather', this.getState('weather'));
 		}
 	}
 

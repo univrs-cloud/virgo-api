@@ -1,10 +1,6 @@
 const { execa } = require('execa');
 
 const reboot = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	if (module.getState('reboot') !== undefined) {
 		return;
 	}
@@ -20,10 +16,6 @@ const reboot = async (socket, module) => {
 };
 
 const shutdown = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	if (module.getState('shutdown') !== undefined) {
 		return;
 	}
@@ -39,10 +31,18 @@ const shutdown = async (socket, module) => {
 };
 
 const onConnection = (socket, module) => {
-	socket.on('host:reboot', () => { 
+	socket.on('host:reboot', () => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
 		reboot(socket, module); 
 	});
-	socket.on('host:shutdown', () => { 
+	socket.on('host:shutdown', () => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
 		shutdown(socket, module); 
 	});
 };

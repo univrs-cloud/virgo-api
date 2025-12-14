@@ -5,10 +5,6 @@ const dockerode = require('dockerode');
 const docker = new dockerode();
 
 const terminalConnect = async (socket, containerId) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	try {
 		const container = docker.getContainer(containerId);
 		if (!container) {
@@ -85,6 +81,10 @@ const findContainerShell = async (id) => {
 
 const onConnection = (socket, module) => {
 	socket.on('terminal:connect', (containerId) => { 
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
 		terminalConnect(socket, containerId); 
 	});
 };

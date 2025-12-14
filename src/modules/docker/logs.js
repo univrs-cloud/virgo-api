@@ -4,10 +4,6 @@ const dockerode = require('dockerode');
 const docker = new dockerode();
 
 const logsConnect = async (socket, containerId) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	try {
 		const container = docker.getContainer(containerId);
 		if (!container) {
@@ -44,6 +40,10 @@ const logsConnect = async (socket, containerId) => {
 
 const onConnection = (socket, module) => {
 	socket.on('logs:connect', (containerId) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+		
 		logsConnect(socket, containerId); 
 	});
 };

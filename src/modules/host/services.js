@@ -33,6 +33,16 @@ const loadServices = async (module) => {
 
 const register = (module) => {
 	loadServices(module);
+
+	module.eventEmitter
+			.on('host:system:services:updated', async () => {
+				await loadServices(module);
+				if (socket.isAuthenticated && socket.isAdmin) {
+					if (module.getState('services')) {
+						socket.emit('host:system:services', module.getState('services'));
+					}
+				}			
+			});
 };
 
 const onConnection = (socket, module) => {

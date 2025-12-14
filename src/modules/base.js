@@ -104,8 +104,6 @@ class BaseModule {
 
 	#setupConnectionHandlers() {
 		this.#nsp.on('connection', (socket) => {
-			socket.join(`user:${socket.username}`);
-
 			if (typeof this.onConnection === 'function') {
 				this.onConnection(socket);
 			}
