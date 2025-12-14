@@ -7,7 +7,7 @@ const configureZram = async () => {
 		console.log('Checking if zram-tools is installed...');
 		try {
 			await execa('dpkg', ['-s', 'zram-tools']);
-			console.log(`zram configured. Skipping configuration.`);
+			console.log(`zram-tools is configured. Skipping configuration.`);
 			return;
 		} catch (error) {
 			console.log('zram-tools is not installed, proceeding with configuration...');

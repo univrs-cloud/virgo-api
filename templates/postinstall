@@ -16,7 +16,7 @@ if ! grep -Fxq "$line_to_add" "$file_path"; then
 	echo "$line_to_add" >> "$file_path"
 fi
 
-systemctl disable nvmf-autoconnect nvmefc-boot-connections # not needed, installed by nvme-cli
+systemctl disable nvmf-autoconnect.service nvmefc-boot-connections.service # not needed, installed by nvme-cli
 
 systemctl enable virgo-api.service
 if ! ischroot; then
