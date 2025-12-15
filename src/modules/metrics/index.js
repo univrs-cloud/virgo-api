@@ -19,12 +19,11 @@ class MetricsModule extends BaseModule {
 		
 		(async () => {
 			await this.#loadNetworkInfo();
-			await this.#load();
 		})();
 
 		this.eventEmitter
 			.on('metrics:enabled', async () => {
-				await this.#load();
+				await this.#loadMetrics();
 				for (const socket of this.nsp.sockets.values()) {
 					if (socket.isAuthenticated && socket.isAdmin) {
 						socket.emit('metrics', this.getState('metrics'));
@@ -32,7 +31,7 @@ class MetricsModule extends BaseModule {
 				}
 			})
 			.on('metrics:disabled', async () => {
-				await this.#load();
+				await this.#loadMetrics();
 				for (const socket of this.nsp.sockets.values()) {
 					if (socket.isAuthenticated && socket.isAdmin) {
 						socket.emit('metrics', this.getState('metrics'));
@@ -47,7 +46,7 @@ class MetricsModule extends BaseModule {
 				return;
 			}
 
-			await this.#load();
+			await this.#loadMetrics();
 			socket.emit('metrics', this.getState('metrics'));
 		});
 	}
@@ -215,7 +214,7 @@ class MetricsModule extends BaseModule {
 		return { values };
 	}
 
-	async #load() {
+	async #loadMetrics() {
 		const isEnabled = await this.isPcpRunning();
 		let grid = {};
 
