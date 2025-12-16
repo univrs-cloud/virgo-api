@@ -112,55 +112,13 @@ class MetricsModule extends BaseModule {
 		return grid;
 	}
 
-	async #findArchives() {
-		try {
-			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
-			const endTime = new Date();
-			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			const archiveDates = new Set();
-			// Add both start and end dates to ensure we don't miss archives when spanning midnight
-			const addDateStr = (d) => {
-				return d.getUTCFullYear() + 
-					String(d.getUTCMonth() + 1).padStart(2, '0') + 
-					String(d.getUTCDate()).padStart(2, '0');
-			};
-			archiveDates.add(addDateStr(startTime));
-			archiveDates.add(addDateStr(endTime));
-			
-			// Find all archive files (both .meta and .meta.xz)
-			const { stdout } = await execa('find', [
-				archivePath,
-				'-type', 'f',
-				'(',
-				'-name', '*.meta',
-				'-o',
-				'-name', '*.meta.xz',
-				')',
-				'-printf', '%p\n'
-			]);
-
-			const allArchives = stdout.split('\n')
-				.filter(Boolean)
-				.map(path => path.replace('.meta.xz', '').replace('.meta', ''));
-			
-			// Filter to only archives matching our date range
-			const relevantArchives = allArchives.filter(archive => {
-				const basename = archive.split('/').pop();
-				const datePrefix = basename.substring(0, 8);
-				return archiveDates.has(datePrefix);
-			});
-			
-			// Deduplicate (in case both .meta and .meta.xz exist)
-			const uniqueArchives = [...new Set(relevantArchives)].sort();
-			return uniqueArchives.length > 0 ? uniqueArchives : null;
-		} catch (error) {
-			console.error('Failed to find archives:', error.message);
-			return null;
-		}
-	}
-
 	async #pcpQuery(metric) {
-		const archives = await this.#findArchives();
+		// Cache archives list to avoid repeated filesystem lookups
+		if (!this._archivesCache) {
+			this._archivesCache = await this.#findArchives();
+		}
+		const archives = this._archivesCache;
+		
 		if (!archives || archives.length === 0) {
 			console.error('No PCP archives found. Ensure pmlogger is running.');
 			return { values: [] };
@@ -178,9 +136,9 @@ class MetricsModule extends BaseModule {
 				'-S', formatTime(startTime),
 				'-T', formatTime(endTime),
 				'-t', `${this.#INTERVAL_SECONDS}sec`,
-				'-f', '6', // 6 decimal places
-				'-w', '20', // Width for values
-				'-z', // Use archive timezone (UTC)
+				'-f', '6',
+				'-w', '20',
+				'-z',
 				metric
 			]);
 			return this.#parsePmvalOutput(stdout, startTime, endTime);
@@ -190,80 +148,72 @@ class MetricsModule extends BaseModule {
 		}
 	}
 
+	async #findArchives() {
+		try {
+			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
+			const endTime = new Date();
+			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
+			const addDateStr = (d) => {
+				return d.getUTCFullYear() + 
+					String(d.getUTCMonth() + 1).padStart(2, '0') + 
+					String(d.getUTCDate()).padStart(2, '0');
+			};
+			const archiveDates = new Set([addDateStr(startTime), addDateStr(endTime)]);
+			
+			const { stdout } = await execa('find', [
+				archivePath, '-type', 'f',
+				'(', '-name', '*.meta', '-o', '-name', '*.meta.xz', ')',
+				'-printf', '%p\n'
+			]);
+
+			const allArchives = stdout.split('\n')
+				.filter(Boolean)
+				.map(path => path.replace('.meta.xz', '').replace('.meta', ''));
+			
+			const relevantArchives = allArchives.filter(archive => {
+				const basename = archive.split('/').pop();
+				return archiveDates.has(basename.substring(0, 8));
+			});
+			
+			return [...new Set(relevantArchives)].sort();
+		} catch (error) {
+			console.error('Failed to find archives:', error.message);
+			return null;
+		}
+	}
+
 	#parsePmvalOutput(stdout, startTime, endTime) {
 		const values = [];
 		const lines = stdout.split('\n');
+		const endDate = new Date(endTime);
+		const daysDiff = Math.ceil((endDate.getTime() - startTime.getTime()) / (24 * 3600 * 1000));
+		
 		for (const line of lines) {
 			const trimmed = line.trim();
-			// Skip empty lines and header lines
-			if (!trimmed || 
-				trimmed.includes('metric:') || 
-				trimmed.includes('host:') || 
-				trimmed.includes('semantics:') ||
-				trimmed.includes('units:') ||
-				trimmed.includes('samples:')) {
-				continue;
-			}
-			// pmval output format: "HH:MM:SS.mmm   value"
+			if (!trimmed || /metric:|host:|semantics:|units:|samples:/.test(trimmed)) continue;
+			
 			const match = trimmed.match(/^(\d{2}):(\d{2}):(\d{2})\.?\d*\s+([\d.eE+-]+)/);
 			if (match) {
-				const [, hours, minutes, seconds, valueStr] = match;
+				const [, h, m, s, valueStr] = match;
 				const value = parseFloat(valueStr);
-				if (!isNaN(value)) {
-					const hour = parseInt(hours);
-					const minute = parseInt(minutes);
-					const second = parseInt(seconds);
-
-					// Since pmval outputs in chronological order and we're querying with
-					// specific start/end times, we can work backwards from endTime
-					// to find the correct date for each timestamp
+				if (isNaN(value)) continue;
+				
+				const hour = parseInt(h), minute = parseInt(m), second = parseInt(s);
+				
+				for (let daysBack = 0; daysBack <= daysDiff + 1; daysBack++) {
+					const candidate = new Date(Date.UTC(
+						endDate.getUTCFullYear(), endDate.getUTCMonth(),
+						endDate.getUTCDate() - daysBack, hour, minute, second
+					));
 					
-					// Start from the end time's date and work backwards
-					const endDate = new Date(endTime);
-					const startDate = new Date(startTime);
-					
-					// Calculate how many days are in our range
-					const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 3600 * 1000));
-					
-					let bestCandidate = null;
-					let minDistance = Infinity;
-					
-					// Try all possible dates within our range
-					for (let daysBack = 0; daysBack <= daysDiff + 1; daysBack++) {
-						const candidate = new Date(Date.UTC(
-							endDate.getUTCFullYear(),
-							endDate.getUTCMonth(),
-							endDate.getUTCDate() - daysBack,
-							hour,
-							minute,
-							second
-						));
-						
-						// Check if this candidate is within our time range
-						if (candidate.getTime() >= startTime.getTime() && 
-							candidate.getTime() <= endTime.getTime()) {
-							
-							// Pick the candidate closest to the end time (most recent)
-							const distance = endTime.getTime() - candidate.getTime();
-							if (distance < minDistance) {
-								minDistance = distance;
-								bestCandidate = candidate;
-							}
-						}
-					}
-					
-					if (bestCandidate) {
-						const timestamp = Math.floor(bestCandidate.getTime() / 1000);
-						values.push({ 
-							ts: timestamp, 
-							value 
-						});
+					if (candidate >= startTime && candidate <= endTime) {
+						values.push({ ts: Math.floor(candidate.getTime() / 1000), value });
+						break;
 					}
 				}
 			}
 		}
 		
-		// Sort values by timestamp to ensure chronological order
 		values.sort((a, b) => a.ts - b.ts);
 		return { values };
 	}
@@ -275,6 +225,9 @@ class MetricsModule extends BaseModule {
 		if (isEnabled) {
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
+			
+			// Clear archive cache for fresh lookup
+			this._archivesCache = null;
 
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
 				this.#pcpQuery('kernel.all.cpu.nice'),                                      // CPU nice time
