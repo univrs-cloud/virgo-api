@@ -74,59 +74,28 @@ class MetricsModule extends BaseModule {
 		return Math.ceil(x / scale) * scale;
 	}
 
-	#emptyGrid(startTime, endTime) {
-		const grid = {};
-		
-		// Iterate minute by minute through the time window
-		const current = new Date(startTime);
-		// Round down to the nearest minute
-		current.setUTCSeconds(0, 0);
-		
-		while (current <= endTime) {
-			const hour = current.getUTCHours();
-			const minute = current.getUTCMinutes();
-			
-			if (!grid[hour]) {
-				grid[hour] = {};
-			}
-			grid[hour][minute] = null;
-			
-			// Advance by 1 minute
-			current.setUTCMinutes(current.getUTCMinutes() + 1);
-		}
-		
-		return grid;
-	}
-
-	#buildMetricGrid(series, mapFn, startTime, endTime) {
-		const grid = this.#emptyGrid(startTime, endTime);
+	#buildMetricGrid(series, mapFn) {
+		const dataMap = new Map();
 		for (const p of series.values ?? []) {
-			const d = new Date(p.ts * 1000);
-			const hour = d.getUTCHours();
-			const minute = d.getUTCMinutes();
 			const mappedValue = mapFn(p);
-			if (mappedValue !== null && grid[hour] !== undefined) {
-				grid[hour][minute] = (grid[hour][minute] ?? 0) + mappedValue;
+			if (mappedValue !== null) {
+				// Round to minute, use milliseconds for moment.js compatibility
+				const d = new Date(p.ts * 1000);
+				d.setUTCSeconds(0, 0);
+				const tsMs = d.getTime();
+				dataMap.set(tsMs, (dataMap.get(tsMs) ?? 0) + mappedValue);
 			}
 		}
-		return grid;
+		// Return sorted array of [timestamp, value] pairs
+		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
-	async #pcpQuery(metric) {
-		// Cache archives list to avoid repeated filesystem lookups
-		if (!this._archivesCache) {
-			this._archivesCache = await this.#findArchives();
-		}
-		const archives = this._archivesCache;
-		
+	async #pcpQuery(metric, archives, startTime, endTime) {
 		if (!archives || archives.length === 0) {
-			console.error('No PCP archives found. Ensure pmlogger is running.');
 			return { values: [] };
 		}
 
 		try {
-			const endTime = new Date();
-			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
 			const formatTime = (date) => {
 				const pad = (n) => String(n).padStart(2, '0');
 				return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
@@ -153,11 +122,9 @@ class MetricsModule extends BaseModule {
 			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			const addDateStr = (d) => {
-				return d.getUTCFullYear() + 
-					String(d.getUTCMonth() + 1).padStart(2, '0') + 
-					String(d.getUTCDate()).padStart(2, '0');
-			};
+			const addDateStr = (d) => d.getUTCFullYear() + 
+				String(d.getUTCMonth() + 1).padStart(2, '0') + 
+				String(d.getUTCDate()).padStart(2, '0');
 			const archiveDates = new Set([addDateStr(startTime), addDateStr(endTime)]);
 			
 			const { stdout } = await execa('find', [
@@ -226,19 +193,24 @@ class MetricsModule extends BaseModule {
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
 			
-			// Clear archive cache for fresh lookup
-			this._archivesCache = null;
+			// Find archives once, reuse for all queries
+			const archives = await this.#findArchives();
+			if (!archives || archives.length === 0) {
+				console.error('No PCP archives found. Ensure pmlogger is running.');
+				this.setState('metrics', { isEnabled, grid: {} });
+				return;
+			}
 
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
-				this.#pcpQuery('kernel.all.cpu.nice'),                                      // CPU nice time
-				this.#pcpQuery('kernel.all.cpu.user'),                                      // CPU user time  
-				this.#pcpQuery('kernel.all.cpu.sys'),	                                    // CPU system time
-				this.#pcpQuery('kernel.all.load'),	                                        // Load average (instances: 1min, 5min, 15min)
-				this.#pcpQuery('mem.physmem'),		                                        // Total physical memory (KiB)
-				this.#pcpQuery('mem.util.available'),	                                    // Available memory (KiB)
-				this.#pcpQuery('swap.pagesout'),		                                    // Swap pages out
-				this.#pcpQuery('disk.all.total_bytes'),                                     // Disk throughput (despite name, unit is KiB!)
-				this.#pcpQuery(`network.interface.total.bytes[${this.#defaultInterface}]`), // Network throughput for default interface (B/s)
+				this.#pcpQuery('kernel.all.cpu.nice', archives, startTime, endTime),
+				this.#pcpQuery('kernel.all.cpu.user', archives, startTime, endTime),
+				this.#pcpQuery('kernel.all.cpu.sys', archives, startTime, endTime),
+				this.#pcpQuery('kernel.all.load', archives, startTime, endTime),
+				this.#pcpQuery('mem.physmem', archives, startTime, endTime),
+				this.#pcpQuery('mem.util.available', archives, startTime, endTime),
+				this.#pcpQuery('swap.pagesout', archives, startTime, endTime),
+				this.#pcpQuery('disk.all.total_bytes', archives, startTime, endTime),
+				this.#pcpQuery(`network.interface.total.bytes[${this.#defaultInterface}]`, archives, startTime, endTime),
 			]);
 
 			const cpuUtilRaw = {
@@ -252,7 +224,7 @@ class MetricsModule extends BaseModule {
 			const cpuUtil = this.#buildMetricGrid(cpuUtilRaw, p => {
 				const val = p.value / 10 / this.#CPU_CORES;
 				return this.#clamp01(val);
-			}, startTime, endTime);
+			});
 
 			// CPU saturation: load average (use 1min load - instance index 1)
 			const cpuSat = this.#buildMetricGrid(loadAvgRaw, p => {
@@ -261,7 +233,7 @@ class MetricsModule extends BaseModule {
 				if (load > this.scaleSatCPU)
 					this.scaleSatCPU = this.#scaleForValue(load);
 				return this.#clamp01(load / this.scaleSatCPU);
-			}, startTime, endTime);
+			});
 
 			// Memory: (total - available) / total, both in KiB
 			const memUtil = this.#buildMetricGrid(memAvailRaw, p => {
@@ -273,13 +245,13 @@ class MetricsModule extends BaseModule {
 					return this.#clamp01(1 - (avail / total));
 				}
 				return null;
-			}, startTime, endTime);
+			});
 
 			// Memory saturation: swap pages out, categorized
 			const memSat = this.#buildMetricGrid(swapOutRaw, p => {
 				const swapout = p.value;
 				return swapout > 1000 ? 1 : (swapout > 1 ? 0.3 : 0);
-			}, startTime, endTime);
+			});
 
 			// Disk: KiB/s (despite metric name saying "bytes"), unbounded with dynamic scaling
 			const diskUtil = this.#buildMetricGrid(diskTotalRaw, p => {
@@ -287,13 +259,13 @@ class MetricsModule extends BaseModule {
 				if (kbps > this.scaleUseDisks)
 					this.scaleUseDisks = this.#scaleForValue(kbps);
 				return this.#clamp01(kbps / this.scaleUseDisks);
-			}, startTime, endTime);
+			});
 
 			// Network: B/s, normalize to detected interface speed
 			const netUtil = this.#buildMetricGrid(netTotalRaw, p => {
 				const bps = p.value || 0;
 				return this.#clamp01(bps / this.#networkSpeedBytesPerSec);
-			}, startTime, endTime);
+			});
 
 			grid = { cpuUtil, cpuSat, memUtil, memSat, diskUtil, netUtil };
 		}
