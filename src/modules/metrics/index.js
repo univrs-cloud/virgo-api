@@ -12,6 +12,7 @@ class MetricsModule extends BaseModule {
 
 	constructor() {
 		super('metrics');
+
 		this.scaleSatCPU = 4;
 		this.scaleUseDisks = 10000; // KB/s
 		this.scaleUseNetwork = 100000; // B/s
@@ -44,6 +45,7 @@ class MetricsModule extends BaseModule {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
+
 			await this.#loadMetrics();
 			socket.emit('metrics', this.getState('metrics'));
 		});
@@ -56,12 +58,10 @@ class MetricsModule extends BaseModule {
 				return true;
 			}
 		} catch (error) {}
-
 		try {
 			await execa('pgrep', ['pmcd']);
 			return true;
 		} catch (error) {}
-
 		return false;
 	}
 
@@ -75,24 +75,24 @@ class MetricsModule extends BaseModule {
 	}
 
 	#emptyGrid() {
-		const g = {};
-		for (let h = 0; h < 24; h++) {
-			g[h] = {};
-			for (let m = 0; m < 60; m++) {
-				g[h][m] = null;
+		const grid = {};
+		for (let hour = 0; hour < 24; hour++) {
+			grid[hour] = {};
+			for (let minute = 0; minute < 60; minute++) {
+				grid[hour][minute] = null;
 			}
 		}
-		return g;
+		return grid;
 	}
 
 	#buildMetricGrid(series, mapFn) {
 		const grid = this.#emptyGrid();
 		for (const p of series.values ?? []) {
 			const d = new Date(p.ts * 1000);
-			const h = d.getUTCHours();
-			const m = d.getUTCMinutes();
+			const hour = d.getUTCHours();
+			const minute = d.getUTCMinutes();
 			const mappedValue = mapFn(p);
-			grid[h][m] = (grid[h][m] ?? 0) + mappedValue;
+			grid[hour][minute] = (grid[hour][minute] ?? 0) + mappedValue;
 		}
 		return grid;
 	}
@@ -100,12 +100,8 @@ class MetricsModule extends BaseModule {
 	async #findArchives() {
 		try {
 			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
-			
-			// Calculate the date range we need archives for
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			
-			// Generate expected archive date prefixes (YYYYMMDD format)
 			const archiveDates = new Set();
 			let currentDate = new Date(startTime);
 			while (currentDate <= endTime) {
@@ -158,17 +154,12 @@ class MetricsModule extends BaseModule {
 		try {
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-
-			// Format times as YYYY-MM-DD HH:MM:SS in UTC (PCP uses UTC)
 			const formatTime = (date) => {
 				const pad = (n) => String(n).padStart(2, '0');
 				return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
 			};
-
-			// Use all archives concatenated with comma
-			const archiveList = archives.join(',');
 			const { stdout } = await execa('pmval', [
-				'-a', archiveList,
+				'-a', archives.join(','),
 				'-S', formatTime(startTime),
 				'-T', formatTime(endTime),
 				'-t', `${this.#INTERVAL_SECONDS}sec`,
@@ -198,7 +189,6 @@ class MetricsModule extends BaseModule {
 				trimmed.includes('samples:')) {
 				continue;
 			}
-
 			// pmval output format: "HH:MM:SS.mmm   value"
 			const match = trimmed.match(/^(\d{2}):(\d{2}):(\d{2})\.?\d*\s+([\d.eE+-]+)/);
 			if (match) {
@@ -269,14 +259,14 @@ class MetricsModule extends BaseModule {
 
 		if (isEnabled) {
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
-				this.#pcpQuery('kernel.all.cpu.nice'),   // CPU nice time
-				this.#pcpQuery('kernel.all.cpu.user'),   // CPU user time  
-				this.#pcpQuery('kernel.all.cpu.sys'),	 // CPU system time
-				this.#pcpQuery('kernel.all.load'),	   // Load average (instances: 1min, 5min, 15min)
-				this.#pcpQuery('mem.physmem'),		   // Total physical memory (KiB)
-				this.#pcpQuery('mem.util.available'),	 // Available memory (KiB)
-				this.#pcpQuery('swap.pagesout'),		   // Swap pages out
-				this.#pcpQuery('disk.all.total_bytes'), // Disk throughput (despite name, unit is KiB!)
+				this.#pcpQuery('kernel.all.cpu.nice'),                                      // CPU nice time
+				this.#pcpQuery('kernel.all.cpu.user'),                                      // CPU user time  
+				this.#pcpQuery('kernel.all.cpu.sys'),	                                    // CPU system time
+				this.#pcpQuery('kernel.all.load'),	                                        // Load average (instances: 1min, 5min, 15min)
+				this.#pcpQuery('mem.physmem'),		                                        // Total physical memory (KiB)
+				this.#pcpQuery('mem.util.available'),	                                    // Available memory (KiB)
+				this.#pcpQuery('swap.pagesout'),		                                    // Swap pages out
+				this.#pcpQuery('disk.all.total_bytes'),                                     // Disk throughput (despite name, unit is KiB!)
 				this.#pcpQuery(`network.interface.total.bytes[${this.#defaultInterface}]`), // Network throughput for default interface (B/s)
 			]);
 
@@ -349,7 +339,7 @@ class MetricsModule extends BaseModule {
 		try {
 			const defaultInterface = await si.networkInterfaces('default');
 			if (defaultInterface) {
-				this.#defaultInterface = defaultInterface.iface || 'eth0';
+				this.#defaultInterface = defaultInterface.iface;
 				if (defaultInterface.speed > 0) {
 					// systeminformation returns speed in Mbps (megabits per second)
 					// Convert Mbps to bytes/second: Mbps * 1,000,000 / 8
@@ -359,7 +349,6 @@ class MetricsModule extends BaseModule {
 		} catch (error) {
 			console.error('Failed to get network interface info:', error.message);
 		}
-
 		try {
 			const osInfo = await si.osInfo();
 			this.#hostname = osInfo.hostname;
