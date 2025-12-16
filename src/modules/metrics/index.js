@@ -74,25 +74,40 @@ class MetricsModule extends BaseModule {
 		return Math.ceil(x / scale) * scale;
 	}
 
-	#emptyGrid() {
+	#emptyGrid(startTime, endTime) {
 		const grid = {};
-		for (let hour = 0; hour < 24; hour++) {
-			grid[hour] = {};
-			for (let minute = 0; minute < 60; minute++) {
-				grid[hour][minute] = null;
+		
+		// Iterate minute by minute through the time window
+		const current = new Date(startTime);
+		// Round down to the nearest minute
+		current.setUTCSeconds(0, 0);
+		
+		while (current <= endTime) {
+			const hour = current.getUTCHours();
+			const minute = current.getUTCMinutes();
+			
+			if (!grid[hour]) {
+				grid[hour] = {};
 			}
+			grid[hour][minute] = null;
+			
+			// Advance by 1 minute
+			current.setUTCMinutes(current.getUTCMinutes() + 1);
 		}
+		
 		return grid;
 	}
 
-	#buildMetricGrid(series, mapFn) {
-		const grid = this.#emptyGrid();
+	#buildMetricGrid(series, mapFn, startTime, endTime) {
+		const grid = this.#emptyGrid(startTime, endTime);
 		for (const p of series.values ?? []) {
 			const d = new Date(p.ts * 1000);
 			const hour = d.getUTCHours();
 			const minute = d.getUTCMinutes();
 			const mappedValue = mapFn(p);
-			grid[hour][minute] = (grid[hour][minute] ?? 0) + mappedValue;
+			if (mappedValue !== null && grid[hour] !== undefined) {
+				grid[hour][minute] = (grid[hour][minute] ?? 0) + mappedValue;
+			}
 		}
 		return grid;
 	}
@@ -103,14 +118,14 @@ class MetricsModule extends BaseModule {
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
 			const archiveDates = new Set();
-			let currentDate = new Date(startTime);
-			while (currentDate <= endTime) {
-				const dateStr = currentDate.getUTCFullYear() + 
-					String(currentDate.getUTCMonth() + 1).padStart(2, '0') + 
-					String(currentDate.getUTCDate()).padStart(2, '0');
-				archiveDates.add(dateStr);
-				currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-			}
+			// Add both start and end dates to ensure we don't miss archives when spanning midnight
+			const addDateStr = (d) => {
+				return d.getUTCFullYear() + 
+					String(d.getUTCMonth() + 1).padStart(2, '0') + 
+					String(d.getUTCDate()).padStart(2, '0');
+			};
+			archiveDates.add(addDateStr(startTime));
+			archiveDates.add(addDateStr(endTime));
 			
 			// Find all archive files (both .meta and .meta.xz)
 			const { stdout } = await execa('find', [
@@ -258,6 +273,9 @@ class MetricsModule extends BaseModule {
 		let grid = {};
 
 		if (isEnabled) {
+			const endTime = new Date();
+			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
+
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
 				this.#pcpQuery('kernel.all.cpu.nice'),                                      // CPU nice time
 				this.#pcpQuery('kernel.all.cpu.user'),                                      // CPU user time  
@@ -281,7 +299,7 @@ class MetricsModule extends BaseModule {
 			const cpuUtil = this.#buildMetricGrid(cpuUtilRaw, p => {
 				const val = p.value / 10 / this.#CPU_CORES;
 				return this.#clamp01(val);
-			});
+			}, startTime, endTime);
 
 			// CPU saturation: load average (use 1min load - instance index 1)
 			const cpuSat = this.#buildMetricGrid(loadAvgRaw, p => {
@@ -290,7 +308,7 @@ class MetricsModule extends BaseModule {
 				if (load > this.scaleSatCPU)
 					this.scaleSatCPU = this.#scaleForValue(load);
 				return this.#clamp01(load / this.scaleSatCPU);
-			});
+			}, startTime, endTime);
 
 			// Memory: (total - available) / total, both in KiB
 			const memUtil = this.#buildMetricGrid(memAvailRaw, p => {
@@ -302,13 +320,13 @@ class MetricsModule extends BaseModule {
 					return this.#clamp01(1 - (avail / total));
 				}
 				return null;
-			});
+			}, startTime, endTime);
 
 			// Memory saturation: swap pages out, categorized
 			const memSat = this.#buildMetricGrid(swapOutRaw, p => {
 				const swapout = p.value;
 				return swapout > 1000 ? 1 : (swapout > 1 ? 0.3 : 0);
-			});
+			}, startTime, endTime);
 
 			// Disk: KiB/s (despite metric name saying "bytes"), unbounded with dynamic scaling
 			const diskUtil = this.#buildMetricGrid(diskTotalRaw, p => {
@@ -316,13 +334,13 @@ class MetricsModule extends BaseModule {
 				if (kbps > this.scaleUseDisks)
 					this.scaleUseDisks = this.#scaleForValue(kbps);
 				return this.#clamp01(kbps / this.scaleUseDisks);
-			});
+			}, startTime, endTime);
 
 			// Network: B/s, normalize to detected interface speed
 			const netUtil = this.#buildMetricGrid(netTotalRaw, p => {
 				const bps = p.value || 0;
 				return this.#clamp01(bps / this.#networkSpeedBytesPerSec);
-			});
+			}, startTime, endTime);
 
 			grid = { cpuUtil, cpuSat, memUtil, memSat, diskUtil, netUtil };
 		}
