@@ -12,7 +12,6 @@ class MetricsModule extends BaseModule {
 
 	constructor() {
 		super('metrics');
-		
 		this.scaleSatCPU = 4;
 		this.scaleUseDisks = 10000; // KB/s
 		this.scaleUseNetwork = 100000; // B/s
@@ -45,7 +44,6 @@ class MetricsModule extends BaseModule {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				return;
 			}
-
 			await this.#loadMetrics();
 			socket.emit('metrics', this.getState('metrics'));
 		});
@@ -58,11 +56,12 @@ class MetricsModule extends BaseModule {
 				return true;
 			}
 		} catch (error) {}
-		
+
 		try {
 			await execa('pgrep', ['pmcd']);
 			return true;
 		} catch (error) {}
+
 		return false;
 	}
 
@@ -101,19 +100,48 @@ class MetricsModule extends BaseModule {
 	async #findArchives() {
 		try {
 			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
+			
+			// Calculate the date range we need archives for
+			const endTime = new Date();
+			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
+			
+			// Generate expected archive date prefixes (YYYYMMDD format)
+			const archiveDates = new Set();
+			let currentDate = new Date(startTime);
+			while (currentDate <= endTime) {
+				const dateStr = currentDate.getUTCFullYear() + 
+					String(currentDate.getUTCMonth() + 1).padStart(2, '0') + 
+					String(currentDate.getUTCDate()).padStart(2, '0');
+				archiveDates.add(dateStr);
+				currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+			}
+			
+			// Find all archive files (both .meta and .meta.xz)
 			const { stdout } = await execa('find', [
 				archivePath,
-				'-name', '*.meta',
 				'-type', 'f',
-				'-mtime', '-1', // Modified within last day
+				'(',
+				'-name', '*.meta',
+				'-o',
+				'-name', '*.meta.xz',
+				')',
 				'-printf', '%p\n'
 			]);
-			const archives = stdout.split('\n')
+
+			const allArchives = stdout.split('\n')
 				.filter(Boolean)
-				.map(path => path.replace('.meta', ''))
-				.sort()
-				.reverse();
-			return archives.length > 0 ? archives[0] : null;
+				.map(path => path.replace('.meta.xz', '').replace('.meta', ''));
+			
+			// Filter to only archives matching our date range
+			const relevantArchives = allArchives.filter(archive => {
+				const basename = archive.split('/').pop();
+				const datePrefix = basename.substring(0, 8);
+				return archiveDates.has(datePrefix);
+			});
+			
+			// Deduplicate (in case both .meta and .meta.xz exist)
+			const uniqueArchives = [...new Set(relevantArchives)].sort();
+			return uniqueArchives.length > 0 ? uniqueArchives : null;
 		} catch (error) {
 			console.error('Failed to find archives:', error.message);
 			return null;
@@ -121,9 +149,8 @@ class MetricsModule extends BaseModule {
 	}
 
 	async #pcpQuery(metric) {
-		const archive = await this.#findArchives();
-		
-		if (!archive) {
+		const archives = await this.#findArchives();
+		if (!archives || archives.length === 0) {
 			console.error('No PCP archives found. Ensure pmlogger is running.');
 			return { values: [] };
 		}
@@ -131,15 +158,17 @@ class MetricsModule extends BaseModule {
 		try {
 			const endTime = new Date();
 			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			
+
 			// Format times as YYYY-MM-DD HH:MM:SS in UTC (PCP uses UTC)
 			const formatTime = (date) => {
 				const pad = (n) => String(n).padStart(2, '0');
 				return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
 			};
 
+			// Use all archives concatenated with comma
+			const archiveList = archives.join(',');
 			const { stdout } = await execa('pmval', [
-				'-a', archive,
+				'-a', archiveList,
 				'-S', formatTime(startTime),
 				'-T', formatTime(endTime),
 				'-t', `${this.#INTERVAL_SECONDS}sec`,
@@ -148,21 +177,18 @@ class MetricsModule extends BaseModule {
 				'-z', // Use archive timezone (UTC)
 				metric
 			]);
-
-			return this.#parsePmvalOutput(stdout);
+			return this.#parsePmvalOutput(stdout, startTime, endTime);
 		} catch (error) {
 			console.error('Failed to query PCP metric', metric, ':', error.message);
 			return { values: [] };
 		}
 	}
 
-	#parsePmvalOutput(stdout) {
+	#parsePmvalOutput(stdout, startTime, endTime) {
 		const values = [];
 		const lines = stdout.split('\n');
-		
 		for (const line of lines) {
 			const trimmed = line.trim();
-			
 			// Skip empty lines and header lines
 			if (!trimmed || 
 				trimmed.includes('metric:') || 
@@ -173,44 +199,67 @@ class MetricsModule extends BaseModule {
 				continue;
 			}
 
-			// pmval output format: "HH:MM:SS.mmm	value"
+			// pmval output format: "HH:MM:SS.mmm   value"
 			const match = trimmed.match(/^(\d{2}):(\d{2}):(\d{2})\.?\d*\s+([\d.eE+-]+)/);
 			if (match) {
 				const [, hours, minutes, seconds, valueStr] = match;
 				const value = parseFloat(valueStr);
-				
 				if (!isNaN(value)) {
-					// PCP with -z flag outputs in UTC time
-					// We need to convert this to a proper Unix timestamp
-					const now = new Date();
+					const hour = parseInt(hours);
+					const minute = parseInt(minutes);
+					const second = parseInt(seconds);
+
+					// Since pmval outputs in chronological order and we're querying with
+					// specific start/end times, we can work backwards from endTime
+					// to find the correct date for each timestamp
 					
-					// Create a UTC date for today with the time from pmval
-					const utcDate = new Date(Date.UTC(
-						now.getUTCFullYear(),
-						now.getUTCMonth(),
-						now.getUTCDate(),
-						parseInt(hours),
-						parseInt(minutes),
-						parseInt(seconds)
-					));
+					// Start from the end time's date and work backwards
+					const endDate = new Date(endTime);
+					const startDate = new Date(startTime);
 					
-					// If this UTC time is in the future, it must be from yesterday
-					const nowUtc = Date.now();
-					if (utcDate.getTime() > nowUtc) {
-						utcDate.setUTCDate(utcDate.getUTCDate() - 1);
+					// Calculate how many days are in our range
+					const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 3600 * 1000));
+					
+					let bestCandidate = null;
+					let minDistance = Infinity;
+					
+					// Try all possible dates within our range
+					for (let daysBack = 0; daysBack <= daysDiff + 1; daysBack++) {
+						const candidate = new Date(Date.UTC(
+							endDate.getUTCFullYear(),
+							endDate.getUTCMonth(),
+							endDate.getUTCDate() - daysBack,
+							hour,
+							minute,
+							second
+						));
+						
+						// Check if this candidate is within our time range
+						if (candidate.getTime() >= startTime.getTime() && 
+							candidate.getTime() <= endTime.getTime()) {
+							
+							// Pick the candidate closest to the end time (most recent)
+							const distance = endTime.getTime() - candidate.getTime();
+							if (distance < minDistance) {
+								minDistance = distance;
+								bestCandidate = candidate;
+							}
+						}
 					}
 					
-					// Store as Unix timestamp (seconds)
-					// When we later do new Date(ts * 1000), JavaScript will automatically
-					// convert to local timezone when we call getHours()/getMinutes()
-					values.push({ 
-						ts: Math.floor(utcDate.getTime() / 1000), 
-						value 
-					});
+					if (bestCandidate) {
+						const timestamp = Math.floor(bestCandidate.getTime() / 1000);
+						values.push({ 
+							ts: timestamp, 
+							value 
+						});
+					}
 				}
 			}
 		}
-
+		
+		// Sort values by timestamp to ensure chronological order
+		values.sort((a, b) => a.ts - b.ts);
 		return { values };
 	}
 
@@ -220,14 +269,14 @@ class MetricsModule extends BaseModule {
 
 		if (isEnabled) {
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
-				this.#pcpQuery('kernel.all.cpu.nice'),	 // CPU nice time
-				this.#pcpQuery('kernel.all.cpu.user'),	 // CPU user time  
-				this.#pcpQuery('kernel.all.cpu.sys'),	  // CPU system time
-				this.#pcpQuery('kernel.all.load'),		 // Load average (instances: 1min, 5min, 15min)
-				this.#pcpQuery('mem.physmem'),			 // Total physical memory (KiB)
-				this.#pcpQuery('mem.util.available'),	  // Available memory (KiB)
+				this.#pcpQuery('kernel.all.cpu.nice'),   // CPU nice time
+				this.#pcpQuery('kernel.all.cpu.user'),   // CPU user time  
+				this.#pcpQuery('kernel.all.cpu.sys'),	 // CPU system time
+				this.#pcpQuery('kernel.all.load'),	   // Load average (instances: 1min, 5min, 15min)
+				this.#pcpQuery('mem.physmem'),		   // Total physical memory (KiB)
+				this.#pcpQuery('mem.util.available'),	 // Available memory (KiB)
 				this.#pcpQuery('swap.pagesout'),		   // Swap pages out
-				this.#pcpQuery('disk.all.total_bytes'),	// Disk throughput (despite name, unit is KiB!)
+				this.#pcpQuery('disk.all.total_bytes'), // Disk throughput (despite name, unit is KiB!)
 				this.#pcpQuery(`network.interface.total.bytes[${this.#defaultInterface}]`), // Network throughput for default interface (B/s)
 			]);
 
@@ -237,13 +286,13 @@ class MetricsModule extends BaseModule {
 					value: (v.value || 0) + (cpuUserRaw.values[i]?.value || 0) + (cpuSysRaw.values[i]?.value || 0),
 				}))
 			};
-			
+
 			// CPU: msec/s → percentage, divide by 10 to get percentage, then by numCpu
 			const cpuUtil = this.#buildMetricGrid(cpuUtilRaw, p => {
 				const val = p.value / 10 / this.#CPU_CORES;
 				return this.#clamp01(val);
 			});
-			
+
 			// CPU saturation: load average (use 1min load - instance index 1)
 			const cpuSat = this.#buildMetricGrid(loadAvgRaw, p => {
 				// loadAvg has 3 instances: [15min, 1min, 5min], pick 1min (index 1)
@@ -252,7 +301,7 @@ class MetricsModule extends BaseModule {
 					this.scaleSatCPU = this.#scaleForValue(load);
 				return this.#clamp01(load / this.scaleSatCPU);
 			});
-			
+
 			// Memory: (total - available) / total, both in KiB
 			const memUtil = this.#buildMetricGrid(memAvailRaw, p => {
 				// We need both total and available; assume memTotalRaw has same timestamps
@@ -264,13 +313,13 @@ class MetricsModule extends BaseModule {
 				}
 				return null;
 			});
-			
+
 			// Memory saturation: swap pages out, categorized
 			const memSat = this.#buildMetricGrid(swapOutRaw, p => {
 				const swapout = p.value;
 				return swapout > 1000 ? 1 : (swapout > 1 ? 0.3 : 0);
 			});
-			
+
 			// Disk: KiB/s (despite metric name saying "bytes"), unbounded with dynamic scaling
 			const diskUtil = this.#buildMetricGrid(diskTotalRaw, p => {
 				const kbps = p.value;
@@ -278,7 +327,7 @@ class MetricsModule extends BaseModule {
 					this.scaleUseDisks = this.#scaleForValue(kbps);
 				return this.#clamp01(kbps / this.scaleUseDisks);
 			});
-			
+
 			// Network: B/s, normalize to detected interface speed
 			const netUtil = this.#buildMetricGrid(netTotalRaw, p => {
 				const bps = p.value || 0;
