@@ -40,8 +40,8 @@ echo "Configured zram: \${PERCENT}% of RAM with zstd compression"
 		console.log('configure-zram-size script created');
 
 		console.log('Installing zram-tools...');
-		await execa('apt-get', ['update']);
-		await execa('apt-get', ['install', '-y', 'zram-tools']);
+		await execa('apt', ['update']);
+		await execa('apt', ['install', '-y', 'zram-tools']);
 		console.log('zram-tools installed');
 
 		console.log('Running configure-zram-size...');
