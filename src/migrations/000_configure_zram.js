@@ -18,7 +18,7 @@ const configureZram = async () => {
 # Detect RAM size and configure zram percentage
 
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1000 / 1000))
+TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
 if [ "$TOTAL_RAM_GB" -le 4 ]; then
 	PERCENT=50
@@ -29,6 +29,7 @@ else
 fi
 
 # Update zram configuration
+sed -i "s/^#PERCENT=.*/PERCENT=$PERCENT/" /etc/default/zramswap
 sed -i "s/^PERCENT=.*/PERCENT=$PERCENT/" /etc/default/zramswap
 sed -i "s/^#ALGO=.*/ALGO=zstd/" /etc/default/zramswap
 sed -i "s/^ALGO=.*/ALGO=zstd/" /etc/default/zramswap
