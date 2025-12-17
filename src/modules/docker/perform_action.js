@@ -53,6 +53,12 @@ const performServiceAction = async (job, module) => {
 	return `${container.name} service ${actionVerbs.pastTense}.`;
 };
 
+const register = (module) => {
+	module.eventEmitter.on('app:uninstall:pcp', async ({ username }) => {
+		await module.addJob('app:performAction', { config: { action: 'uninstall', name: 'pcp' }, username });
+	});
+};
+
 const onConnection = (socket, module) => {
 	socket.on('app:performAction', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
@@ -72,6 +78,7 @@ const onConnection = (socket, module) => {
 
 module.exports = {
 	name: 'perform_action',
+	register,
 	onConnection,
 	jobs: {
 		'app:performAction': performAppAction,

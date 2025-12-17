@@ -94,6 +94,21 @@ const installApp = async (job, module) => {
 	return `${template.title} installed.`;
 };
 
+const register = (module) => {
+	module.eventEmitter.on('app:install:pcp', async ({ username }) => {
+		const template = module.getState('templates')?.find((template) => { return template.name === 'pcp'; });
+		if (!template) {
+			return;
+		}
+
+		const config = {
+			id: template.id,
+			env: []
+		};
+		await module.addJob('app:install', { config, username });
+	});
+};
+
 const onConnection = (socket, module) => {
 	socket.on('app:install', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
@@ -106,6 +121,7 @@ const onConnection = (socket, module) => {
 
 module.exports = {
 	name: 'install',
+	register,
 	onConnection,
 	jobs: {
 		'app:install': installApp
