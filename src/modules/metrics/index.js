@@ -9,9 +9,6 @@ class MetricsModule extends BaseModule {
 	#defaultInterface = 'eth0';
 	#pcpApiUrl = 'http://127.0.0.1:44322';
 
-	// Cache for series IDs to avoid repeated lookups
-	#seriesCache = new Map();
-
 	constructor() {
 		super('metrics');
 
@@ -124,10 +121,6 @@ class MetricsModule extends BaseModule {
 	}
 
 	async #getSeriesIds(metric) {
-		if (this.#seriesCache.has(metric)) {
-			return this.#seriesCache.get(metric);
-		}
-
 		try {
 			const response = await fetch(
 				`${this.#pcpApiUrl}/series/query?expr=${encodeURIComponent(metric)}`,
@@ -137,9 +130,7 @@ class MetricsModule extends BaseModule {
 				console.error(`Failed to query series for ${metric}: ${response.status}`);
 				return [];
 			}
-			const seriesIds = await response.json();
-			this.#seriesCache.set(metric, seriesIds);
-			return seriesIds;
+			return await response.json();
 		} catch (error) {
 			console.error(`Failed to get series IDs for ${metric}:`, error.message);
 			return [];
