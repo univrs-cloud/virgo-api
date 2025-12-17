@@ -103,34 +103,34 @@ class HostModule extends BaseModule {
 
 		this.checkUpdate();
 		if (this.getState('update') !== undefined) {
-			this.nsp.emit('host:update', this.getState('update'));
+			socket.emit('host:update', this.getState('update'));
 		}
 		if (this.getState('system')) {
-			this.nsp.emit('host:system', this.getState('system'));
+			socket.emit('host:system', this.getState('system'));
 		}
 		if (this.getState('networkStats')) {
-			this.nsp.emit('host:network:stats', this.getState('networkStats'));
+			socket.emit('host:network:stats', this.getState('networkStats'));
 		}
 		if (this.getState('cpuStats')) {
-			this.nsp.emit('host:cpu:stats', this.getState('cpuStats'));
+			socket.emit('host:cpu:stats', this.getState('cpuStats'));
 		}
 		if (this.getState('memory')) {
-			this.nsp.emit('host:memory', this.getState('memory'));
+			socket.emit('host:memory', this.getState('memory'));
 		}
 		if (this.getState('storage')) {
-			this.nsp.emit('host:storage', this.getState('storage'));
+			socket.emit('host:storage', this.getState('storage'));
 		}
 		if (this.getState('drives')) {
-			this.nsp.emit('host:drives', this.getState('drives'));
+			socket.emit('host:drives', this.getState('drives'));
 		}
 		if (this.getState('time')) {
-			this.nsp.emit('host:time', this.getState('time'));
+			socket.emit('host:time', this.getState('time'));
 		}
 		if (this.getState('reboot') === undefined) {
-			this.nsp.emit('host:reboot', false);
+			socket.emit('host:reboot', false);
 		}
 		if (this.getState('shutdown') === undefined) {
-			this.nsp.emit('host:shutdown', false);
+			socket.emit('host:shutdown', false);
 		}
 	}
 

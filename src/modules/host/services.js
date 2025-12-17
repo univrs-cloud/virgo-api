@@ -8,10 +8,32 @@ const loadServices = async (module) => {
 		]);
 		const serviceUnits = JSON.parse(serviceUnitsList);
 		const serviceUnitFiles = JSON.parse(serviceUnitFilesList);
+		const activeServiceUnits = serviceUnits.filter((serviceUnit) => { return serviceUnit.active === 'active'; }).map((serviceUnit) => { return serviceUnit.unit; });
+		const memoryMap = new Map();
+		if (activeServiceUnits.length > 0) {
+			const { stdout } = await execa('systemctl', ['show', ...activeServiceUnits, '--property=Id,MemoryCurrent']);
+			let currentId = null;
+			for (const line of stdout.split('\n')) {
+				if (line.startsWith('Id=')) {
+					currentId = line.slice(3);
+				} else if (line.startsWith('MemoryCurrent=') && currentId) {
+					const value = line.slice(14);
+					memoryMap.set(currentId, /^\d+$/.test(value) ? parseInt(value, 10) : null);
+					currentId = null;
+				}
+			}
+		}
+
 		const services = serviceUnits.map((service) => {
 			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === service.unit; });
 			service.unitFileState = serviceUnitFile?.state || 'unknown';
 			service.broken = service.load === 'not-found';
+			const memoryUsage = memoryMap.get(service.unit) || 0;
+			const totalMemory = module.getState('memory')?.total;
+			service.memory = {
+				usage: memoryUsage,
+				percent: totalMemory ? (memoryUsage / totalMemory) * 100 : 0
+			};
 			let state = `${service.active}:${service.sub}`;
 			if (service.active === 'active' && service.sub === 'running') {
 				state = 'running';
