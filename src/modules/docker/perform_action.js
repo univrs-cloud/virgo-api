@@ -1,8 +1,6 @@
 const { execa } = require('execa');
-const dockerode = require('dockerode');
+const docker = require('../../utils/docker_client');
 const DataService = require('../../database/data_service');
-
-const docker = new dockerode();
 const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 
 const performAppAction = async (job, module) => {

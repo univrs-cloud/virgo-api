@@ -1,7 +1,5 @@
 const stream = require('stream');
-const dockerode = require('dockerode');
-
-const docker = new dockerode();
+const docker = require('../../utils/docker_client');
 
 // Track active log sessions per socket to clean up listeners
 const activeSessions = new WeakMap();

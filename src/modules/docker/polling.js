@@ -1,10 +1,8 @@
 const { execa } = require('execa');
 const camelcaseKeys = require('camelcase-keys').default;
 const filesizeParser = require('filesize-parser');
-const dockerode = require('dockerode');
+const docker = require('../../utils/docker_client');
 const Poller = require('../../utils/poller');
-
-const docker = new dockerode();
 const polls = [];
 
 const getContainers = async (module) => {

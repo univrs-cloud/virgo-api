@@ -3,11 +3,9 @@ const path = require('path');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
 const dockerCompose = require('docker-compose');
-const dockerode = require('dockerode');
+const docker = require('../../utils/docker_client');
 const dockerPullProgressParser = require('../../utils/docker_pull_progress_parser');
 const DataService = require('../../database/data_service');
-
-const docker = new dockerode();
 
 const updateApp = async (job, module) => {
 	const config = job.data.config;

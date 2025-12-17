@@ -1,7 +1,5 @@
 const camelcaseKeys = require('camelcase-keys').default;
-const dockerode = require('dockerode');
-
-const docker = new dockerode();
+const docker = require('../../utils/docker_client');
 
 const getRegistry = (imageName) => {
 	if (imageName.startsWith('ghcr.io/')) return 'ghcr';

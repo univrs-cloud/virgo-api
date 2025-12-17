@@ -1,9 +1,7 @@
 const path = require('path');
-const dockerode = require('dockerode');
+const docker = require('../../utils/docker_client');
 const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
-
-const docker = new dockerode();
 
 class DockerModule extends BaseModule {
 	#composeDir = '/opt/docker';
