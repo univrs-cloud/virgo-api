@@ -91,6 +91,9 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
 	module.eventEmitter.emit('configured:updated');
+	if (template.name === 'pcp') {
+		module.eventEmitter.emit('metrics:enabled');
+	}
 	return `${template.title} installed.`;
 };
 

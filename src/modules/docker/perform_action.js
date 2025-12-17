@@ -32,6 +32,9 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
+		if (config.name === 'pcp') {
+			module.eventEmitter.emit('metrics:disabled');
+		}
 	}
 	return `${existingApp.title} app ${actionVerbs.pastTense}.`;
 };
