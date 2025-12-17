@@ -37,11 +37,11 @@ const register = (module) => {
 	module.eventEmitter
 			.on('host:system:services:updated', async () => {
 				await loadServices(module);
-				if (socket.isAuthenticated && socket.isAdmin) {
-					if (module.getState('services')) {
+				for (const socket of module.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
 						socket.emit('host:system:services', module.getState('services'));
 					}
-				}			
+				}
 			});
 };
 
