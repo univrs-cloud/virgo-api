@@ -1,4 +1,3 @@
-const { execa } = require('execa');
 const si = require('systeminformation');
 const BaseModule = require('../base');
 
@@ -6,16 +5,18 @@ class MetricsModule extends BaseModule {
 	#HOURS = 12;
 	#INTERVAL_SECONDS = 60;
 	#CPU_CORES = 4;
-	#hostname = 'localhost';
 	#networkSpeedBytesPerSec = (1000 * 1000000) / 8;
 	#defaultInterface = 'eth0';
+	#pcpApiUrl = 'http://127.0.0.1:44322';
+
+	// Cache for series IDs to avoid repeated lookups
+	#seriesCache = new Map();
 
 	constructor() {
 		super('metrics');
 
 		this.scaleSatCPU = 4;
 		this.scaleUseDisks = 10000; // KB/s
-		this.scaleUseNetwork = 100000; // B/s
 		
 		(async () => {
 			await this.#loadNetworkInfo();
@@ -53,16 +54,21 @@ class MetricsModule extends BaseModule {
 
 	async isPcpRunning() {
 		try {
-			const { stdout: status } = await execa('systemctl', ['is-active', 'pmcd']);
-			if (status.trim() === 'active') {
-				return true;
+			const response = await fetch(`${this.#pcpApiUrl}/series/ping`, {
+				signal: AbortSignal.timeout(5000)
+			});
+			return response.ok;
+		} catch (error) {
+			// Try metrics endpoint as fallback (ping might not exist in all versions)
+			try {
+				const response = await fetch(`${this.#pcpApiUrl}/series/metrics?limit=1`, {
+					signal: AbortSignal.timeout(5000)
+				});
+				return response.ok;
+			} catch {
+				return false;
 			}
-		} catch (error) {}
-		try {
-			await execa('pgrep', ['pmcd']);
-			return true;
-		} catch (error) {}
-		return false;
+		}
 	}
 
 	#clamp01(value) { 
@@ -74,13 +80,40 @@ class MetricsModule extends BaseModule {
 		return Math.ceil(x / scale) * scale;
 	}
 
-	#buildMetricGrid(series, mapFn) {
+	/**
+	 * Convert counter values to rates (value per second)
+	 * Counter metrics accumulate over time, so we need to compute the delta
+	 */
+	#counterToRate(values) {
+		if (values.length < 2) return [];
+		
+		const rates = [];
+		for (let i = 1; i < values.length; i++) {
+			const prev = values[i - 1];
+			const curr = values[i];
+			const timeDeltaSec = (curr.timestamp - prev.timestamp) / 1000;
+			
+			if (timeDeltaSec > 0) {
+				const valueDelta = curr.value - prev.value;
+				// Handle counter wrap-around (unlikely but possible)
+				const rate = valueDelta >= 0 ? valueDelta / timeDeltaSec : 0;
+				rates.push({
+					timestamp: curr.timestamp,
+					value: rate,
+					instance: curr.instance
+				});
+			}
+		}
+		return rates;
+	}
+
+	#buildMetricGrid(values, mapFn) {
 		const dataMap = new Map();
-		for (const p of series.values ?? []) {
+		for (const p of values) {
 			const mappedValue = mapFn(p);
-			if (mappedValue !== null) {
-				// Round to minute, use milliseconds for moment.js compatibility
-				const d = new Date(p.ts * 1000);
+			if (mappedValue !== null && !isNaN(mappedValue)) {
+				// Timestamp from API is in milliseconds, round to minute
+				const d = new Date(p.timestamp);
 				d.setUTCSeconds(0, 0);
 				const tsMs = d.getTime();
 				dataMap.set(tsMs, (dataMap.get(tsMs) ?? 0) + mappedValue);
@@ -90,99 +123,113 @@ class MetricsModule extends BaseModule {
 		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
-	async #pcpQuery(metric, archives, startTime, endTime) {
-		if (!archives || archives.length === 0) {
-			return { values: [] };
+	async #getSeriesIds(metric) {
+		if (this.#seriesCache.has(metric)) {
+			return this.#seriesCache.get(metric);
 		}
 
 		try {
-			const formatTime = (date) => {
-				const pad = (n) => String(n).padStart(2, '0');
-				return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
-			};
-			const { stdout } = await execa('pmval', [
-				'-a', archives.join(','),
-				'-S', formatTime(startTime),
-				'-T', formatTime(endTime),
-				'-t', `${this.#INTERVAL_SECONDS}sec`,
-				'-f', '6',
-				'-w', '20',
-				'-z',
-				metric
-			]);
-			return this.#parsePmvalOutput(stdout, startTime, endTime);
+			const response = await fetch(
+				`${this.#pcpApiUrl}/series/query?expr=${encodeURIComponent(metric)}`,
+				{ signal: AbortSignal.timeout(10000) }
+			);
+			if (!response.ok) {
+				console.error(`Failed to query series for ${metric}: ${response.status}`);
+				return [];
+			}
+			const seriesIds = await response.json();
+			this.#seriesCache.set(metric, seriesIds);
+			return seriesIds;
+		} catch (error) {
+			console.error(`Failed to get series IDs for ${metric}:`, error.message);
+			return [];
+		}
+	}
+
+	async #getSeriesInstances(seriesId) {
+		try {
+			const response = await fetch(
+				`${this.#pcpApiUrl}/series/instances?series=${seriesId}`,
+				{ signal: AbortSignal.timeout(10000) }
+			);
+			if (!response.ok) return [];
+			return await response.json();
+		} catch (error) {
+			console.error(`Failed to get instances for series ${seriesId}:`, error.message);
+			return [];
+		}
+	}
+
+	async #pcpQuery(metric, instanceFilter = null) {
+		try {
+			const seriesIds = await this.#getSeriesIds(metric);
+			if (seriesIds.length === 0) {
+				return { values: [] };
+			}
+
+			// Use simple relative time format that PCP understands
+			const start = `-${this.#HOURS}hour`;
+			const finish = 'now';
+
+			// Query all series and pick the one with the most data
+			let bestValues = [];
+			
+			for (const seriesId of seriesIds) {
+				const url = `${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=${finish}&interval=${this.#INTERVAL_SECONDS}s`;
+
+				const response = await fetch(url, {
+					signal: AbortSignal.timeout(30000)
+				});
+				
+				if (!response.ok) {
+					continue;
+				}
+
+				let values = await response.json();
+				
+				// Skip empty series
+				if (!values || values.length === 0) {
+					continue;
+				}
+
+				// If instance filter specified, get instances and filter
+				if (instanceFilter !== null) {
+					const instances = await this.#getSeriesInstances(seriesId);
+					const targetInstance = instances.find(i => 
+						i.name === instanceFilter || i.id === instanceFilter
+					);
+					if (targetInstance) {
+						values = values.filter(v => v.instance === targetInstance.instance);
+					} else {
+						continue; // This series doesn't have the requested instance
+					}
+				}
+
+				if (values.length === 0) {
+					continue;
+				}
+
+				// Parse values (API returns scientific notation strings)
+				const parsedValues = values.map(v => ({
+					timestamp: v.timestamp,
+					value: parseFloat(v.value),
+					instance: v.instance
+				})).filter(v => !isNaN(v.value));
+
+				// Keep the series with the most data points
+				if (parsedValues.length > bestValues.length) {
+					bestValues = parsedValues;
+				}
+			}
+
+			// Sort by timestamp
+			bestValues.sort((a, b) => a.timestamp - b.timestamp);
+
+			return { values: bestValues };
 		} catch (error) {
 			console.error('Failed to query PCP metric', metric, ':', error.message);
 			return { values: [] };
 		}
-	}
-
-	async #findArchives() {
-		try {
-			const archivePath = `/var/log/pcp/pmlogger/${this.#hostname}`;
-			const endTime = new Date();
-			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			const addDateStr = (d) => d.getUTCFullYear() + 
-				String(d.getUTCMonth() + 1).padStart(2, '0') + 
-				String(d.getUTCDate()).padStart(2, '0');
-			const archiveDates = new Set([addDateStr(startTime), addDateStr(endTime)]);
-			
-			const { stdout } = await execa('find', [
-				archivePath, '-type', 'f',
-				'(', '-name', '*.meta', '-o', '-name', '*.meta.xz', ')',
-				'-printf', '%p\n'
-			]);
-
-			const allArchives = stdout.split('\n')
-				.filter(Boolean)
-				.map(path => path.replace('.meta.xz', '').replace('.meta', ''));
-			
-			const relevantArchives = allArchives.filter(archive => {
-				const basename = archive.split('/').pop();
-				return archiveDates.has(basename.substring(0, 8));
-			});
-			
-			return [...new Set(relevantArchives)].sort();
-		} catch (error) {
-			console.error('Failed to find archives:', error.message);
-			return null;
-		}
-	}
-
-	#parsePmvalOutput(stdout, startTime, endTime) {
-		const values = [];
-		const lines = stdout.split('\n');
-		const endDate = new Date(endTime);
-		const daysDiff = Math.ceil((endDate.getTime() - startTime.getTime()) / (24 * 3600 * 1000));
-		
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed || /metric:|host:|semantics:|units:|samples:/.test(trimmed)) continue;
-			
-			const match = trimmed.match(/^(\d{2}):(\d{2}):(\d{2})\.?\d*\s+([\d.eE+-]+)/);
-			if (match) {
-				const [, h, m, s, valueStr] = match;
-				const value = parseFloat(valueStr);
-				if (isNaN(value)) continue;
-				
-				const hour = parseInt(h), minute = parseInt(m), second = parseInt(s);
-				
-				for (let daysBack = 0; daysBack <= daysDiff + 1; daysBack++) {
-					const candidate = new Date(Date.UTC(
-						endDate.getUTCFullYear(), endDate.getUTCMonth(),
-						endDate.getUTCDate() - daysBack, hour, minute, second
-					));
-					
-					if (candidate >= startTime && candidate <= endTime) {
-						values.push({ ts: Math.floor(candidate.getTime() / 1000), value });
-						break;
-					}
-				}
-			}
-		}
-		
-		values.sort((a, b) => a.ts - b.ts);
-		return { values };
 	}
 
 	async #loadMetrics() {
@@ -190,56 +237,71 @@ class MetricsModule extends BaseModule {
 		let grid = {};
 
 		if (isEnabled) {
-			const endTime = new Date();
-			const startTime = new Date(endTime.getTime() - this.#HOURS * 3600 * 1000);
-			
-			// Find archives once, reuse for all queries
-			const archives = await this.#findArchives();
-			if (!archives || archives.length === 0) {
-				console.error('No PCP archives found. Ensure pmlogger is running.');
-				this.setState('metrics', { isEnabled, grid: {} });
-				return;
-			}
-
 			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
-				this.#pcpQuery('kernel.all.cpu.nice', archives, startTime, endTime),
-				this.#pcpQuery('kernel.all.cpu.user', archives, startTime, endTime),
-				this.#pcpQuery('kernel.all.cpu.sys', archives, startTime, endTime),
-				this.#pcpQuery('kernel.all.load', archives, startTime, endTime),
-				this.#pcpQuery('mem.physmem', archives, startTime, endTime),
-				this.#pcpQuery('mem.util.available', archives, startTime, endTime),
-				this.#pcpQuery('swap.pagesout', archives, startTime, endTime),
-				this.#pcpQuery('disk.all.total_bytes', archives, startTime, endTime),
-				this.#pcpQuery(`network.interface.total.bytes[${this.#defaultInterface}]`, archives, startTime, endTime),
+				this.#pcpQuery('kernel.all.cpu.nice'),
+				this.#pcpQuery('kernel.all.cpu.user'),
+				this.#pcpQuery('kernel.all.cpu.sys'),
+				this.#pcpQuery('kernel.all.load', '1 minute'), // Filter to 1-minute load
+				this.#pcpQuery('mem.physmem'),
+				this.#pcpQuery('mem.util.available'),
+				this.#pcpQuery('swap.pagesout'),
+				this.#pcpQuery('disk.all.total_bytes'),
+				this.#pcpQuery('network.interface.total.bytes', this.#defaultInterface),
 			]);
 
-			const cpuUtilRaw = {
-				values: cpuNiceRaw.values.map((v, i) => ({
-					ts: v.ts,
-					value: (v.value || 0) + (cpuUserRaw.values[i]?.value || 0) + (cpuSysRaw.values[i]?.value || 0),
-				}))
-			};
+			// Convert counter metrics to rates
+			const cpuNiceRates = this.#counterToRate(cpuNiceRaw.values);
+			const cpuUserRates = this.#counterToRate(cpuUserRaw.values);
+			const cpuSysRates = this.#counterToRate(cpuSysRaw.values);
+			const swapOutRates = this.#counterToRate(swapOutRaw.values);
+			const diskRates = this.#counterToRate(diskTotalRaw.values);
+			const netRates = this.#counterToRate(netTotalRaw.values);
 
-			// CPU: msec/s → percentage, divide by 10 to get percentage, then by numCpu
-			const cpuUtil = this.#buildMetricGrid(cpuUtilRaw, p => {
-				const val = p.value / 10 / this.#CPU_CORES;
+			// Combine CPU metrics by timestamp
+			const cpuByTs = new Map();
+			for (const v of cpuNiceRates) {
+				cpuByTs.set(v.timestamp, { nice: v.value, user: 0, sys: 0 });
+			}
+			for (const v of cpuUserRates) {
+				const entry = cpuByTs.get(v.timestamp) || { nice: 0, user: 0, sys: 0 };
+				entry.user = v.value;
+				cpuByTs.set(v.timestamp, entry);
+			}
+			for (const v of cpuSysRates) {
+				const entry = cpuByTs.get(v.timestamp) || { nice: 0, user: 0, sys: 0 };
+				entry.sys = v.value;
+				cpuByTs.set(v.timestamp, entry);
+			}
+
+			const cpuUtilValues = Array.from(cpuByTs.entries()).map(([timestamp, cpu]) => ({
+				timestamp,
+				value: (cpu.nice || 0) + (cpu.user || 0) + (cpu.sys || 0)
+			}));
+
+			// CPU: rate is in ms/s, max is 1000ms/s per core = 100% per core
+			// Total max = 1000 * numCores for all cores at 100%
+			const cpuUtil = this.#buildMetricGrid(cpuUtilValues, p => {
+				// p.value is in ms/s, divide by (1000 * cores) to get percentage
+				const val = p.value / (1000 * this.#CPU_CORES);
 				return this.#clamp01(val);
 			});
 
-			// CPU saturation: load average (use 1min load - instance index 1)
-			const cpuSat = this.#buildMetricGrid(loadAvgRaw, p => {
-				// loadAvg has 3 instances: [15min, 1min, 5min], pick 1min (index 1)
-				const load = Array.isArray(p.value) ? p.value[1] : p.value;
+			// CPU saturation: 1-minute load average (instant metric, not counter)
+			const cpuSat = this.#buildMetricGrid(loadAvgRaw.values, p => {
+				const load = p.value;
 				if (load > this.scaleSatCPU)
 					this.scaleSatCPU = this.#scaleForValue(load);
 				return this.#clamp01(load / this.scaleSatCPU);
 			});
 
-			// Memory: (total - available) / total, both in KiB
-			const memUtil = this.#buildMetricGrid(memAvailRaw, p => {
-				// We need both total and available; assume memTotalRaw has same timestamps
-				const idx = memAvailRaw.values.indexOf(p);
-				const total = memTotalRaw.values[idx]?.value;
+			// Memory: (total - available) / total, both in KiB (instant metrics)
+			const memTotalByTs = new Map();
+			for (const v of memTotalRaw.values) {
+				memTotalByTs.set(v.timestamp, v.value);
+			}
+
+			const memUtil = this.#buildMetricGrid(memAvailRaw.values, p => {
+				const total = memTotalByTs.get(p.timestamp);
 				const avail = p.value;
 				if (total && avail !== undefined) {
 					return this.#clamp01(1 - (avail / total));
@@ -247,24 +309,24 @@ class MetricsModule extends BaseModule {
 				return null;
 			});
 
-			// Memory saturation: swap pages out, categorized
-			const memSat = this.#buildMetricGrid(swapOutRaw, p => {
-				const swapout = p.value;
-				return swapout > 1000 ? 1 : (swapout > 1 ? 0.3 : 0);
+			// Memory saturation: swap pages out rate
+			const memSat = this.#buildMetricGrid(swapOutRates, p => {
+				const swapoutRate = p.value; // pages/s
+				return swapoutRate > 1000 ? 1 : (swapoutRate > 1 ? 0.3 : 0);
 			});
 
-			// Disk: KiB/s (despite metric name saying "bytes"), unbounded with dynamic scaling
-			const diskUtil = this.#buildMetricGrid(diskTotalRaw, p => {
-				const kbps = p.value;
-				if (kbps > this.scaleUseDisks)
-					this.scaleUseDisks = this.#scaleForValue(kbps);
-				return this.#clamp01(kbps / this.scaleUseDisks);
+			// Disk: bytes/s rate, unbounded with dynamic scaling
+			const diskUtil = this.#buildMetricGrid(diskRates, p => {
+				const bytesPerSec = p.value;
+				if (bytesPerSec > this.scaleUseDisks)
+					this.scaleUseDisks = this.#scaleForValue(bytesPerSec);
+				return this.#clamp01(bytesPerSec / this.scaleUseDisks);
 			});
 
-			// Network: B/s, normalize to detected interface speed
-			const netUtil = this.#buildMetricGrid(netTotalRaw, p => {
-				const bps = p.value || 0;
-				return this.#clamp01(bps / this.#networkSpeedBytesPerSec);
+			// Network: bytes/s rate, normalize to interface speed
+			const netUtil = this.#buildMetricGrid(netRates, p => {
+				const bytesPerSec = p.value || 0;
+				return this.#clamp01(bytesPerSec / this.#networkSpeedBytesPerSec);
 			});
 
 			grid = { cpuUtil, cpuSat, memUtil, memSat, diskUtil, netUtil };
@@ -293,10 +355,12 @@ class MetricsModule extends BaseModule {
 			console.error('Failed to get network interface info:', error.message);
 		}
 		try {
-			const osInfo = await si.osInfo();
-			this.#hostname = osInfo.hostname;
+			const cpu = await si.cpu();
+			if (cpu.cores > 0) {
+				this.#CPU_CORES = cpu.cores;
+			}
 		} catch (error) {
-			console.error('Failed to get hostname info:', error.message);
+			console.error('Failed to get CPU info:', error.message);
 		}
 	}
 }
