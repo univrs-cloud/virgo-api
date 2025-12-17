@@ -13,14 +13,22 @@ const loadServices = async (module) => {
 		if (activeServiceUnits.length > 0) {
 			const { stdout } = await execa('systemctl', ['show', ...activeServiceUnits, '--property=Id,MemoryCurrent']);
 			let currentId = null;
+			let currentMemory = undefined;
 			for (const line of stdout.split('\n')) {
 				if (line.startsWith('Id=')) {
 					currentId = line.slice(3);
-				} else if (line.startsWith('MemoryCurrent=') && currentId) {
+				} else if (line.startsWith('MemoryCurrent=')) {
 					const value = line.slice(14);
-					memoryMap.set(currentId, /^\d+$/.test(value) ? parseInt(value, 10) : null);
+					currentMemory = /^\d+$/.test(value) ? parseInt(value, 10) : null;
+				} else if (line === '' && currentId !== null && currentMemory !== undefined) {
+					memoryMap.set(currentId, currentMemory);
 					currentId = null;
+					currentMemory = undefined;
 				}
+			}
+			// Handle last service (no trailing blank line)
+			if (currentId !== null && currentMemory !== undefined) {
+				memoryMap.set(currentId, currentMemory);
 			}
 		}
 
