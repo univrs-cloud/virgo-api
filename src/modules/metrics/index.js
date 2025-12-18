@@ -157,9 +157,10 @@ class MetricsModule extends BaseModule {
 			if (seriesIds.length === 0) {
 				return { values: [] };
 			}
-
-			// Use simple relative time format that PCP understands
-			const start = `-${this.#HOURS}hour`;
+			
+			const extraMinutes = new Date().getMinutes();
+			const totalMinutes = this.#HOURS * 60 + extraMinutes + 1;
+			const start = `-${totalMinutes}minute`;
 			const finish = 'now';
 
 			// Query all series and pick the one with the most data
