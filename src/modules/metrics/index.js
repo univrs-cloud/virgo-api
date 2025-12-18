@@ -107,16 +107,35 @@ class MetricsModule extends BaseModule {
 	#buildMetricGrid(values, mapFn) {
 		const dataMap = new Map();
 		for (const p of values) {
-			const mappedValue = mapFn(p);
-			if (mappedValue !== null && !isNaN(mappedValue)) {
-				// Timestamp from API is in milliseconds, round to minute
-				const d = new Date(p.timestamp);
-				d.setUTCSeconds(0, 0);
-				const tsMs = d.getTime();
-				dataMap.set(tsMs, (dataMap.get(tsMs) ?? 0) + mappedValue);
+			const mapped = mapFn(p);
+			if (mapped === null) continue;
+			
+			// Timestamp from API is in milliseconds, round to minute
+			const d = new Date(p.timestamp);
+			d.setUTCSeconds(0, 0);
+			const tsMs = d.getTime();
+			
+			const existing = dataMap.get(tsMs);
+			if (existing) {
+				existing.normalized += mapped.normalized;
+				// For raw, handle objects (like CPU breakdown) vs simple values
+				if (typeof mapped.raw === 'object' && mapped.raw !== null) {
+					for (const key of Object.keys(mapped.raw)) {
+						existing.raw[key] = (existing.raw[key] ?? 0) + mapped.raw[key];
+					}
+				} else {
+					existing.raw += mapped.raw;
+				}
+			} else {
+				dataMap.set(tsMs, {
+					normalized: mapped.normalized,
+					raw: typeof mapped.raw === 'object' && mapped.raw !== null 
+						? { ...mapped.raw } 
+						: mapped.raw
+				});
 			}
 		}
-		// Return sorted array of [timestamp, value] pairs
+		// Return sorted array of [timestamp, { normalized, raw }] pairs
 		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
@@ -267,15 +286,24 @@ class MetricsModule extends BaseModule {
 
 			const cpuUtilValues = Array.from(cpuByTs.entries()).map(([timestamp, cpu]) => ({
 				timestamp,
-				value: (cpu.nice || 0) + (cpu.user || 0) + (cpu.sys || 0)
+				nice: cpu.nice || 0,
+				user: cpu.user || 0,
+				sys: cpu.sys || 0
 			}));
 
 			// CPU: rate is in ms/s, max is 1000ms/s per core = 100% per core
 			// Total max = 1000 * numCores for all cores at 100%
+			const maxCpu = 1000 * this.#CPU_CORES;
 			const cpuUtil = this.#buildMetricGrid(cpuUtilValues, p => {
-				// p.value is in ms/s, divide by (1000 * cores) to get percentage
-				const val = p.value / (1000 * this.#CPU_CORES);
-				return this.#clamp01(val);
+				const total = p.nice + p.user + p.sys;
+				return {
+					normalized: this.#clamp01(total / maxCpu),
+					raw: {
+						nice: this.#clamp01(p.nice / maxCpu),
+						user: this.#clamp01(p.user / maxCpu),
+						sys: this.#clamp01(p.sys / maxCpu)
+					}
+				};
 			});
 
 			// CPU saturation: 1-minute load average (instant metric, not counter)
@@ -283,7 +311,10 @@ class MetricsModule extends BaseModule {
 				const load = p.value;
 				if (load > this.scaleSatCPU)
 					this.scaleSatCPU = this.#scaleForValue(load);
-				return this.#clamp01(load / this.scaleSatCPU);
+				return {
+					normalized: this.#clamp01(load / this.scaleSatCPU),
+					raw: load
+				};
 			});
 
 			// Memory: (total - available) / total, both in KiB (instant metrics)
@@ -296,7 +327,11 @@ class MetricsModule extends BaseModule {
 				const total = memTotalByTs.get(p.timestamp);
 				const avail = p.value;
 				if (total && avail !== undefined) {
-					return this.#clamp01(1 - (avail / total));
+					const used = total - avail;
+					return {
+						normalized: this.#clamp01(used / total),
+						raw: { used: used * 1024, total: total * 1024 } // in bytes
+					};
 				}
 				return null;
 			});
@@ -304,7 +339,10 @@ class MetricsModule extends BaseModule {
 			// Memory saturation: swap pages out rate
 			const memSat = this.#buildMetricGrid(swapOutRates, p => {
 				const swapoutRate = p.value; // pages/s
-				return swapoutRate > 1000 ? 1 : (swapoutRate > 1 ? 0.3 : 0);
+				return {
+					normalized: swapoutRate > 1000 ? 1 : (swapoutRate > 1 ? 0.3 : 0),
+					raw: swapoutRate // pages/s
+				};
 			});
 
 			// Disk: bytes/s rate, unbounded with dynamic scaling
@@ -312,13 +350,19 @@ class MetricsModule extends BaseModule {
 				const bytesPerSec = p.value;
 				if (bytesPerSec > this.scaleUseDisks)
 					this.scaleUseDisks = this.#scaleForValue(bytesPerSec);
-				return this.#clamp01(bytesPerSec / this.scaleUseDisks);
+				return {
+					normalized: this.#clamp01(bytesPerSec / this.scaleUseDisks),
+					raw: bytesPerSec // bytes/s
+				};
 			});
 
 			// Network: bytes/s rate, normalize to interface speed
 			const netUtil = this.#buildMetricGrid(netRates, p => {
 				const bytesPerSec = p.value || 0;
-				return this.#clamp01(bytesPerSec / this.#networkSpeedBytesPerSec);
+				return {
+					normalized: this.#clamp01(bytesPerSec / this.#networkSpeedBytesPerSec),
+					raw: bytesPerSec // bytes/s
+				};
 			});
 
 			grid = { cpuUtil, cpuSat, memUtil, memSat, diskUtil, netUtil };
