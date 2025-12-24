@@ -1,11 +1,12 @@
 const { execa } = require('execa');
 const docker = require('../../utils/docker_client');
 const DataService = require('../../database/data_service');
-const allowedActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
+const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
+const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause'];
 
 const performAppAction = async (job, module) => {
 	const config = job.data.config;
-	if (!allowedActions.includes(config?.action)) {
+	if (!allowedAppActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
 
@@ -26,7 +27,7 @@ const performAppAction = async (job, module) => {
 		action = ['up', '-d', '--force-recreate'];
 	}
 	if (config.action === 'uninstall') {
-		action = ['down'];
+		action = ['down', '-v'];
 	}
 	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
 	if (config.action === 'uninstall') {
@@ -41,7 +42,7 @@ const performAppAction = async (job, module) => {
 
 const performServiceAction = async (job, module) => {
 	const config = job.data.config;
-	if (!allowedActions.includes(config?.action)) {
+	if (!allowedServiceActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}
 
