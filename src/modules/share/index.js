@@ -1,7 +1,6 @@
 const fs = require('fs');
 const { execa } = require('execa');
 const ini = require('ini');
-const checkDiskSpace = require('check-disk-space').default;
 const BaseModule = require('../base');
 
 class ShareModule extends BaseModule {
@@ -53,11 +52,23 @@ class ShareModule extends BaseModule {
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
 				try {
-					const diskSpace = await checkDiskSpace(value['path']);
-					share.size = diskSpace.size;
-					share.free = diskSpace.free;
-					share.alloc = share.size - share.free;
-					share.cap = (share.size > 0 ? share.alloc / share.size * 100 : 0);
+					const [{ stdout: dfResult }, { stdout: duResult }] = await Promise.all([
+						execa('df', ['-Pk', value['path']]),
+						execa('du', ['-shb', '--apparent-size', value['path']])
+					]);
+					
+					const dfLines = dfResult.split('\n');
+					const dfParts = dfLines[1].split(/\s+/);
+					const size = parseInt(dfParts[1], 10) * 1024;
+					const free = parseInt(dfParts[3], 10) * 1024;
+					
+					const duParts = duResult.split(/\s+/);
+					const used = parseInt(duParts[0], 10);
+					
+					share.size = size;
+					share.free = free;
+					share.alloc = used;
+					share.cap = (size > 0 ? used / size * 100 : 0);
 				} catch (error) {
 					console.error(`Error checking disk space for ${name}:`, error);
 				}
