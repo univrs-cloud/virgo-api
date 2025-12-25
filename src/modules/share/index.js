@@ -1,4 +1,3 @@
-const fs = require('fs');
 const { execa } = require('execa');
 const ini = require('ini');
 const BaseModule = require('../base');
@@ -52,18 +51,21 @@ class ShareModule extends BaseModule {
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
 				try {
-					const [{ stdout: dfResult }, { stdout: duResult }] = await Promise.all([
-						execa('df', ['-Pk', value['path']]),
-						execa('du', ['-shb', '--apparent-size', value['path']])
-					]);
+					const { stdout: dfOutput } = await execa('df', ['-Pk', value['path']]);
+					const parts = dfOutput.split('\n')[1].split(/\s+/);
+					const size = parseInt(parts[1], 10) * 1024;
+					const free = parseInt(parts[3], 10) * 1024;
+					const mountpoint = parts[5];
 					
-					const dfLines = dfResult.split('\n');
-					const dfParts = dfLines[1].split(/\s+/);
-					const size = parseInt(dfParts[1], 10) * 1024;
-					const free = parseInt(dfParts[3], 10) * 1024;
-					
-					const duParts = duResult.split(/\s+/);
-					const used = parseInt(duParts[0], 10);
+					let used;
+					if (value['path'] === mountpoint) {
+						// Path is a ZFS mountpoint, use df
+						used = parseInt(parts[2], 10) * 1024;
+					} else {
+						// Path is a subdirectory, use du for actual directory size
+						const { stdout: duOutput } = await execa('du', ['-sb', '--apparent-size', value['path']]);
+						used = parseInt(duOutput.split(/\s+/)[0], 10);
+					}
 					
 					share.size = size;
 					share.free = free;
