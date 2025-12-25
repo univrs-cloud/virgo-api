@@ -121,25 +121,16 @@ class DataService {
 	
 	static async deleteApplication(name) {
 		try {
-			// Get the application first to get its ID
 			const application = await Application.findOne({
 				where: { name: name }
 			});
-			
 			if (!application) {
 				return false;
 			}
-			
-			// Delete the application
+			await DataService.deleteConfigurationOrder(application.id, 'app');
 			const deleted = await Application.destroy({
 				where: { name: name }
 			});
-			
-			if (deleted > 0) {
-				// Also delete the configuration order entry
-				await DataService.deleteConfigurationOrder(application.id, 'app');
-			}
-			
 			return deleted > 0;
 		} catch (error) {
 			console.error(`Error deleting application '${name}' from database:`, error);
@@ -194,25 +185,16 @@ class DataService {
 	
 	static async deleteBookmark(name) {
 		try {
-			// Get the bookmark first to get its ID
 			const bookmark = await Bookmark.findOne({
 				where: { name: name }
 			});
-			
 			if (!bookmark) {
 				return false;
 			}
-			
-			// Delete the bookmark
+			await DataService.deleteConfigurationOrder(bookmark.id, 'bookmark');
 			const deleted = await Bookmark.destroy({
 				where: { name: name }
 			});
-			
-			if (deleted > 0) {
-				// Also delete the configuration order entry
-				await DataService.deleteConfigurationOrder(bookmark.id, 'bookmark');
-			}
-			
 			return deleted > 0;
 		} catch (error) {
 			console.error(`Error deleting bookmark '${name}' from database:`, error);
@@ -251,31 +233,29 @@ class DataService {
 
 	static async getConfigured() {
 		try {
-			const entries = await ConfigurationOrder.findAll({
-				include: [
-					{
-						model: Application,
-						required: false
-					},
-					{
-						model: Bookmark,
-						required: false
-					}
-				]
+			const applications = await Application.findAll({
+				include: [{
+					model: ConfigurationOrder,
+					required: false,
+					where: { type: 'app' }
+				}]
 			});
-			
-			return entries
-				.filter((entry) => {
-					return entry.Application || entry.Bookmark;
-				})
-				.map((entry) => {
-					const entryData = entry.get({ plain: true });
-					return {
-						...(entryData.type === 'app' ? entryData.Application : entryData.Bookmark),
-						type: entryData.type,
-						order: entryData.order
-					};
-				});
+			const bookmarks = await Bookmark.findAll({
+				include: [{
+					model: ConfigurationOrder,
+					required: false,
+					where: { type: 'bookmark' }
+				}]
+			});
+			const appEntries = applications.map((app) => {
+				const { ConfigurationOrder, ...data } = app.get({ plain: true });
+				return { ...data, type: 'app', order: ConfigurationOrder?.order ?? null };
+			});
+			const bookmarkEntries = bookmarks.map((bookmark) => {
+				const { ConfigurationOrder, ...data } = bookmark.get({ plain: true });
+				return { ...data, type: 'bookmark', order: ConfigurationOrder?.order ?? null };
+			});
+			return [...appEntries, ...bookmarkEntries];
 		} catch (error) {
 			console.error(`Error getting configuration order with items:`, error);
 			return [];
@@ -284,7 +264,6 @@ class DataService {
 
 	static async getNextOrderForCategory(category) {
 		try {
-			// Get all order entries for apps in this category using associations
 			const appOrderEntries = await ConfigurationOrder.findAll({
 				include: [{
 					model: Application,
@@ -293,8 +272,6 @@ class DataService {
 				}],
 				attributes: ['order']
 			});
-			
-			// Get all order entries for bookmarks in this category using associations
 			const bookmarkOrderEntries = await ConfigurationOrder.findAll({
 				include: [{
 					model: Bookmark,
@@ -303,11 +280,8 @@ class DataService {
 				}],
 				attributes: ['order']
 			});
-			
-			// Find the highest order in this category
 			const allOrders = [...appOrderEntries, ...bookmarkOrderEntries].map(entry => entry.order);
 			const maxOrder = allOrders.length > 0 ? Math.max(...allOrders) : 0;
-			
 			return maxOrder + 1;
 		} catch (error) {
 			console.error(`Error getting next order for category '${category}':`, error);
