@@ -1,7 +1,7 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../index');
 
-const ConfigurationOrder = sequelize.define('ConfigurationOrder', {
+const ItemOrder = sequelize.define('ItemOrder', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -28,4 +28,5 @@ const ConfigurationOrder = sequelize.define('ConfigurationOrder', {
 	]
 });
 
-module.exports = ConfigurationOrder;
+module.exports = ItemOrder;
+

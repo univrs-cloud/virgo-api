@@ -1,24 +1,24 @@
 const Application = require('./Application');
 const Bookmark = require('./Bookmark');
-const ConfigurationOrder = require('./ConfigurationOrder');
+const ItemOrder = require('./ItemOrder');
 
 // Define associations
-Application.hasOne(ConfigurationOrder, {
+Application.hasOne(ItemOrder, {
 	foreignKey: 'itemId',
 	constraints: false
 });
 
-Bookmark.hasOne(ConfigurationOrder, {
+Bookmark.hasOne(ItemOrder, {
 	foreignKey: 'itemId',
 	constraints: false
 });
 
-ConfigurationOrder.belongsTo(Application, {
+ItemOrder.belongsTo(Application, {
 	foreignKey: 'itemId',
 	constraints: false
 });
 
-ConfigurationOrder.belongsTo(Bookmark, {
+ItemOrder.belongsTo(Bookmark, {
 	foreignKey: 'itemId',
 	constraints: false
 });
@@ -26,5 +26,5 @@ ConfigurationOrder.belongsTo(Bookmark, {
 module.exports = {
 	Application,
 	Bookmark,
-	ConfigurationOrder
+	ItemOrder
 };

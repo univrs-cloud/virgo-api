@@ -1,6 +1,6 @@
 const { sequelize } = require('../database/index');
 const Configuration = require('../database/models/Configuration');
-const { Application, Bookmark, ConfigurationOrder } = require('../database/models/associations');
+const { Application, Bookmark, ItemOrder } = require('../database/models/associations');
 
 class DataService {
 	static async initialize() {
@@ -9,7 +9,7 @@ class DataService {
 			await Configuration.sync({ force: false });
 			await Application.sync({ force: false });
 			await Bookmark.sync({ force: false });
-			await ConfigurationOrder.sync({ force: false });
+			await ItemOrder.sync({ force: false });
 			console.log(`Database models synchronized.`);
 			
 			return true;
@@ -111,7 +111,7 @@ class DataService {
 			}, { returning: true });
 			const application = entry.get({ plain: true });
 			const order = await DataService.getNextOrderForCategory(application.category);
-			await DataService.setConfigurationOrder(application.id, 'app', order);
+			await DataService.setItemOrder(application.id, 'app', order);
 			return true;
 		} catch (error) {
 			console.error(`Error writing application '${applicationData.name}' to database:`, error);
@@ -127,7 +127,7 @@ class DataService {
 			if (!application) {
 				return false;
 			}
-			await DataService.deleteConfigurationOrder(application.id, 'app');
+			await DataService.deleteItemOrder(application.id, 'app');
 			const deleted = await Application.destroy({
 				where: { name: name }
 			});
@@ -175,7 +175,7 @@ class DataService {
 			}, { returning: true });
 			const bookmark = entry.get({ plain: true });
 			const order = await DataService.getNextOrderForCategory(bookmark.category);
-			await DataService.setConfigurationOrder(bookmark.id, 'bookmark', order);
+			await DataService.setItemOrder(bookmark.id, 'bookmark', order);
 			return true;
 		} catch (error) {
 			console.error(`Error writing bookmark '${bookmarkData.name}' to database:`, error);
@@ -191,7 +191,7 @@ class DataService {
 			if (!bookmark) {
 				return false;
 			}
-			await DataService.deleteConfigurationOrder(bookmark.id, 'bookmark');
+			await DataService.deleteItemOrder(bookmark.id, 'bookmark');
 			const deleted = await Bookmark.destroy({
 				where: { name: name }
 			});
@@ -202,23 +202,23 @@ class DataService {
 		}
 	}
 
-	static async setConfigurationOrder(itemId, type, order) {
+	static async setItemOrder(itemId, type, order) {
 		try {
-			await ConfigurationOrder.upsert({
+			await ItemOrder.upsert({
 				itemId: itemId,
 				type: type,
 				order: order
 			});
 			return true;
 		} catch (error) {
-			console.error(`Error writing configuration order for item ${itemId} (${type}) to database:`, error);
+			console.error(`Error writing item order for ${itemId} (${type}) to database:`, error);
 			return false;
 		}
 	}
 
-	static async deleteConfigurationOrder(itemId, type) {
+	static async deleteItemOrder(itemId, type) {
 		try {
-			const deleted = await ConfigurationOrder.destroy({
+			const deleted = await ItemOrder.destroy({
 				where: { 
 					itemId: itemId,
 					type: type
@@ -226,7 +226,7 @@ class DataService {
 			});
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting configuration order for item ${itemId} (${type}):`, error);
+			console.error(`Error deleting item order for ${itemId} (${type}):`, error);
 			return false;
 		}
 	}
@@ -235,36 +235,36 @@ class DataService {
 		try {
 			const applications = await Application.findAll({
 				include: [{
-					model: ConfigurationOrder,
+					model: ItemOrder,
 					required: false,
 					where: { type: 'app' }
 				}]
 			});
 			const bookmarks = await Bookmark.findAll({
 				include: [{
-					model: ConfigurationOrder,
+					model: ItemOrder,
 					required: false,
 					where: { type: 'bookmark' }
 				}]
 			});
 			const appEntries = applications.map((app) => {
-				const { ConfigurationOrder, ...data } = app.get({ plain: true });
-				return { ...data, type: 'app', order: ConfigurationOrder?.order ?? null };
+				const { ItemOrder, ...data } = app.get({ plain: true });
+				return { ...data, type: 'app', order: ItemOrder?.order ?? null };
 			});
 			const bookmarkEntries = bookmarks.map((bookmark) => {
-				const { ConfigurationOrder, ...data } = bookmark.get({ plain: true });
-				return { ...data, type: 'bookmark', order: ConfigurationOrder?.order ?? null };
+				const { ItemOrder, ...data } = bookmark.get({ plain: true });
+				return { ...data, type: 'bookmark', order: ItemOrder?.order ?? null };
 			});
 			return [...appEntries, ...bookmarkEntries];
 		} catch (error) {
-			console.error(`Error getting configuration order with items:`, error);
+			console.error(`Error getting configured items:`, error);
 			return [];
 		}
 	}
 
 	static async getNextOrderForCategory(category) {
 		try {
-			const appOrderEntries = await ConfigurationOrder.findAll({
+			const appOrderEntries = await ItemOrder.findAll({
 				include: [{
 					model: Application,
 					where: { category: category },
@@ -272,7 +272,7 @@ class DataService {
 				}],
 				attributes: ['order']
 			});
-			const bookmarkOrderEntries = await ConfigurationOrder.findAll({
+			const bookmarkOrderEntries = await ItemOrder.findAll({
 				include: [{
 					model: Bookmark,
 					where: { category: category },

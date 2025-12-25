@@ -7,7 +7,7 @@ const onConnection = (socket, module) => {
 		}
 		
 		for (const item of config) {
-			await DataService.setConfigurationOrder(item.id, item.type, item.order);
+			await DataService.setItemOrder(item.id, item.type, item.order);
 		};
 		module.eventEmitter.emit('configured:updated');
 	});

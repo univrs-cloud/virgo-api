@@ -6,6 +6,7 @@
 		await require('./002_migrate_configuration')();
 		await require('./003_migrate_data')();
 		await require('./004_update_notification_configuration_files')();
+		await require('./005_rename_configuration_order_table')();
 		
 		console.log(`Post install completed successfully!`);
 	} catch (error) {

@@ -46,10 +46,10 @@ const migrateData = async () => {
 						const { order: _, ...appData } = item;
 						await DataService.setApplication(appData);
 						
-						// Set order in the ConfigurationOrder table
+						// Set order in the ItemOrder table
 						const createdApp = await DataService.getApplication(item.name);
 						if (createdApp) {
-							await DataService.setConfigurationOrder(createdApp.id, 'app', order++);
+							await DataService.setItemOrder(createdApp.id, 'app', order++);
 							console.log(`Migrated app: ${item.name} (category: ${category}, order: ${order - 1})`);
 						}
 					} else if (item.type === 'bookmark') {
@@ -57,10 +57,10 @@ const migrateData = async () => {
 						const { order: _, ...bookmarkData } = item;
 						await DataService.setBookmark(bookmarkData);
 						
-						// Set order in the ConfigurationOrder table
+						// Set order in the ItemOrder table
 						const createdBookmark = await DataService.getBookmark(item.name);
 						if (createdBookmark) {
-							await DataService.setConfigurationOrder(createdBookmark.id, 'bookmark', order++);
+							await DataService.setItemOrder(createdBookmark.id, 'bookmark', order++);
 							console.log(`Migrated bookmark: ${item.name} (category: ${category}, order: ${order - 1})`);
 						}
 					}
