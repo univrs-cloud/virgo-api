@@ -43,6 +43,7 @@ class ShareModule extends BaseModule {
 				let share = {
 					name: name,
 					comment: value['comment'],
+					path: value['path'],
 					validUsers: value['valid users']?.split(' '),
 					size: 0,
 					free: 0,
