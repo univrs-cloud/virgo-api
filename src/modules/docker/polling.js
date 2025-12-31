@@ -1,6 +1,6 @@
 const { execa } = require('execa');
+const si = require('systeminformation');
 const camelcaseKeys = require('camelcase-keys').default;
-const filesizeParser = require('filesize-parser');
 const docker = require('../../utils/docker_client');
 const Poller = require('../../utils/poller');
 const polls = [];
@@ -30,16 +30,18 @@ const getAppsResourceMetrics = async (module) => {
 
 	let appsResourceMetrics = [];
 	try {
-		const [{ stdout: dockerStats }, { stdout: zfsList }] = await Promise.all([
-			execa('docker', ['container', 'stats', '--all', '--no-stream', '--no-trunc', '--format', 'json']),
+		const [dockerStats, { stdout: zfsList }] = await Promise.all([
+			si.dockerContainerStats('*'),
 			execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int'])
 		]);
-		const containerStats = dockerStats.split('\n')?.map((line) => { return JSON.parse(line); })?.map((stat) => {
-			stat.CPUPerc = Number(stat.CPUPerc.replace('%', ''));
-			stat.MemPerc = Number(stat.MemPerc.replace('%', ''));
-			stat.MemUsage = filesizeParser(stat.MemUsage.split('/')[0].trim());
-			return camelcaseKeys(stat);
-		});
+		const containerStats = dockerStats?.map((container) => {
+			return {
+				id: container.id,
+				cpuPercent: container.cpuPercent || 0,
+				memPercent: container.memPercent || 0,
+				memUsage: container.memUsage || 0
+			};
+		}) || [];
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 
 		for (const app of apps) {
@@ -60,13 +62,13 @@ const getAppsResourceMetrics = async (module) => {
 				(acc, container) => {
 					const containerStat = containerStats.find((containerStat) => { return containerStat.id === container.id; });
 					if (containerStat) {
-						acc.cpuPerc += containerStat.cpuPerc;
-						acc.memPerc += containerStat.memPerc;
+						acc.cpuPercent += containerStat.cpuPercent;
+						acc.memPercent += containerStat.memPercent;
 						acc.memUsage += containerStat.memUsage;
 					}
 					return acc;
 				},
-				{ cpuPerc: 0, memPerc: 0, memUsage: 0 }
+				{ cpuPercent: 0, memPercent: 0, memUsage: 0 }
 			);
 			const appContainersStats = projectContainers.map(
 					(container) => {
@@ -78,11 +80,11 @@ const getAppsResourceMetrics = async (module) => {
 						return {
 							id: containerStat.id,
 							cpu: {
-								percent: containerStat?.cpuPerc || 0
+								percent: containerStat?.cpuPercent || 0
 							},
 							memory: {
 								usage: containerStat?.memUsage || 0,
-								percent: containerStat?.memPerc || 0
+								percent: containerStat?.memPercent || 0
 							}
 						}
 					}
@@ -92,11 +94,11 @@ const getAppsResourceMetrics = async (module) => {
 			appsResourceMetrics.push({
 				name: app.name,
 				cpu: {
-					percent: appStat?.cpuPerc || 0
+					percent: appStat?.cpuPercent || 0
 				},
 				memory: {
 					usage: appStat?.memUsage || 0,
-					percent: appStat?.memPerc || 0
+					percent: appStat?.memPercent || 0
 				},
 				storage: {
 					dataset: dataset?.properties?.usedbydataset?.value || 0,
