@@ -14,13 +14,13 @@ const updateApp = async (job, module) => {
 		throw new Error(`App not found.`);
 	}
 
-	const container = module.getState('containers')?.find((container) => { return container.name === config.name });
+	const container = module.findContainerByAppName(config.name);
 	if (!container) {
 		throw new Error(`Container for app '${config.name}' not found.`);
 	}
 	
-	const composeProject = container.labels.comDockerComposeProject;
-	const composeProjectDir = container.labels.comDockerComposeProjectWorkingDir;
+	const composeProject = container.labels?.comDockerComposeProject;
+	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir;
 	const composeProjectContainers = module.getState('containers')?.filter((container) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});

@@ -62,6 +62,35 @@ class DockerModule extends BaseModule {
 		return this.#appIconsDir;
 	}
 
+	/**
+	 * Find a container for an app by matching compose project name.
+	 * First tries exact container name match (for backward compatibility),
+	 * then tries matching by name pattern {project_name}-{service_name}-{number}.
+	 * @param {string} appName - The app name to find container for
+	 * @returns {Object|null} - The container object or null if not found
+	 */
+	findContainerByAppName(appName) {
+		const containers = this.getState('containers') || [];
+		
+		// First, try exact container name match (backward compatibility with container_name)
+		let container = containers.find((container) => {
+			return container.names && container.names.some((name) => { return name === `/${appName}`; });
+		});
+		
+		if (container) {
+			return container;
+		}
+		
+		// Then, try matching by name pattern {project_name}-{service_name}-{number}
+		// Docker Compose generates names like: {project_name}-{service_name}-{number}
+		// The project name matches the app name (directory name)
+		container = containers.find((container) => {
+			return container.names && container.names.some((name) => { return name.startsWith(`/${appName}-`); });
+		});
+		
+		return container || null;
+	}
+
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin?.startPolling(this);

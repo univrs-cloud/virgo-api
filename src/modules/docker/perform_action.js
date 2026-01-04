@@ -17,8 +17,11 @@ const performAppAction = async (job, module) => {
 
 	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${existingApp.title} app is ${actionVerbs.gerund}...`);
-	const container = module.getState('containers')?.find((container) => { return container.names.includes(`/${config.name}`); });
-	const composeProject = container?.labels?.comDockerComposeProject ?? false;
+	const container = module.findContainerByAppName(config.name);
+	if (!container) {
+		throw new Error(`Container for app '${config.name}' not found.`);
+	}
+	const composeProject = container.labels?.comDockerComposeProject ?? false;
 	if (composeProject === false) {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action} action.`);
 	}

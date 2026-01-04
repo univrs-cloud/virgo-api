@@ -45,10 +45,10 @@ const getAppsResourceMetrics = async (module) => {
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 
 		for (const app of apps) {
-			const container = containers.find((container) => { return container.names.includes(`/${app.name}`); });
+			const container = module.findContainerByAppName(app.name);
 			let projectContainers = [];
 			if (container) {
-				const composeProject = container?.labels?.comDockerComposeProject || false;
+				const composeProject = container.labels?.comDockerComposeProject || false;
 				if (composeProject) {
 					projectContainers = containers.filter((container) => {
 						return container.labels && container.labels['comDockerComposeProject'] === composeProject;
