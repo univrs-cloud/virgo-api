@@ -92,3 +92,13 @@ module.exports = {
 		'host:network:interface:update': updateInterface
 	}
 };
+
+/*
+nmcli con delete "Wired connection 1" && \
+nmcli con delete "Wired connection 2" && \
+nmcli con add type bond con-name bond0 ifname bond0 bond.options "mode=active-backup,miimon=100,primary=eth0" && \
+nmcli con mod bond0 ipv4.addresses "192.168.100.3/24" ipv4.gateway "192.168.100.1" ipv4.dns "192.168.100.2" ipv4.dns-search "univrs" ipv4.method manual && \
+nmcli con add type ethernet con-name bond0-eth1 ifname eth1 master bond0 && \
+nmcli con add type ethernet con-name bond0-eth0 ifname eth0 master bond0 && \
+nmcli con up bond0
+*/
