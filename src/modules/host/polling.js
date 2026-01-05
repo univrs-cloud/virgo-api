@@ -7,7 +7,10 @@ const polls = [];
 
 const getNetworkStats = async (module) => {
 	try {
-		const networkStats = await si.networkStats();
+		const system = module.getState('system');
+		const defaultInterface = system?.networkInterfaces?.find((iface) => { return iface.default; });
+		const ifaceName = defaultInterface?.ifname || null;
+		const networkStats = await si.networkStats(ifaceName);
 		let networkInterfaceStats = networkStats[0];
 		if (networkInterfaceStats.rx_sec === null) {
 			networkInterfaceStats.rx_sec = 0;

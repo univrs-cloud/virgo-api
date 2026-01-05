@@ -2,6 +2,7 @@ const os = require('os');
 const fs = require('fs');
 const { execa } = require('execa');
 const si = require('systeminformation');
+const camelcaseKeys = require('camelcase-keys').default;
 const { version } = require('../../../package.json');
 const BaseModule = require('../base');
 
@@ -42,7 +43,7 @@ class HostModule extends BaseModule {
 		});
 		(async () => {
 			await this.#loadNetworkIdentifier();
-			await this.#loadNetworkInterface();
+			await this.#loadNetworkInterfaces();
 			await this.#loadDefaultGateway();
 		})();
 
@@ -59,7 +60,7 @@ class HostModule extends BaseModule {
 				this.nsp.emit('host:system', this.getState('system'));
 			})
 			.on('host:network:interface:updated', async () => {
-				await this.#loadNetworkInterface();
+				await this.#loadNetworkInterfaces();
 				await this.#loadDefaultGateway();
 				this.nsp.emit('host:system', this.getState('system'));
 			});
@@ -263,12 +264,38 @@ class HostModule extends BaseModule {
 		}
 	}
 
-	async #loadNetworkInterface() {
+	async #getInterfaceSpeed(ifname) {
 		try {
-			const networkInterface = await si.networkInterfaces('default');
-			this.setState('system', { ...this.getState('system'), networkInterface });
+			const speedPath = `/sys/class/net/${ifname}/speed`;
+			const speed = await fs.promises.readFile(speedPath, 'utf8');
+			const speedValue = parseInt(speed.trim(), 10);
+			return isNaN(speedValue) ? 0 : speedValue;
 		} catch (error) {
-			this.setState('system', { ...this.getState('system'), networkInterface: false });
+			// Speed file might not exist for some interfaces
+			return 0;
+		}
+	}
+
+	async #loadNetworkInterfaces() {
+		try {
+			const { stdout: addrOutput } = await execa('ip', ['-j', 'addr', 'show']);
+			const { stdout: defaultRoutesOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
+			const networkInterfaces = camelcaseKeys(JSON.parse(addrOutput), { deep: true });
+			const defaultRoutes = JSON.parse(defaultRoutesOutput);
+			let defaultDev = null;
+			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {
+				defaultDev = defaultRoutes[0].dev;
+			}
+			
+			// Get speed for each interface
+			for (const iface of networkInterfaces) {
+				iface.default = (defaultDev !== null && iface.ifname === defaultDev);
+				iface.speed = await this.#getInterfaceSpeed(iface.ifname);
+			}
+			
+			this.setState('system', { ...this.getState('system'), networkInterfaces });
+		} catch (error) {
+			this.setState('system', { ...this.getState('system'), networkInterfaces: false });
 		}
 	}
 
