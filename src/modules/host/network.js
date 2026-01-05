@@ -30,7 +30,7 @@ const connectionExists = async (connectionName) => {
 
 const getDnsSearchFromConnection = async (connectionName) => {
 	try {
-		const { stdout } = await execa('nmcli', ['-t', '-f', 'ipv4.dns-search', 'connection', 'show', connectionName]);
+		const { stdout } = await execa('nmcli', ['-g', 'ipv4.dns-search', 'connection', 'show', connectionName]);
 		const dnsSearch = stdout.trim();
 		return dnsSearch || null;
 	} catch (error) {
@@ -56,6 +56,7 @@ const updateIdentifier = async (job, module) => {
 
 		const connectionName = await getConnectionNameForInterface(defaultInterface.ifname);
 		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns-search', config.domainName]);
+		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns', '1.1.1.1']);
 		await execa('nmcli', ['connection', 'reload']);
 		await execa('nmcli', ['connection', 'up', connectionName]);
 		await execa('hostnamectl', ['set-hostname', config.hostname]);
@@ -116,13 +117,7 @@ const updateInterface = async (job, module) => {
 		// Create bond (always create, even if eth1 doesn't exist)
 		// eth0 is always the primary interface
 		if (!bondExists) {
-			await execa('nmcli', [
-				'connection', 'add',
-				'type', 'bond',
-				'con-name', bondName,
-				'ifname', bondName,
-				'bond.options', `mode=active-backup,miimon=100,primary=eth0`
-			]);
+			await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', bondName, 'ifname', bondName, 'bond.options', `mode=active-backup,miimon=100,primary=eth0`]);
 		}
 		
 		// Configure bond with network settings
@@ -139,6 +134,8 @@ const updateInterface = async (job, module) => {
 		if (!bondExists && eth0DnsSearch) {
 			bondModifyArgs.push('ipv4.dns-search', eth0DnsSearch);
 		}
+		// Set default DNS server
+		bondModifyArgs.push('ipv4.dns', '1.1.1.1');
 		await execa('nmcli', bondModifyArgs);
 		
 		// Always add eth0 as slave to the bond (if not already added)
