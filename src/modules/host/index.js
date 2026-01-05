@@ -292,13 +292,10 @@ class HostModule extends BaseModule {
 			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {
 				defaultDev = defaultRoutes[0].dev;
 			}
-			
-			// Get speed for each interface
 			for (const iface of networkInterfaces) {
 				iface.default = (defaultDev !== null && iface.ifname === defaultDev);
 				iface.speed = await this.#getInterfaceSpeed(iface.ifname);
 			}
-			
 			this.setState('system', { ...this.getState('system'), networkInterfaces });
 		} catch (error) {
 			this.setState('system', { ...this.getState('system'), networkInterfaces: false });
