@@ -266,12 +266,18 @@ class HostModule extends BaseModule {
 
 	async #getInterfaceSpeed(ifname) {
 		try {
-			const speedPath = `/sys/class/net/${ifname}/speed`;
-			const speed = await fs.promises.readFile(speedPath, 'utf8');
+			let targetInterface = ifname;
+			const bondingPath = `/sys/class/net/${ifname}/bonding/active_slave`;
+			if (fs.existsSync(bondingPath)) { // Check if it's a bond interface
+				const activeSlave = await fs.promises.readFile(bondingPath, 'utf8');
+				if (activeSlave.trim()) {
+					targetInterface = activeSlave.trim();
+				}
+			}
+			const speed = await fs.promises.readFile(`/sys/class/net/${targetInterface}/speed`, 'utf8');
 			const speedValue = parseInt(speed.trim(), 10);
-			return isNaN(speedValue) ? 0 : speedValue;
-		} catch (error) {
-			// Speed file might not exist for some interfaces
+			return (isNaN(speedValue) || speedValue < 0) ? 0 : speedValue;
+		} catch {
 			return 0;
 		}
 	}

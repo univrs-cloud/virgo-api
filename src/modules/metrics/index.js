@@ -333,19 +333,34 @@ class MetricsModule extends BaseModule {
 		this.setState('metrics', { isEnabled, grid });
 	}
 
+	async #getInterfaceSpeed(ifname) {
+		try {
+			let targetInterface = ifname;
+			const bondingPath = `/sys/class/net/${ifname}/bonding/active_slave`;
+			if (fs.existsSync(bondingPath)) { // Check if it's a bond interface
+				const activeSlave = await fs.promises.readFile(bondingPath, 'utf8');
+				if (activeSlave.trim()) {
+					targetInterface = activeSlave.trim();
+				}
+			}
+			const speed = await fs.promises.readFile(`/sys/class/net/${targetInterface}/speed`, 'utf8');
+			const speedValue = parseInt(speed.trim(), 10);
+			return (isNaN(speedValue) || speedValue < 0) ? 0 : speedValue;
+		} catch {
+			return 0;
+		}
+	}
+
 	async #loadSystemInfo() {
 		try {
 			const { stdout: defaultRoutesOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
 			const defaultRoutes = JSON.parse(defaultRoutesOutput);
 			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {
 				this.#defaultInterface = defaultRoutes[0].dev;
-				try {
-					const speed = await fs.promises.readFile(`/sys/class/net/${this.#defaultInterface}/speed`, 'utf8');
-					const speedValue = parseInt(speed.trim(), 10);
-					if (!isNaN(speedValue) && speedValue > 0) {
-						this.#networkSpeedBytesPerSec = (speedValue * 1000000) / 8;
-					}
-				} catch (error) {}
+				const speed = this.#getInterfaceSpeed(this.#defaultInterface);
+				if (speed > 0) {
+					this.#networkSpeedBytesPerSec = (speed * 1000000) / 8;
+				}
 			}
 		} catch (error) {
 			console.error('Failed to get network info:', error.message);
