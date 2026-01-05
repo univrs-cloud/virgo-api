@@ -1,5 +1,5 @@
 const createShare = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	await module.updateJobProgress(job, `Creating share ${config.name}...`);
 	// TODO: Implement actual share creation logic
 	module.eventEmitter.emit('shares:updated');

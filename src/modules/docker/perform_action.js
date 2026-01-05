@@ -5,7 +5,7 @@ const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'unin
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause'];
 
 const performAppAction = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	if (!allowedAppActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on apps.`);
 	}
@@ -44,7 +44,7 @@ const performAppAction = async (job, module) => {
 };
 
 const performServiceAction = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	if (!allowedServiceActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}

@@ -2,7 +2,7 @@ const changeCase = require('change-case');
 const DataService = require('../../database/data_service');
 
 const createBookmark = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	await module.updateJobProgress(job, `${config?.title} bookmark is creating...`);
 	const bookmark = {
 		name: changeCase.kebabCase(config.title),

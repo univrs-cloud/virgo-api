@@ -8,7 +8,7 @@ const dockerPullProgressParser = require('../../utils/docker_pull_progress_parse
 const DataService = require('../../database/data_service');
 
 const updateApp = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	const existingApp = await DataService.getApplication(config?.name);
 	if (!existingApp) {
 		throw new Error(`App not found.`);

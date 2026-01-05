@@ -1,7 +1,7 @@
 const DataService = require('../../database/data_service');
 
 const updateLocation = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	await module.updateJobProgress(job, `Saving location...`);	
 	await DataService.setConfiguration('location', config);
 	module.eventEmitter.emit('configuration:updated');

@@ -1,7 +1,7 @@
 const DataService = require('../../database/data_service');
 
 const deleteBookmark = async (job, module) => {
-	const config = job.data.config;
+	const { config } = job.data;
 	const existingBookmark = await DataService.getBookmark(config?.name);
 	if (!existingBookmark) {
 		throw new Error(`Bookmark not found.`);
