@@ -282,6 +282,18 @@ class HostModule extends BaseModule {
 		}
 	}
 
+	async #waitForInterfaceSpeed(ifname, timeoutMs = 6000, intervalMs = 500) {
+		const start = Date.now();
+		while (Date.now() - start < timeoutMs) {
+			const speed = await this.#getInterfaceSpeed(ifname);
+			if (speed > 0) {
+				return speed;
+			}
+			await new Promise((resolve) => { return setTimeout(resolve, intervalMs); });
+		}
+		return 0;
+	}
+
 	async #loadNetworkInterfaces() {
 		try {
 			const { stdout: addrOutput } = await execa('ip', ['-j', 'addr', 'show']);
@@ -294,7 +306,11 @@ class HostModule extends BaseModule {
 			}
 			for (const iface of networkInterfaces) {
 				iface.default = (defaultDev !== null && iface.ifname === defaultDev);
-				iface.speed = await this.#getInterfaceSpeed(iface.ifname);
+				if (iface.default) {
+					iface.speed = await this.#waitForInterfaceSpeed(iface.ifname);
+				} else {
+					iface.speed = await this.#getInterfaceSpeed(iface.ifname);
+				}
 			}
 			this.setState('system', { ...this.getState('system'), networkInterfaces });
 		} catch (error) {

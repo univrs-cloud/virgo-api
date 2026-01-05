@@ -202,7 +202,7 @@ const onConnection = (socket, module) => {
 
 module.exports = {
 	name: 'network',
-	// register, // can't user register to load and emit on change because network is part of system state
+	// register, // can't use register to load and emit on change because network is part of system state
 	onConnection,
 	jobs: {
 		'host:network:identifier:update': updateIdentifier,
