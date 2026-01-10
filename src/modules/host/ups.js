@@ -18,16 +18,22 @@ const checkUps = async (module) => {
 					status = camelcaseKeys(status, { deep: true });
 					module.setState('ups', status);
 				} catch (error) {
-					console.error('Parse error:', error.message);
+					console.error('UPS socket response parse error:', error.message);
 					module.setState('ups', 'remote i/o error');
 				}
 			}
 		}
 		module.nsp.emit('host:ups', module.getState('ups'));
 	});
+	socket.on('error', (error) => {
+		console.error('UPS socket error:', error.message);
+		module.setState('ups', 'remote i/o error');
+		module.nsp.emit('host:ups', module.getState('ups'));
+	});
 	socket.on('close', () => {
 		console.log('UPS socket disconnected, reconnecting in 5s...');
 		socket = null;
+		buffer = '';
 		setTimeout(() => { checkUps(module); }, 5000);
 	});
 }
