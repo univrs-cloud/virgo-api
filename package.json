@@ -58,8 +58,6 @@
 	},
 	"optionalDependencies": {
 		"bufferutil": "*",
-		"raspi": "^6.0.1",
-		"raspi-i2c": "^6.2.4",
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
