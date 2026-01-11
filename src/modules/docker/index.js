@@ -74,7 +74,7 @@ class DockerModule extends BaseModule {
 		
 		// First, try exact container name match (backward compatibility with container_name)
 		let container = containers.find((container) => {
-			return container.names && container.names.some((name) => { return name === `/${appName}`; });
+			return container.name === appName;
 		});
 		
 		if (container) {
@@ -85,7 +85,7 @@ class DockerModule extends BaseModule {
 		// Docker Compose generates names like: {project_name}-{service_name}-{number}
 		// The project name matches the app name (directory name)
 		container = containers.find((container) => {
-			return container.names && container.names.some((name) => { return name.startsWith(`/${appName}-`); });
+			return container.names?.some((name) => { return name.startsWith(`/${appName}-`); });
 		});
 		
 		return container || null;
