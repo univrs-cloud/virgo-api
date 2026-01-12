@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const camelcaseKeys = require('camelcase-keys').default;
 const docker = require('../../utils/docker_client');
 
@@ -144,6 +146,72 @@ const checkForUpdates = async (module) => {
 	}
 };
 
+const fetchStackFiles = async (module) => {
+	try {
+		const composeDir = module.composeDir;
+		
+		// Check if compose directory exists
+		try {
+			await fs.promises.access(composeDir);
+		} catch (error) {
+			console.warn(`Compose directory ${composeDir} does not exist. Skipping compose files update.`);
+			return;
+		}
+
+		// Get all directories in the compose directory
+		const entries = await fs.promises.readdir(composeDir, { withFileTypes: true });
+		const appDirs = entries
+			.filter(entry => entry.isDirectory())
+			.map(entry => entry.name);
+
+		// Get templates from module state
+		const templates = module.getState('templates') || [];
+		
+		// Update compose files for each app that has a template
+		for (const appName of appDirs) {
+			const template = templates.find((template) => { return template.name === appName; });
+			
+			if (!template) {
+				continue; // Skip if no template exists for this app
+			}
+
+			// Only update if template has repository information
+			if (!template.repository?.url || !template.repository?.stackfile) {
+				continue;
+			}
+
+			try {
+				const composeFilePath = path.join(composeDir, appName, 'docker-compose.yml');
+				
+				// Check if docker-compose.yml file exists
+				try {
+					await fs.promises.access(composeFilePath);
+				} catch (error) {
+					// File doesn't exist, skip
+					continue;
+				}
+
+				// Download the template
+				const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
+				if (!response.ok) {
+					console.warn(`Failed to download template for ${appName}: HTTP ${response.status}`);
+					continue;
+				}
+
+				const stack = await response.text();
+				
+				// Replace the docker-compose.yml file
+				await fs.promises.writeFile(composeFilePath, stack, 'utf-8');
+				console.log(`Updated docker-compose.yml for ${appName}`);
+			} catch (error) {
+				console.warn(`Error updating compose file for ${appName}:`, error.message);
+			}
+		}
+	} catch (error) {
+		console.error(`Error updating compose files:`, error);
+	}
+};
+
 const register = (module) => {
 	checkForUpdates(module);
 
@@ -157,6 +225,12 @@ const register = (module) => {
 	module.addJobSchedule(
 		'app:templates:fetch',
 		{ pattern: '0 1 * * * *' }
+	);
+
+	// Schedule compose files updater to run daily at midnight
+	module.addJobSchedule(
+		'app:stackfiles:fetch',
+		{ pattern: '0 0 0 * * *' }
 	);
 };
 
@@ -179,6 +253,10 @@ module.exports = {
 		},
 		'app:templates:fetch': async (job, module) => {
 			module.eventEmitter.emit('app:templates:fetch');
+			return ``;
+		},
+		'app:stackfiles:fetch': async (job, module) => {
+			await fetchStackFiles(module);
 			return ``;
 		}
 	}
