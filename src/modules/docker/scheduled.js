@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
 const camelcaseKeys = require('camelcase-keys').default;
 const docker = require('../../utils/docker_client');
 
@@ -95,7 +96,7 @@ const checkForUpdates = async (module) => {
 	images = camelcaseKeys(images, { deep: true });
 	let containers = await docker.listContainers({ all: true });
 	containers = camelcaseKeys(containers, { deep: true });
-	for (const { id, imageId } of containers) {
+	for (const { id, imageId, labels } of containers) {
 		const image = images.find((image) => { return image.id === imageId });
 		if (!Array.isArray(image?.repoDigests) || image.repoDigests.length === 0) {
 			continue;
@@ -106,6 +107,51 @@ const checkForUpdates = async (module) => {
 		let inspect = await container.inspect();
 		inspect = camelcaseKeys(inspect, { deep: true });
 		const imageName = inspect.config.image;
+		
+		// Extract current tag from image name
+		const currentTag = imageName.includes(':') ? imageName.split(':')[1] : 'latest';
+		
+		// Check if container belongs to a docker compose project
+		const composeProject = labels?.comDockerComposeProject || inspect.config.labels?.comDockerComposeProject;
+		const composeService = labels?.comDockerComposeService || inspect.config.labels?.comDockerComposeService;
+		
+		// If container is part of a compose project, compare tags first
+		if (composeProject && composeService) {
+			try {
+				const composeFilePath = path.join(module.composeDir, composeProject, 'docker-compose.yml');
+				
+				// Check if compose file exists
+				try {
+					await fs.promises.access(composeFilePath);
+				} catch (error) {
+					// Compose file doesn't exist, skip tag comparison and fall back to digest comparison
+					throw error;
+				}
+				
+				// Read and parse compose file
+				const composeFileContent = await fs.promises.readFile(composeFilePath, 'utf-8');
+				const composeData = yaml.load(composeFileContent);
+				
+				// Get the service definition
+				const service = composeData?.services?.[composeService];
+				if (service?.image) {
+					// Extract expected tag from compose file
+					const expectedImage = service.image;
+					const expectedTag = expectedImage.includes(':') ? expectedImage.split(':')[1] : 'latest';
+					
+					// Compare tags - if they don't match, mark as update and skip digest comparison
+					if (currentTag !== expectedTag) {
+						updates.push({ imageName: imageName, containerId: id });
+						module.setState('updates', updates);
+						continue;
+					}
+				}
+			} catch (error) {
+				// If we can't read/parse compose file, fall back to digest comparison
+				// console.log(`Could not read compose file for ${composeProject}: ${error.message}`);
+			}
+		}
+		
 		const registry = getRegistry(imageName);
 		let remoteDigest = null;
 		switch (registry) {
