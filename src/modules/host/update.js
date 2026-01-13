@@ -60,17 +60,10 @@ const update = async (socket, module) => {
 			'-c',
 			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}; echo $? > ${module.updateExitStatusFile}"`
 		], { shell: true });
-		await module.checkUpdate();
 	} catch (error) {
-		console.error(error);
-		clearInterval(module.checkUpdateIntervalId);
-		module.checkUpdateIntervalId = null;
-		await updateLogsWatcher?.stop();
-		
-		module.setState('update', { ...module.getState('update'), state: 'failed' });
-		module.nsp.emit('host:update', module.getState('update'));
-		module.generateUpdates();
+		console.error(error.message);
 	}
+	await module.checkUpdate();
 };
 
 const completeUpdate = (socket, module) => {

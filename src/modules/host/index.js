@@ -174,9 +174,14 @@ class HostModule extends BaseModule {
 
 			let exitCode = 0;
 			try {
-				exitCode = parseInt((await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim());
-			} catch (error) {}
+				const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+				exitCode = parseInt(exitCodeContent);
+				console.log(`Update completed - exit code file content: "${exitCodeContent}", parsed: ${exitCode}`);
+			} catch (error) {
+				console.error(`Failed to read exit code file:`, error.message);
+			}
 			const state = (exitCode === 0 ? 'succeeded' : 'failed');
+			console.log(`Setting update state to: ${state} (exitCode: ${exitCode})`);
 			this.setState('update', { ...this.getState('update'), isRebootRequired, state });
 			this.nsp.emit('host:update', this.getState('update'));
 
