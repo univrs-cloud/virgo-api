@@ -162,6 +162,27 @@ class HostModule extends BaseModule {
 				return;
 			}
 	
+			// Wait for exit code file to be written (handle race condition)
+			let exitCodeContent = '';
+			let retries = 10; // Wait up to 10 seconds for the file to be written
+			while (retries > 0 && exitCodeContent === '') {
+				try {
+					exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+					if (exitCodeContent === '') {
+						// File exists but is empty, wait a bit and retry
+						await new Promise(resolve => setTimeout(resolve, 1000));
+						retries--;
+						continue;
+					}
+				} catch (error) {
+					// File doesn't exist yet, wait and retry
+					await new Promise(resolve => setTimeout(resolve, 1000));
+					retries--;
+					continue;
+				}
+				break;
+			}
+
 			clearInterval(this.checkUpdateIntervalId);
 			this.checkUpdateIntervalId = null;
 			await updateLogsWatcher?.stop();
@@ -173,12 +194,16 @@ class HostModule extends BaseModule {
 			} catch (error) {}
 
 			let exitCode = 0;
-			try {
-				const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (exitCodeContent !== '') {
 				exitCode = parseInt(exitCodeContent);
+				if (isNaN(exitCode)) {
+					console.error(`Failed to parse exit code from file content: "${exitCodeContent}"`);
+					exitCode = 1; // Treat unparseable content as failure
+				}
 				console.log(`Update completed - exit code file content: "${exitCodeContent}", parsed: ${exitCode}`);
-			} catch (error) {
-				console.error(`Failed to read exit code file:`, error.message);
+			} else {
+				console.error(`Exit code file is empty or missing after retries`);
+				exitCode = 1; // Treat missing/empty file as failure
 			}
 			const state = (exitCode === 0 ? 'succeeded' : 'failed');
 			console.log(`Setting update state to: ${state} (exitCode: ${exitCode})`);
