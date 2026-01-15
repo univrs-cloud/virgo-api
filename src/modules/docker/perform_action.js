@@ -65,10 +65,11 @@ const performServiceAction = async (job, module) => {
 	}
 
 	container.name = container.names[0].replace('/', '');
+	const serviceName = container.labels?.comDockerComposeService || container.name;
 	const actionVerbs = module.nlp.conjugate(config.action);
-	await module.updateJobProgress(job, `${container.name} service is ${actionVerbs.gerund}...`);
+	await module.updateJobProgress(job, `${serviceName} service is ${actionVerbs.gerund}...`);
 	await docker.getContainer(container.id)[config.action]();
-	return `${container.name} service ${actionVerbs.pastTense}.`;
+	return `${serviceName} service ${actionVerbs.pastTense}.`;
 };
 
 const register = (module) => {
