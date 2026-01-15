@@ -64,6 +64,7 @@ const performServiceAction = async (job, module) => {
 		throw new Error(`Service not found.`);
 	}
 
+	container.name = container.names[0].replace('/', '');
 	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${container.name} service is ${actionVerbs.gerund}...`);
 	await docker.getContainer(container.id)[config.action]();
