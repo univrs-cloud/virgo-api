@@ -9,7 +9,7 @@ const DataService = require('../../database/data_service');
 
 const installApp = async (job, module) => {
 	const { config } = job.data;
-	const template = module.getState('templates')?.find((template) => { return template.id === config?.id; });
+	const template = module.getState('templates')?.find((template) => { return template.name === config?.name; });
 	if (!template) {
 		throw new Error(`App template not found.`);
 	}
@@ -99,13 +99,8 @@ const installApp = async (job, module) => {
 
 const register = (module) => {
 	module.eventEmitter.on('app:install:pcp', async ({ username }) => {
-		const template = module.getState('templates')?.find((template) => { return template.name === 'pcp'; });
-		if (!template) {
-			return;
-		}
-
 		const config = {
-			id: template.id,
+			name: 'pcp',
 			env: []
 		};
 		await module.addJob('app:install', { config, username });
