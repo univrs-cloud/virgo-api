@@ -1,5 +1,6 @@
 const path = require('path');
 const { execa } = require('execa');
+const camelcaseKeys = require('camelcase-keys').default;
 const docker = require('../../utils/docker_client');
 const DataService = require('../../database/data_service');
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
@@ -18,10 +19,12 @@ const performAppAction = async (job, module) => {
 
 	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${existingApp.title} app is ${actionVerbs.gerund}...`);
-	const container = module.findContainerByAppName(config.name);
-	if (!container) {
-		throw new Error(`Container for app '${config.name}' not found.`);
+	const containers = await module.findContainersByAppName(config.name);
+	if (containers.length === 0) {
+		throw new Error(`Containers for app '${config.name}' not found.`);
 	}
+	
+	const container = containers[0];
 	const composeProject = container.labels?.comDockerComposeProject ?? false;
 	if (composeProject === false) {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action} action.`);
@@ -54,7 +57,9 @@ const performServiceAction = async (job, module) => {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}
 
-	const container = module.getState('containers')?.find((container) => { return container.id === config?.id; });
+	let containers = await docker.listContainers({ all: true });
+	containers = camelcaseKeys(containers, { deep: true });
+	const container = containers.find((container) => { return container.id === config?.id; });
 	if (!container) {
 		throw new Error(`Service not found.`);
 	}

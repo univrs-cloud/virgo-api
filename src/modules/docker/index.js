@@ -1,4 +1,6 @@
 const path = require('path');
+const camelcaseKeys = require('camelcase-keys').default;
+const docker = require('../../utils/docker_client');
 const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
 
@@ -62,32 +64,25 @@ class DockerModule extends BaseModule {
 	}
 
 	/**
-	 * Find a container for an app by matching compose project name.
-	 * First tries exact container name match (for backward compatibility),
-	 * then tries matching by name pattern {project_name}-{service_name}-{number}.
-	 * @param {string} appName - The app name to find container for
-	 * @returns {Object|null} - The container object or null if not found
+	 * Find all containers for an app by matching compose project name.
+	 * Matches containers by compose project label (exact match).
+	 * @param {string} appName - The app name to find containers for
+	 * @returns {Promise<Array>} - Array of container objects (empty if none found)
 	 */
-	findContainerByAppName(appName) {
-		const containers = this.getState('containers') || [];
-		
-		// First, try exact container name match (backward compatibility with container_name)
-		let container = containers.find((container) => {
-			return container.name === appName;
-		});
-		
-		if (container) {
+	async findContainersByAppName(appName) {
+		let containers = await docker.listContainers({ all: true });
+		containers = camelcaseKeys(containers, { deep: true });
+		containers = containers.map((container) => {
+			container.name = container.names[0].replace('/', '');
 			return container;
-		}
-		
-		// Then, try matching by name pattern {project_name}-{service_name}-{number}
-		// Docker Compose generates names like: {project_name}-{service_name}-{number}
-		// The project name matches the app name (directory name)
-		container = containers.find((container) => {
-			return container.names?.some((name) => { return name.startsWith(`/${appName}-`); });
 		});
-		
-		return container || null;
+		// Match by compose project label (exact match)
+		// This ensures we match the exact project name and avoid false matches
+		// e.g., "nextcloud" won't match containers from "nextcloud-hpb" project
+		const projectContainers = containers.filter((container) => {
+			return container.labels?.comDockerComposeProject === appName;
+		});
+		return projectContainers;
 	}
 
 	async onConnection(socket) {

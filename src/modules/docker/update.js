@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
+const camelcaseKeys = require('camelcase-keys').default;
 const dockerCompose = require('docker-compose');
 const docker = require('../../utils/docker_client');
 const dockerPullProgressParser = require('../../utils/docker_pull_progress_parser');
@@ -14,16 +15,14 @@ const updateApp = async (job, module) => {
 		throw new Error(`App not found.`);
 	}
 
-	const container = module.findContainerByAppName(config.name);
-	if (!container) {
-		throw new Error(`Container for app '${config.name}' not found.`);
+	const containers = await module.findContainersByAppName(config.name);
+	if (containers.length === 0) {
+		throw new Error(`Containers for app '${config.name}' not found.`);
 	}
 	
+	const container = containers[0];
 	const composeProject = container.labels?.comDockerComposeProject;
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
-	const composeProjectContainers = module.getState('containers')?.filter((container) => {
-		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
-	});
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
 	const template = module.getState('templates')?.find((template) => { return template.name === config.name; });
 	if (template) {
@@ -68,7 +67,7 @@ const updateApp = async (job, module) => {
 	await module.updateJobProgress(job, `Cleaning up...`);
 	await docker.pruneImages();
 	let updates = module.getState('updates')?.filter((update) => {
-		return !composeProjectContainers.some((container) => { return container.id === update.containerId; });
+		return !containers.some((container) => { return container.id === update.containerId; });
 	});
 	module.setState('updates', updates);
 	module.nsp.emit('app:updates', module.getState('updates'));

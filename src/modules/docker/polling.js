@@ -22,8 +22,19 @@ const getContainers = async (module) => {
 
 const getAppsResourceMetrics = async (module) => {
 	const apps = (module.getState('configured') || []).filter((item) => { return item.type === 'app'; });
-	const containers = module.getState('containers') || [];
-	if (apps.length === 0 || containers.length === 0) {
+	if (apps.length === 0) {
+		setTimeout(() => { getAppsResourceMetrics(module); }, 100);
+		return;
+	}
+	
+	let containers = await docker.listContainers({ all: true });
+	containers = camelcaseKeys(containers, { deep: true });
+	containers = containers.map((container) => {
+		container.name = container.names[0].replace('/', '');
+		return container;
+	});
+	
+	if (containers.length === 0) {
 		setTimeout(() => { getAppsResourceMetrics(module); }, 100);
 		return;
 	}
@@ -45,18 +56,7 @@ const getAppsResourceMetrics = async (module) => {
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 
 		for (const app of apps) {
-			const container = module.findContainerByAppName(app.name);
-			let projectContainers = [];
-			if (container) {
-				const composeProject = container.labels?.comDockerComposeProject || false;
-				if (composeProject) {
-					projectContainers = containers.filter((container) => {
-						return container.labels && container.labels['comDockerComposeProject'] === composeProject;
-					});
-				} else {
-					projectContainers = [container];
-				}
-			}
+			const projectContainers = await module.findContainersByAppName(app.name);
 
 			const appStat = projectContainers.reduce(
 				(acc, container) => {
