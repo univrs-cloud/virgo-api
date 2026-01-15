@@ -14,10 +14,6 @@ const installApp = async (job, module) => {
 		throw new Error(`App template not found.`);
 	}
 
-	if (template.type !== 3) { // only docker compose is supported
-		throw new Error(`Installing this app type is not supported.`);
-	}
-
 	const existingApp = await DataService.getApplication(template?.name);
 	if (existingApp) {
 		throw new Error(`App already installed.`);
