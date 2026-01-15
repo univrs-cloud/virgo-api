@@ -118,7 +118,8 @@ const checkForUpdates = async (module) => {
 		// If container is part of a compose project, compare tags first
 		if (composeProject && composeService) {
 			try {
-				const composeFilePath = path.join(module.composeDir, composeProject, 'docker-compose.yml');
+				// Use the actual compose file path from container labels, or construct it
+				const composeFilePath = inspect.config.labels?.comDockerComposeProjectConfigFiles || path.join(module.composeDir, composeProject, 'docker-compose.yml');
 				
 				// Check if compose file exists
 				try {
@@ -204,17 +205,16 @@ const fetchStackFiles = async (module) => {
 			return;
 		}
 
-		// Get all directories in the compose directory
-		const entries = await fs.promises.readdir(composeDir, { withFileTypes: true });
-		const appDirs = entries
-			.filter(entry => entry.isDirectory())
-			.map(entry => entry.name);
-
+		// Get all installed applications from module state (configured)
+		const configured = module.getState('configured') || [];
+		const installedApps = configured.filter((item) => { return item.type === 'app'; });
+		
 		// Get templates from module state
 		const templates = module.getState('templates') || [];
 		
-		// Update compose files for each app that has a template
-		for (const appName of appDirs) {
+		// Update compose files for each installed app that has a template
+		for (const app of installedApps) {
+			const appName = app.name;
 			const template = templates.find((template) => { return template.name === appName; });
 			
 			if (!template) {

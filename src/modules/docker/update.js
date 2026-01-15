@@ -20,7 +20,7 @@ const updateApp = async (job, module) => {
 	}
 	
 	const composeProject = container.labels?.comDockerComposeProject;
-	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir;
+	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
 	const composeProjectContainers = module.getState('containers')?.filter((container) => {
 		return container.labels && container.labels['comDockerComposeProject'] === composeProject;
 	});

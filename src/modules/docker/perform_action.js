@@ -1,3 +1,4 @@
+const path = require('path');
 const { execa } = require('execa');
 const docker = require('../../utils/docker_client');
 const DataService = require('../../database/data_service');
@@ -25,6 +26,7 @@ const performAppAction = async (job, module) => {
 	if (composeProject === false) {
 		throw new Error(`${existingApp.title} app is not set up to perform ${config.action} action.`);
 	}
+		
 	let action = [config.action];
 	if (config.action === 'recreate') {
 		action = ['up', '-d', '--force-recreate'];
@@ -32,7 +34,10 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'uninstall') {
 		action = ['down', '-v'];
 	}
-	await execa('docker', ['compose', '-f', module.composeFile(composeProject), ...action]);
+	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
+	await execa('docker', ['compose', ...action], {
+		cwd: composeProjectDir
+	});
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');

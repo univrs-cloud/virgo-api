@@ -115,6 +115,7 @@ const getAppsResourceMetrics = async (module) => {
 };
 
 const register = (module) => {
+	getContainers(module);
 	getAppsResourceMetrics(module);
 
 	module.eventEmitter

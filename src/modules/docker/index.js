@@ -1,5 +1,4 @@
 const path = require('path');
-const docker = require('../../utils/docker_client');
 const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
 
@@ -44,7 +43,7 @@ class DockerModule extends BaseModule {
 		return this.#composeDir;
 	}
 
-	get composeFile() {
+	get projectComposeFile() {
 		return (composeProject) => {
 			return path.join(this.composeDir, composeProject, 'docker-compose.yml');
 		};
