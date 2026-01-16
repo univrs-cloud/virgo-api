@@ -177,6 +177,44 @@ class MetricsModule extends BaseModule {
 			
 			const seriesToQuery = targetSeriesId ? [targetSeriesId] : seriesIds;
 			
+			// If filtering by instance, collect values from single series
+			// Otherwise, aggregate across all instances (e.g., all disk devices)
+			if (instanceFilter !== null) {
+				for (const seriesId of seriesToQuery) {
+					const valResponse = await fetch(
+						`${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=now&interval=${this.#INTERVAL_SECONDS}s`,
+						{ signal: AbortSignal.timeout(30000) }
+					);
+					
+					if (!valResponse.ok) continue;
+
+					let values = await valResponse.json();
+					if (!values || values.length === 0) continue;
+
+					values = values.filter(v => v.instance === targetInstance.instance);
+
+					if (values.length === 0) continue;
+
+					const parsedValues = values
+						.map(v => ({
+							timestamp: v.timestamp,
+							value: parseFloat(v.value),
+							instance: v.instance
+						}))
+						.filter(v => !isNaN(v.value));
+
+					if (parsedValues.length > bestValues.length) {
+						bestValues = parsedValues;
+					}
+				}
+
+				bestValues.sort((a, b) => a.timestamp - b.timestamp);
+				return { values: bestValues };
+			}
+
+			// Aggregate across all instances (e.g., sum all disk devices)
+			const allValuesByTimestamp = new Map();
+			
 			for (const seriesId of seriesToQuery) {
 				const valResponse = await fetch(
 					`${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=now&interval=${this.#INTERVAL_SECONDS}s`,
@@ -188,25 +226,24 @@ class MetricsModule extends BaseModule {
 				let values = await valResponse.json();
 				if (!values || values.length === 0) continue;
 
-				if (instanceFilter !== null && targetInstance) {
-					values = values.filter(v => v.instance === targetInstance.instance);
-				}
+				for (const v of values) {
+					const value = parseFloat(v.value);
+					if (isNaN(value)) continue;
 
-				if (values.length === 0) continue;
-
-				const parsedValues = values
-					.map(v => ({
-						timestamp: v.timestamp,
-						value: parseFloat(v.value),
-						instance: v.instance
-					}))
-					.filter(v => !isNaN(v.value));
-
-				if (parsedValues.length > bestValues.length) {
-					bestValues = parsedValues;
+					const existing = allValuesByTimestamp.get(v.timestamp);
+					if (existing) {
+						existing.value += value;
+					} else {
+						allValuesByTimestamp.set(v.timestamp, {
+							timestamp: v.timestamp,
+							value: value,
+							instance: null // Aggregated across instances
+						});
+					}
 				}
 			}
 
+			bestValues = Array.from(allValuesByTimestamp.values());
 			bestValues.sort((a, b) => a.timestamp - b.timestamp);
 			return { values: bestValues };
 		} catch (error) {
@@ -311,7 +348,10 @@ class MetricsModule extends BaseModule {
 			});
 
 			const diskUtil = this.#buildMetricGrid(diskRates, p => {
-				const bytesPerSec = p.value;
+				// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
+				// Convert to bytes/s for consistency with other metrics
+				const kibibytesPerSec = p.value;
+				const bytesPerSec = kibibytesPerSec * 1024;
 				if (bytesPerSec > this.scaleUseDisks) this.scaleUseDisks = this.#scaleForValue(bytesPerSec);
 				return {
 					normalized: this.#clamp01(bytesPerSec / this.scaleUseDisks),
