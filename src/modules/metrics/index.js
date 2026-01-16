@@ -133,7 +133,7 @@ class MetricsModule extends BaseModule {
 		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
-	async #pcpQuery(metric, instanceFilter = null) {
+	async #pcpQuery(metric, instanceFilter = null, aggregateInstances = false) {
 		try {
 			const response = await fetch(
 				`${this.#pcpApiUrl}/series/query?expr=${encodeURIComponent(metric)}`,
@@ -178,7 +178,6 @@ class MetricsModule extends BaseModule {
 			const seriesToQuery = targetSeriesId ? [targetSeriesId] : seriesIds;
 			
 			// If filtering by instance, collect values from single series
-			// Otherwise, aggregate across all instances (e.g., all disk devices)
 			if (instanceFilter !== null) {
 				for (const seriesId of seriesToQuery) {
 					const valResponse = await fetch(
@@ -212,9 +211,45 @@ class MetricsModule extends BaseModule {
 				return { values: bestValues };
 			}
 
-			// Aggregate across all instances (e.g., sum all disk devices)
-			const allValuesByTimestamp = new Map();
-			
+			// If aggregateInstances is true, sum all instances (e.g., all disk devices)
+			// Otherwise, take the series with the most values (e.g., memory metrics)
+			if (aggregateInstances) {
+				const allValuesByTimestamp = new Map();
+				
+				for (const seriesId of seriesToQuery) {
+					const valResponse = await fetch(
+						`${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=now&interval=${this.#INTERVAL_SECONDS}s`,
+						{ signal: AbortSignal.timeout(30000) }
+					);
+					
+					if (!valResponse.ok) continue;
+
+					let values = await valResponse.json();
+					if (!values || values.length === 0) continue;
+
+					for (const v of values) {
+						const value = parseFloat(v.value);
+						if (isNaN(value)) continue;
+
+						const existing = allValuesByTimestamp.get(v.timestamp);
+						if (existing) {
+							existing.value += value;
+						} else {
+							allValuesByTimestamp.set(v.timestamp, {
+								timestamp: v.timestamp,
+								value: value,
+								instance: null // Aggregated across instances
+							});
+						}
+					}
+				}
+
+				bestValues = Array.from(allValuesByTimestamp.values());
+				bestValues.sort((a, b) => a.timestamp - b.timestamp);
+				return { values: bestValues };
+			}
+
+			// For non-aggregated metrics (like memory), take the series with most values
 			for (const seriesId of seriesToQuery) {
 				const valResponse = await fetch(
 					`${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=now&interval=${this.#INTERVAL_SECONDS}s`,
@@ -226,24 +261,19 @@ class MetricsModule extends BaseModule {
 				let values = await valResponse.json();
 				if (!values || values.length === 0) continue;
 
-				for (const v of values) {
-					const value = parseFloat(v.value);
-					if (isNaN(value)) continue;
+				const parsedValues = values
+					.map(v => ({
+						timestamp: v.timestamp,
+						value: parseFloat(v.value),
+						instance: v.instance
+					}))
+					.filter(v => !isNaN(v.value));
 
-					const existing = allValuesByTimestamp.get(v.timestamp);
-					if (existing) {
-						existing.value += value;
-					} else {
-						allValuesByTimestamp.set(v.timestamp, {
-							timestamp: v.timestamp,
-							value: value,
-							instance: null // Aggregated across instances
-						});
-					}
+				if (parsedValues.length > bestValues.length) {
+					bestValues = parsedValues;
 				}
 			}
 
-			bestValues = Array.from(allValuesByTimestamp.values());
 			bestValues.sort((a, b) => a.timestamp - b.timestamp);
 			return { values: bestValues };
 		} catch (error) {
@@ -265,7 +295,7 @@ class MetricsModule extends BaseModule {
 				this.#pcpQuery('mem.physmem'),
 				this.#pcpQuery('mem.util.available'),
 				this.#pcpQuery('swap.pagesout'),
-				this.#pcpQuery('disk.all.total_bytes'),
+				this.#pcpQuery('disk.all.total_bytes', null, true),
 				this.#pcpQuery('network.interface.total.bytes', this.#defaultInterface),
 			]);
 
