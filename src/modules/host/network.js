@@ -108,11 +108,13 @@ const updateIdentifier = async (job, module) => {
 };
 
 const createBondConnection = async () => {
-	const bondOptions = `mode=active-backup,miimon=100,primary=${PRIMARY_INTERFACE}`;
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=30000`;
 	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', bondOptions]);
 };
 
 const updateBondConnection = async (config) => {
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=30000`;
+	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', bondOptions]);
 	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
 	if (config.method === 'manual') {
 		args.push('ipv4.addresses', `${config.ipAddress}/${config.netmask}`);
@@ -129,11 +131,13 @@ const addBondSlave = async (interfaceName) => {
 	const slaveName = `${BOND_NAME}-${interfaceName}`;
 	
 	if (await connectionExists(slaveName)) {
+		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', '60000']);
 		return true;
 	}
 	
 	try {
 		await execa('nmcli', ['connection', 'add', 'type', 'ethernet', 'con-name', slaveName, 'ifname', interfaceName, 'master', BOND_NAME]);
+		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', '60000']);
 		return true;
 	} catch (error) {
 		return false;
