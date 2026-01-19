@@ -28,10 +28,6 @@ const Application = sequelize.define('Application', {
 	icon: {
 		type: DataTypes.STRING,
 		allowNull: true
-	},
-	url: {
-		type: DataTypes.TEXT,
-		allowNull: true
 	}
 });
 
