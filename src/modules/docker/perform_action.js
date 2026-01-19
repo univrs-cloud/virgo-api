@@ -32,7 +32,7 @@ const performAppAction = async (job, module) => {
 		
 	let action = [config.action];
 	if (config.action === 'recreate') {
-		action = ['up', '-d', '--force-recreate'];
+		action = ['up', '-d', '--force-recreate', '--remove-orphans'];
 	}
 	if (config.action === 'uninstall') {
 		action = ['down', '-v'];

@@ -67,6 +67,7 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Installing ${template.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
+		commandOptions: ['--remove-orphans'],
 		callback: (chunk) => {
 			module.updateJobProgress(job, chunk.toString());
 		}

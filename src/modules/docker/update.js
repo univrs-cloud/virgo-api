@@ -59,6 +59,7 @@ const updateApp = async (job, module) => {
 	await module.updateJobProgress(job, `Updating ${existingApp.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
+		commandOptions: ['--remove-orphans'],
 		callback: (chunk) => {
 			module.updateJobProgress(job, chunk.toString());
 		}
