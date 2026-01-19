@@ -108,12 +108,12 @@ const updateIdentifier = async (job, module) => {
 };
 
 const createBondConnection = async () => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=30000`;
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=60000`;
 	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', bondOptions]);
 };
 
 const updateBondConnection = async (config) => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=30000`;
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=60000`;
 	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', bondOptions]);
 	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
 	if (config.method === 'manual') {
