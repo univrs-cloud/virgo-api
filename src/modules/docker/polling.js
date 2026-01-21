@@ -9,10 +9,6 @@ const getContainers = async (module) => {
 	try {
 		let containers = await docker.listContainers({ all: true });
 		containers = camelcaseKeys(containers, { deep: true });
-		containers = containers.map((container) => {
-			container.name = container.names[0].replace('/', '');
-			return container;
-		});
 		module.setState('containers', containers);
 	} catch (error) {
 		module.setState('containers', false);
@@ -29,11 +25,6 @@ const getAppsResourceMetrics = async (module) => {
 	
 	let containers = await docker.listContainers({ all: true });
 	containers = camelcaseKeys(containers, { deep: true });
-	containers = containers.map((container) => {
-		container.name = container.names[0].replace('/', '');
-		return container;
-	});
-	
 	if (containers.length === 0) {
 		setTimeout(() => { getAppsResourceMetrics(module); }, 100);
 		return;
@@ -57,7 +48,6 @@ const getAppsResourceMetrics = async (module) => {
 
 		for (const app of apps) {
 			const projectContainers = await module.findContainersByAppName(app.name);
-
 			const appStat = projectContainers.reduce(
 				(acc, container) => {
 					const containerStat = containerStats.find((containerStat) => { return containerStat.id === container.id; });
