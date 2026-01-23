@@ -34,7 +34,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^5.66.5",
+		"bullmq": "^5.66.7",
 		"camelcase-keys": "^10.0.1",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -61,7 +61,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^25.0.9",
+		"@types/node": "^25.0.10",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
