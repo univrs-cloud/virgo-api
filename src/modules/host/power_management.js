@@ -11,7 +11,6 @@ const reboot = async (socket, module) => {
 	} catch (error) {
 		module.setState('reboot', false);
 	}
-
 	module.nsp.emit('host:reboot', module.getState('reboot'));
 };
 
@@ -26,7 +25,6 @@ const shutdown = async (socket, module) => {
 	} catch (error) {
 		module.setState('shutdown', false);
 	}
-
 	module.nsp.emit('host:shutdown', module.getState('shutdown'));
 };
 

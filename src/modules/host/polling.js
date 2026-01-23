@@ -22,7 +22,6 @@ const getNetworkStats = async (module) => {
 	} catch (error) {
 		module.setState('networkStats', false);
 	}
-
 	module.nsp.emit('host:network:stats', module.getState('networkStats'));
 };
 
@@ -35,7 +34,6 @@ const getCpuStats = async (module) => {
 	} catch (error) {
 		module.setState('cpuStats', false);
 	}
-
 	module.nsp.emit('host:cpu:stats', module.getState('cpuStats'));
 };
 
@@ -48,6 +46,31 @@ const getMemory = async (module) => {
 	}
 
 	module.nsp.emit('host:memory', module.getState('memory'));
+};
+
+const getDrives = async (module) => {
+	try {
+		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
+			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
+			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
+		])
+		let drives = JSON.parse(smartctl);
+		let nvme = JSON.parse(nvmeList);
+		module.setState('drives', drives.map((drive, index) => {
+			return {
+				name: drive.device.name,
+				model: drive.model_name,
+				serialNumber: drive.serial_number,
+				capacity: drive.user_capacity,
+				temperature: drive.temperature.current,
+				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
+				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp : 99)
+			};
+		}));
+	} catch (error) {
+		module.setState('drives', false);
+	}
+	module.nsp.emit('host:drives', module.getState('drives'));
 };
 
 const getStorage = async (module) => {
@@ -102,34 +125,19 @@ const getStorage = async (module) => {
 	} catch (error) {
 		module.setState('storage', false);
 	}
-
 	module.nsp.emit('host:storage', module.getState('storage'));
 };
 
-const getDrives = async (module) => {
+const getSnapshots = async (module) => {
 	try {
-		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
-			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
-			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
-		])
-		let drives = JSON.parse(smartctl);
-		let nvme = JSON.parse(nvmeList);
-		module.setState('drives', drives.map((drive, index) => {
-			return {
-				name: drive.device.name,
-				model: drive.model_name,
-				serialNumber: drive.serial_number,
-				capacity: drive.user_capacity,
-				temperature: drive.temperature.current,
-				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
-				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp : 99)
-			};
-		}));
+		const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-r', '-j', '--json-int']);
+		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const snapshots = camelcaseKeys(datasets, { deep: true });
+		module.setState('snapshots', snapshots);
 	} catch (error) {
-		module.setState('drives', false);
+		module.setState('snapshots', false);
 	}
-
-	module.nsp.emit('host:drives', module.getState('drives'));
+	module.nsp.emit('host:storage:snapshots', module.getState('snapshots'));
 };
 
 const getTime = async (module) => {
@@ -141,8 +149,9 @@ const register = (module) => {
 	polls.push(new Poller(module, getNetworkStats, 2000));
 	polls.push(new Poller(module, getCpuStats, 5000));
 	polls.push(new Poller(module, getMemory, 10000));
-	polls.push(new Poller(module, getStorage, 60000));
 	polls.push(new Poller(module, getDrives, 60000));
+	polls.push(new Poller(module, getStorage, 60000));
+	polls.push(new Poller(module, getSnapshots, 60 * 60 * 1000));
 	polls.push(new Poller(module, getTime, 60000));
 };
 

@@ -118,11 +118,14 @@ class HostModule extends BaseModule {
 		if (this.getState('memory')) {
 			socket.emit('host:memory', this.getState('memory'));
 		}
+		if (this.getState('drives')) {
+			socket.emit('host:drives', this.getState('drives'));
+		}
 		if (this.getState('storage')) {
 			socket.emit('host:storage', this.getState('storage'));
 		}
-		if (this.getState('drives')) {
-			socket.emit('host:drives', this.getState('drives'));
+		if (this.getState('snapshots')) {
+			socket.emit('host:storage:snapshots', this.getState('snapshots'));
 		}
 		if (this.getState('time')) {
 			socket.emit('host:time', this.getState('time'));
