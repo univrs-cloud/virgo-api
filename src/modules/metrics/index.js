@@ -342,9 +342,12 @@ class MetricsModule extends BaseModule {
 				};
 			});
 
+			// Pre-compute max load to ensure consistent normalization across all data points
+			const maxLoad = loadAvgRaw.values.reduce((max, p) => Math.max(max, p.value), 0);
+			if (maxLoad > this.scaleSatCPU) this.scaleSatCPU = this.#scaleForValue(maxLoad);
+
 			const cpuSat = this.#buildMetricGrid(loadAvgRaw.values, p => {
 				const load = p.value;
-				if (load > this.scaleSatCPU) this.scaleSatCPU = this.#scaleForValue(load);
 				return {
 					normalized: this.#clamp01(load / this.scaleSatCPU),
 					raw: load
@@ -377,12 +380,16 @@ class MetricsModule extends BaseModule {
 				};
 			});
 
+			// Pre-compute max disk I/O to ensure consistent normalization across all data points
+			// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
+			const maxDiskBytesPerSec = diskRates.reduce((max, p) => Math.max(max, p.value * 1024), 0);
+			if (maxDiskBytesPerSec > this.scaleUseDisks) this.scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
+
 			const diskUtil = this.#buildMetricGrid(diskRates, p => {
 				// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
 				// Convert to bytes/s for consistency with other metrics
 				const kibibytesPerSec = p.value;
 				const bytesPerSec = kibibytesPerSec * 1024;
-				if (bytesPerSec > this.scaleUseDisks) this.scaleUseDisks = this.#scaleForValue(bytesPerSec);
 				return {
 					normalized: this.#clamp01(bytesPerSec / this.scaleUseDisks),
 					raw: bytesPerSec
