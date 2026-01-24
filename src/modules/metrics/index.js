@@ -374,8 +374,11 @@ class MetricsModule extends BaseModule {
 
 			const memSat = this.#buildMetricGrid(swapOutRates, p => {
 				const swapoutRate = p.value;
+				// Logarithmic scale: 1 → 0, 10 → 0.33, 100 → 0.67, 1000+ → 1
+				// 5-10 pages/s is considered "frequent swapping" that impacts performance
+				const normalized = swapoutRate <= 1 ? 0 : Math.min(1, Math.log10(swapoutRate) / 3);
 				return {
-					normalized: swapoutRate > 1000 ? 1 : (swapoutRate > 1 ? 0.3 : 0),
+					normalized,
 					raw: swapoutRate
 				};
 			});
