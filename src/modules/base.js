@@ -5,6 +5,7 @@ const { getIO } = require('../socket');
 const eventEmitter = require('../utils/event_emitter');
 const nlp = require('../utils/nlp');
 const config = require('../../config');
+const { getQueueName } = require('../queues');
 
 class BaseModule {
 	#name;
@@ -75,7 +76,8 @@ class BaseModule {
 				{
 					name: name,
 					opts: {
-						removeOnComplete: 1
+						removeOnComplete: 1,
+						removeOnFail: 1
 					}
 				}
 			);
@@ -136,18 +138,24 @@ class BaseModule {
 	}
 
 	#setupQueues() {
-		this.#queue = new Queue(`${this.#name}-jobs`);
+		const connection = {
+			host: config.redis.host,
+			port: config.redis.port
+		};
+		const queueName = getQueueName(this.#name);
+		this.#queue = new Queue(queueName, {
+			connection,
+			defaultJobOptions: {
+				removeOnComplete: 100,
+				removeOnFail: 100
+			}
+		});
 		this.#worker = new Worker(
-			`${this.#name}-jobs`,
+			queueName,
 			async (job) => {
 				return await this.#processJob(job);
 			},
-			{
-				connection: {
-					host: config.redis.host,
-					port: config.redis.port
-				}
-			}
+			{ connection }
 		);
 		this.#worker.on('completed', async (job, result) => {
 			if (job) {

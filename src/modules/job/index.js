@@ -1,7 +1,11 @@
 const BaseModule = require('../base');
+const { QUEUE_NAMES } = require('../queues');
+
+// Exclude job-jobs (self) and weather-jobs from monitoring
+const EXCLUDED_FROM_MONITORING = ['job-jobs', 'weather-jobs'];
 
 class JobModule extends BaseModule {
-	#queues = ['configuration-jobs', 'host-jobs', 'docker-jobs', 'bookmark-jobs', 'user-jobs', 'share-jobs', 'metrics-jobs'];
+	#queues = QUEUE_NAMES.filter((name) => !EXCLUDED_FROM_MONITORING.includes(name));
 
 	constructor() {
 		super('job');
