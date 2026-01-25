@@ -1,5 +1,5 @@
 const BaseModule = require('../base');
-const { QUEUE_NAMES } = require('../queues');
+const { QUEUE_NAMES } = require('../../queues');
 
 // Exclude job-jobs (self) and weather-jobs from monitoring
 const EXCLUDED_FROM_MONITORING = ['job-jobs', 'weather-jobs'];
