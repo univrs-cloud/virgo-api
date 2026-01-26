@@ -169,13 +169,10 @@ class DataService {
 		try {
 			const { traefik, ...bookmarkFields } = bookmarkData;
 			
-			// Get existing bookmark if updating (by id) to handle name changes
-			let oldName = null;
+			// Get existing bookmark if updating (by id) to find old traefik config
+			let existingBookmark = null;
 			if (bookmarkFields.id) {
-				const existing = await Bookmark.findByPk(bookmarkFields.id, { raw: true });
-				if (existing && existing.name !== bookmarkFields.name) {
-					oldName = existing.name;
-				}
+				existingBookmark = await Bookmark.findByPk(bookmarkFields.id, { raw: true });
 			}
 			
 			const [ entry ] = await Bookmark.upsert({
@@ -191,19 +188,23 @@ class DataService {
 			await DataService.setItemOrder(bookmark.id, 'bookmark', order);
 			
 			// Handle Traefik config
+			// Find existing config using OLD url (if updating) or new url (if creating)
+			const configs = await traefikConfig.readAll();
+			const oldUrl = existingBookmark?.url || bookmarkFields.url;
+			const existingConfig = configs.find((c) => traefikConfig.match(c, { url: oldUrl }));
+			
 			if (traefik === null) {
 				// Explicitly set to null - delete existing config
-				if (oldName) {
-					await traefikConfig.remove(oldName);
+				if (existingConfig) {
+					await traefikConfig.remove(existingConfig.subdomain);
 				}
-				await traefikConfig.remove(bookmarkFields.name);
 			} else if (traefik) {
-				// Delete old config if name changed
-				if (oldName) {
-					await traefikConfig.remove(oldName);
+				// Delete old config if subdomain changed
+				if (existingConfig && existingConfig.subdomain !== traefik.subdomain) {
+					await traefikConfig.remove(existingConfig.subdomain);
 				}
-				// Write new/updated config
-				await traefikConfig.write(bookmarkFields.name, {
+				// Write new/updated config using subdomain as filename
+				await traefikConfig.write(traefik.subdomain, {
 					subdomain: traefik.subdomain,
 					backendUrl: traefik.backendUrl,
 					isAuthRequired: traefik.isAuthRequired ?? true
@@ -226,13 +227,17 @@ class DataService {
 				return false;
 			}
 			
+			// Find and delete associated Traefik config file (if it exists)
+			const configs = await traefikConfig.readAll();
+			const existingConfig = configs.find((c) => traefikConfig.match(c, { url: bookmark.url }));
+			if (existingConfig) {
+				await traefikConfig.remove(existingConfig.subdomain);
+			}
+			
 			await DataService.deleteItemOrder(bookmark.id, 'bookmark');
 			const deleted = await Bookmark.destroy({
 				where: { name }
 			});
-			
-			// Delete associated Traefik config file (if it exists)
-			await traefikConfig.remove(name);
 			
 			return deleted > 0;
 		} catch (error) {
