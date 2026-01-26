@@ -10,11 +10,13 @@ const updateBookmark = async (job, module) => {
 
 	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
 	const bookmark = {
-		name: changeCase.kebabCase(config.title),
+		id: existingBookmark.id,
+		name: config.name || changeCase.kebabCase(config.title),
 		category: config.category,
 		icon: existingBookmark.icon,
 		title: config.title,
 		url: config.url,
+		traefik: config.traefik,
 		order: existingBookmark.order
 	};
 	await DataService.setBookmark(bookmark);

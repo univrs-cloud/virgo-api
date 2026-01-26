@@ -1,6 +1,7 @@
 const { sequelize } = require('../database/index');
 const Configuration = require('../database/models/Configuration');
 const { Application, Bookmark, ItemOrder } = require('../database/models/associations');
+const traefikConfig = require('../utils/traefik_config');
 
 class DataService {
 	static async initialize() {
@@ -89,7 +90,7 @@ class DataService {
 	static async getApplication(name) {
 		try {
 			const application = await Application.findOne({
-				where: { name: name },
+				where: { name },
 				raw: true
 			});
 			return application;
@@ -121,14 +122,15 @@ class DataService {
 	static async deleteApplication(name) {
 		try {
 			const application = await Application.findOne({
-				where: { name: name }
+				where: { name }
 			});
 			if (!application) {
 				return false;
 			}
+
 			await DataService.deleteItemOrder(application.id, 'app');
 			const deleted = await Application.destroy({
-				where: { name: name }
+				where: { name }
 			});
 			return deleted > 0;
 		} catch (error) {
@@ -143,7 +145,7 @@ class DataService {
 			const bookmarks = await Bookmark.findAll({
 				raw: true
 			});
-			return bookmarks;
+			return await traefikConfig.enrichBookmarks(bookmarks);
 		} catch (error) {
 			console.error(`Error reading bookmarks from database:`, error);
 			return [];
@@ -153,7 +155,7 @@ class DataService {
 	static async getBookmark(name) {
 		try {
 			const bookmark = await Bookmark.findOne({
-				where: { name: name },
+				where: { name },
 				raw: true
 			});
 			return bookmark;
@@ -165,16 +167,49 @@ class DataService {
 
 	static async setBookmark(bookmarkData) {
 		try {
+			const { traefik, ...bookmarkFields } = bookmarkData;
+			
+			// Get existing bookmark if updating (by id) to handle name changes
+			let oldName = null;
+			if (bookmarkFields.id) {
+				const existing = await Bookmark.findByPk(bookmarkFields.id, { raw: true });
+				if (existing && existing.name !== bookmarkFields.name) {
+					oldName = existing.name;
+				}
+			}
+			
 			const [ entry ] = await Bookmark.upsert({
-				name: bookmarkData.name,
-				category: bookmarkData.category,
-				title: bookmarkData.title,
-				icon: bookmarkData.icon,
-				url: bookmarkData.url
+				id: bookmarkFields.id,
+				name: bookmarkFields.name,
+				category: bookmarkFields.category,
+				title: bookmarkFields.title,
+				icon: bookmarkFields.icon,
+				url: bookmarkFields.url
 			}, { returning: true });
 			const bookmark = entry.get({ plain: true });
 			const order = await DataService.getNextOrderForCategory(bookmark.category);
 			await DataService.setItemOrder(bookmark.id, 'bookmark', order);
+			
+			// Handle Traefik config
+			if (traefik === null) {
+				// Explicitly set to null - delete existing config
+				if (oldName) {
+					await traefikConfig.remove(oldName);
+				}
+				await traefikConfig.remove(bookmarkFields.name);
+			} else if (traefik) {
+				// Delete old config if name changed
+				if (oldName) {
+					await traefikConfig.remove(oldName);
+				}
+				// Write new/updated config
+				await traefikConfig.write(bookmarkFields.name, {
+					subdomain: traefik.subdomain,
+					backendUrl: traefik.backendUrl,
+					isAuthRequired: traefik.isAuthRequired ?? true
+				});
+			}
+			
 			return true;
 		} catch (error) {
 			console.error(`Error writing bookmark '${bookmarkData.name}' to database:`, error);
@@ -185,15 +220,20 @@ class DataService {
 	static async deleteBookmark(name) {
 		try {
 			const bookmark = await Bookmark.findOne({
-				where: { name: name }
+				where: { name }
 			});
 			if (!bookmark) {
 				return false;
 			}
+			
 			await DataService.deleteItemOrder(bookmark.id, 'bookmark');
 			const deleted = await Bookmark.destroy({
-				where: { name: name }
+				where: { name }
 			});
+			
+			// Delete associated Traefik config file (if it exists)
+			await traefikConfig.remove(name);
+			
 			return deleted > 0;
 		} catch (error) {
 			console.error(`Error deleting bookmark '${name}' from database:`, error);
@@ -254,7 +294,8 @@ class DataService {
 				const { ItemOrder, ...data } = bookmark.get({ plain: true });
 				return { ...data, type: 'bookmark', order: ItemOrder?.order ?? null };
 			});
-			return [...appEntries, ...bookmarkEntries];
+			const enrichedBookmarkEntries = await traefikConfig.enrichBookmarks(bookmarkEntries);
+			return [...appEntries, ...enrichedBookmarkEntries];
 		} catch (error) {
 			console.error(`Error getting configured items:`, error);
 			return [];
@@ -266,7 +307,7 @@ class DataService {
 			const appOrderEntries = await ItemOrder.findAll({
 				include: [{
 					model: Application,
-					where: { category: category },
+					where: { category },
 					attributes: []
 				}],
 				attributes: ['order']
@@ -274,7 +315,7 @@ class DataService {
 			const bookmarkOrderEntries = await ItemOrder.findAll({
 				include: [{
 					model: Bookmark,
-					where: { category: category },
+					where: { category },
 					attributes: []
 				}],
 				attributes: ['order']
