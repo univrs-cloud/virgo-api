@@ -8,7 +8,11 @@ const initializeSocket = (server) => {
 	}
 	
 	io = new Server(server, {
-		path: '/api'
+		path: '/api',
+		cors: {
+			origin: true,
+			credentials: true
+		}
 	});
 
 	return io;
