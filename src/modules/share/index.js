@@ -7,7 +7,9 @@ class ShareModule extends BaseModule {
 		'/etc/samba/smb.conf',
 		'/messier/.shares'
 	];
-	
+	#timeMachinesConf = '/messier/.shares/time_machines.conf';
+	#timeMachinesDatasetPrefix = 'messier/time_machines';
+
 	constructor() {
 		super('share');
 
@@ -24,6 +26,14 @@ class ShareModule extends BaseModule {
 
 	get configurationFiles() {
 		return this.#configurationFiles;
+	}
+
+	get timeMachinesConf() {
+		return this.#timeMachinesConf;
+	}
+
+	get timeMachinesDatasetPrefix() {
+		return this.#timeMachinesDatasetPrefix;
 	}
 
 	onConnection(socket) {
