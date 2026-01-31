@@ -7,12 +7,12 @@ const slug = (comment) => {
 	return (comment || '').toLowerCase().trim().replace(/\s+/g, '_');
 };
 
-const createTimeMachineShare = async (job, module) => {
+const createTimeMachine = async (job, module) => {
 	const { config } = job.data;
 	const { comment, validUsers = [], refquota: refquotaRaw } = config;
 	const dataset = `${module.timeMachinesDataset}/${slug(comment)}`;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
-	await module.updateJobProgress(job, `Creating share ${comment}...`);
+	await module.updateJobProgress(job, `Creating time machine ${comment}...`);
 	await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
 	let shares = {};
 	try {
@@ -42,7 +42,7 @@ const createTimeMachineShare = async (job, module) => {
 	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Share ${comment} created.`;
+	return `Time machine ${comment} created.`;
 };
 
 const createShare = async (job, module) => {
@@ -54,7 +54,7 @@ const createShare = async (job, module) => {
 	}
 
 	if (type === 'timeMachine') {
-		return createTimeMachineShare(job, module);
+		return createTimeMachine(job, module);
 	}
 
 	// folder type not yet implemented
