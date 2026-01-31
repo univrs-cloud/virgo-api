@@ -1,52 +1,45 @@
 const fs = require('fs');
 const path = require('path');
+const ini = require('ini');
 const { execa } = require('execa');
 
 const slug = (comment) => {
 	return (comment || '').toLowerCase().trim().replace(/\s+/g, '_');
 };
 
-const refquotaToZfsString = (bytes) => {
-	if (bytes >= 1024 ** 4) return `${Math.floor(bytes / 1024 ** 4)}T`;
-	if (bytes >= 1024 ** 3) return `${Math.floor(bytes / 1024 ** 3)}G`;
-	if (bytes >= 1024 ** 2) return `${Math.floor(bytes / 1024 ** 2)}M`;
-	if (bytes >= 1024) return `${Math.floor(bytes / 1024)}K`;
-	return `${bytes}`;
-};
-
 const createTimeMachineShare = async (job, module) => {
 	const { config } = job.data;
 	const { comment, validUsers = [], refquota: refquotaRaw } = config;
-	const dataset = `${module.timeMachinesDatasetPrefix}/${slug(comment)}`;
-	const refquota = (Number.isInteger(refquotaRaw) ? refquotaToZfsString(refquotaRaw) : 'none');
-	const section = `[time_machine_${slug(comment)}]
-    path = /time_machines/${slug(comment)}
-    comment = ${comment}
-    browseable = yes
-    writable = yes
-    read only = no
-    guest ok = no
-    create mask = 0775
-    directory mask = 0755
-    force user = root
-    valid users = ${validUsers.join(' ')}
-    enable time machine
-    fruit:time machine = yes
-
-`;
+	const dataset = `${module.timeMachinesDataset}/${slug(comment)}`;
+	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
 	await module.updateJobProgress(job, `Creating share ${comment}...`);
 	await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
-	let existingConf = '';
+	let shares = {};
 	try {
-		existingConf = fs.readFileSync(module.timeMachinesConf, 'utf8');
+		const existingConf = fs.readFileSync(module.timeMachinesConf, 'utf8');
+		shares = ini.parse(existingConf);
 	} catch {
 		// missing or unreadable: treat as empty and write new file
 	}
+	shares[`time_machine_${slug(comment)}`] = {
+		path: `/time_machines/${slug(comment)}`,
+		comment,
+		'browseable': 'yes',
+		'writable': 'yes',
+		'read only': 'no',
+		'guest ok': 'no',
+		'create mask': '0775',
+		'directory mask': '0755',
+		'force user': 'root',
+		'valid users': validUsers.join(' '),
+		'enable time machine': 'yes',
+		'fruit:time machine': 'yes'
+	};
 	const dir = path.dirname(module.timeMachinesConf);
 	if (!fs.existsSync(dir)) {
 		fs.mkdirSync(dir, { recursive: true });
 	}
-	fs.writeFileSync(module.timeMachinesConf, existingConf + section, 'utf8');
+	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
 	return `Share ${comment} created.`;

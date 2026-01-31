@@ -8,7 +8,7 @@ class ShareModule extends BaseModule {
 		'/messier/.shares'
 	];
 	#timeMachinesConf = '/messier/.shares/time_machines.conf';
-	#timeMachinesDatasetPrefix = 'messier/time_machines';
+	#timeMachinesDataset = 'messier/time_machines';
 
 	constructor() {
 		super('share');
@@ -32,14 +32,33 @@ class ShareModule extends BaseModule {
 		return this.#timeMachinesConf;
 	}
 
-	get timeMachinesDatasetPrefix() {
-		return this.#timeMachinesDatasetPrefix;
+	get timeMachinesDataset() {
+		return this.#timeMachinesDataset;
 	}
 
 	onConnection(socket) {
 		if (this.getState('shares')) {
 			socket.emit('shares', this.getState('shares'));
 		}
+	}
+
+	async pathToZfsDataset(sharePath) {
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint', '-j']);
+		const datasets = JSON.parse(zfsList)?.datasets || {};
+		for (const dataset of Object.values(datasets)) {
+			if (sharePath === dataset?.properties?.mountpoint?.value) {
+				return dataset.name;
+			}
+		}
+		return null;
+	}
+	
+	refquotaToZfsString(bytes) {
+		if (bytes >= 1024 ** 4) return `${Math.floor(bytes / 1024 ** 4)}T`;
+		if (bytes >= 1024 ** 3) return `${Math.floor(bytes / 1024 ** 3)}G`;
+		if (bytes >= 1024 ** 2) return `${Math.floor(bytes / 1024 ** 2)}M`;
+		if (bytes >= 1024) return `${Math.floor(bytes / 1024)}K`;
+		return `${bytes}`;
 	}
 
 	async #loadShares() {
