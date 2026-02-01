@@ -58,7 +58,10 @@ const update = async (socket, module) => {
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			`"echo $$ > ${module.updatePidFile}; apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}; echo $? > ${module.updateExitStatusFile}"`
+			// Use newlines instead of semicolons to avoid systemd "Ignoring unknown escape sequences" for \;
+			`"echo $$ > ${module.updatePidFile}
+apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}
+echo $? > ${module.updateExitStatusFile}"`
 		], { shell: true });
 	} catch (error) {
 		console.error(error.message);
