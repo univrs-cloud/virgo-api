@@ -1,6 +1,7 @@
 const { execa } = require('execa');
 const ini = require('ini');
 const BaseModule = require('../base');
+const TimeMachine = require('../../utils/time_machine');
 
 class ShareModule extends BaseModule {
 	#configurationFiles = [
@@ -102,6 +103,14 @@ class ShareModule extends BaseModule {
 					share.cap = (size > 0 ? used / size * 100 : 0);
 				} catch (error) {
 					console.error(`Error checking disk space for ${name}:`, error);
+				}
+				if (share.isTimeMachine && share.path) {
+					try {
+						const tm = new TimeMachine(share.path);
+						share.timeMachine = await tm.getInfo();
+					} catch (error) {
+						share.timeMachine = null;
+					}
 				}
 				return share;
 			});
