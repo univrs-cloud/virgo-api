@@ -19,7 +19,7 @@ const watchConfigurations = (module) => {
 		}
 		// If it's a file
 		return watchedPaths[dir] && watchedPaths[dir].includes(file);
-	}
+	};
 	
 	if (configurationWatcher) {
 		return configurationWatcher;
@@ -66,7 +66,7 @@ const watchConfigurations = (module) => {
 			clearInterval(retryInterval);
 		}
 	}, 10000);
-}
+};
 
 const getTimeMachinePathsFromConfig = async () => {
 	try {
@@ -96,6 +96,12 @@ const getTimeMachinePathsFromConfig = async () => {
 };
 
 const watchTimeMachines = async (module) => {
+	const isPathWatched = (pathToCheck) => {
+		const watchedPaths = timeMachineWatcher.getWatched();
+		const dir = pathToCheck.split('/').slice(0, -1).join('/') || '/';
+		const file = pathToCheck.split('/').pop();
+		return watchedPaths[pathToCheck] !== undefined || (watchedPaths[dir] && watchedPaths[dir].includes(file));
+	};
 	const paths = await getTimeMachinePathsFromConfig();
 
 	if (!timeMachineWatcher) {
@@ -105,22 +111,8 @@ const watchTimeMachines = async (module) => {
 		});
 	}
 
-	const watched = timeMachineWatcher.getWatched();
-	const watchedPaths = Object.keys(watched).flatMap((directory) => {
-		return (watched[directory] || []).map((filename) => {
-			return path.join(directory, filename);
-		});
-	});
-
-	const normalizedPaths = new Set(paths.map((plistPath) => {
-		return path.normalize(plistPath);
-	}));
-	const normalizedWatched = new Set(watchedPaths.map((watchedPath) => {
-		return path.normalize(watchedPath);
-	}));
-
 	paths.forEach((plistPath) => {
-		if (!normalizedWatched.has(path.normalize(plistPath))) {
+		if (!isPathWatched(plistPath)) {
 			try {
 				timeMachineWatcher.add(plistPath);
 			} catch (error) {
@@ -129,10 +121,17 @@ const watchTimeMachines = async (module) => {
 		}
 	});
 
-	watchedPaths.forEach((watchedPath) => {
-		if (!normalizedPaths.has(path.normalize(watchedPath))) {
-			timeMachineWatcher.remove(watchedPath);
-		}
+	const watched = timeMachineWatcher.getWatched();
+	const normalizedPaths = new Set(paths.map((plistPath) => {
+		return path.normalize(plistPath);
+	}));
+	Object.keys(watched).forEach((directory) => {
+		(watched[directory] || []).forEach((filename) => {
+			const watchedPath = path.join(directory, filename);
+			if (!normalizedPaths.has(path.normalize(watchedPath))) {
+				timeMachineWatcher.remove(watchedPath);
+			}
+		});
 	});
 };
 
