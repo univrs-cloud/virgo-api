@@ -10,14 +10,15 @@ let timeMachineWatcher;
 
 const watchConfigurations = (module) => {
 	const isPathWatched = (pathToCheck) => {
+		const normalizedPath = path.normalize(pathToCheck);
 		const watchedPaths = configurationWatcher.getWatched();
-		const dir = pathToCheck.split('/').slice(0, -1).join('/') || '/';
-		const file = pathToCheck.split('/').pop();
 		// If it's a directory
-		if (fs.existsSync(pathToCheck) && fs.lstatSync(pathToCheck).isDirectory()) {
-			return watchedPaths[pathToCheck] !== undefined;
+		if (fs.existsSync(normalizedPath) && fs.lstatSync(normalizedPath).isDirectory()) {
+			return watchedPaths[normalizedPath] !== undefined;
 		}
 		// If it's a file
+		const dir = path.dirname(normalizedPath);
+		const file = path.basename(normalizedPath);
 		return watchedPaths[dir] && watchedPaths[dir].includes(file);
 	};
 	
@@ -96,12 +97,6 @@ const getTimeMachinePathsFromConfig = async () => {
 };
 
 const watchTimeMachines = async (module) => {
-	const isPathWatched = (pathToCheck) => {
-		const watchedPaths = timeMachineWatcher.getWatched();
-		const dir = pathToCheck.split('/').slice(0, -1).join('/') || '/';
-		const file = pathToCheck.split('/').pop();
-		return watchedPaths[pathToCheck] !== undefined || (watchedPaths[dir] && watchedPaths[dir].includes(file));
-	};
 	const paths = await getTimeMachinePathsFromConfig();
 
 	if (!timeMachineWatcher) {
@@ -111,16 +106,20 @@ const watchTimeMachines = async (module) => {
 		});
 	}
 
+	// Add all paths (chokidar handles duplicates gracefully)
 	paths.forEach((plistPath) => {
-		if (!isPathWatched(plistPath)) {
-			try {
-				timeMachineWatcher.add(plistPath);
-			} catch (error) {
-				console.error(`Could not watch ${plistPath}:`, error);
-			}
+		try {
+			timeMachineWatcher.add(plistPath);
+		} catch (error) {
+			console.error(`Could not watch ${plistPath}:`, error);
 		}
 	});
 
+	
+	// Give chokidar a moment to update
+	await new Promise(resolve => setTimeout(resolve, 100));
+	
+	// Remove paths that are no longer in the config
 	const watched = timeMachineWatcher.getWatched();
 	const normalizedPaths = new Set(paths.map((plistPath) => {
 		return path.normalize(plistPath);
