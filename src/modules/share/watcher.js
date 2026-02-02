@@ -117,7 +117,7 @@ const watchTimeMachines = async (module) => {
 
 	
 	// Give chokidar a moment to update
-	await new Promise(resolve => setTimeout(resolve, 100));
+	await new Promise(resolve => setTimeout(resolve, 1000));
 	
 	// Remove paths that are no longer in the config
 	const watched = timeMachineWatcher.getWatched();
