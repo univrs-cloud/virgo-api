@@ -88,7 +88,7 @@ const getTimeMachinePathsFromConfig = async () => {
 		);
 		return machineArrays.flatMap((machines) => {
 			return machines.flatMap((machine) => {
-				return [machine.resultsPath, machine.snapshotHistoryPath];
+				return [machine.snapshotHistoryPath];
 			});
 		});
 	} catch {

@@ -27,7 +27,6 @@ class TimeMachine {
 					const machineDir = path.join(backupPath, name);
 					return {
 						name,
-						resultsPath: path.join(machineDir, 'com.apple.TimeMachine.Results.plist'),
 						snapshotHistoryPath: path.join(machineDir, 'com.apple.TimeMachine.SnapshotHistory.plist')
 					};
 				});
@@ -38,18 +37,14 @@ class TimeMachine {
 
 	/**
 	 * Build full Time Machine backup structure for the share
-	 * Returns machines with snapshots, sizes, progress
+	 * Returns machines with snapshots
 	 */
 	async getInfo() {
 		try {
 			const machines = await TimeMachine.getMachines(this.#backupPath);
 			const info = await Promise.all(
 				machines.map(async (machine) => {
-					const [snapshots, status] = await Promise.all([
-						this.#getSnapshots(machine.snapshotHistoryPath),
-						this.#getStatus(machine.resultsPath)
-					]);
-
+					const snapshots = await this.#getSnapshots(machine.snapshotHistoryPath);
 					const machineInfo = {
 						name: machine.name,
 						snapshots: snapshots.map((snapshot) => {
@@ -59,11 +54,6 @@ class TimeMachine {
 							};
 						})
 					};
-
-					if (status) {
-						machineInfo.status = status;
-					}
-
 					return machineInfo;
 				})
 			);
@@ -98,36 +88,6 @@ class TimeMachine {
 			});
 		} catch {
 			return [];
-		}
-	}
-
-	async #getStatus(resultsPath) {
-		try {
-			const data = await this.#readPlist(resultsPath);
-			if (!data) {
-				return null;
-			}
-
-			const result = {
-				running: data.Running ?? false,
-				bytesUsed: data.BytesUsed || 0,
-				bytesAvailable: data.BytesAvailable || 0
-			};
-
-			const progressData = data.Progress ?? data;
-			if (progressData && (progressData.Percent !== undefined || progressData.bytes !== undefined)) {
-				result.progress = {
-					percent: progressData.Percent ?? 0,
-					bytes: progressData.bytes || 0,
-					totalBytes: progressData.totalBytes || 0,
-					files: progressData.files || 0,
-					totalFiles: progressData.totalFiles || 0,
-					timeRemaining: progressData.TimeRemaining ?? 0
-				};
-			}
-			return result;
-		} catch {
-			return null;
 		}
 	}
 }
