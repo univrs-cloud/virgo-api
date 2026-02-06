@@ -31,7 +31,8 @@ const logsConnect = async (socket, containerId) => {
 				follow: true,
 				stdout: true,
 				stderr: true,
-				tail: 100
+				timestamps: true,
+				tail: 200
 			}
 		);
 
