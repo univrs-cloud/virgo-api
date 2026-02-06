@@ -5,7 +5,7 @@ const docker = require('../../utils/docker_client');
 // Track active terminal sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
 
-const cleanupSession = (socket) => {
+const cleanupSession = async (socket) => {
 	const session = activeSessions.get(socket);
 	if (!session) {
 		return;
@@ -15,7 +15,24 @@ const cleanupSession = (socket) => {
 	socket.off('terminal:resize', session.resizeHandler);
 	socket.off('terminal:disconnect', session.disconnectHandler);
 	socket.off('disconnect', session.socketDisconnectHandler);
-	session.terminalStream?.destroy();
+	// Kill the exec process before destroying the stream
+	if (session.containerExec) {
+		try {
+			// Send exit command to gracefully close the shell
+			if (session.terminalStream && !session.terminalStream.destroyed) {
+				session.terminalStream.write('exit\n');
+			}
+			
+			// Give it a moment to exit gracefully, then destroy
+			await new Promise(resolve => setTimeout(resolve, 100));
+			session.terminalStream?.destroy();
+		} catch (error) {
+			// Exec may already be gone, just destroy the stream
+			session.terminalStream?.destroy();
+		}
+	} else {
+		session.terminalStream?.destroy();
+	}
 	activeSessions.delete(socket);
 };
 
@@ -78,6 +95,7 @@ const terminalConnect = async (socket, containerId) => {
 		// Store session for cleanup
 		activeSessions.set(socket, {
 			terminalStream,
+			containerExec,
 			inputHandler,
 			resizeHandler,
 			disconnectHandler,
