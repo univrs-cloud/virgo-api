@@ -1,7 +1,7 @@
 const BaseModule = require('../base');
 
 class BookmarkModule extends BaseModule {
-	#bookmarkIconsDir = '/var/www/virgo-ui/app/dist/assets/img/bookmarks';
+	#bookmarkIconsDir = '/messier/.config/assets/img/bookmarks';
 
 	constructor() {
 		super('bookmark');

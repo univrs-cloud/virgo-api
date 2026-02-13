@@ -8,7 +8,7 @@ class DockerModule extends BaseModule {
 	#composeDir = '/opt/docker';
 	#appsDataset = 'messier/apps';
 	#appsDir;
-	#appIconsDir = '/var/www/virgo-ui/app/dist/assets/img/apps';
+	#appIconsDir = '/messier/.config/assets/img/apps';
 
 	constructor() {
 		super('docker');
