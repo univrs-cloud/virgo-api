@@ -1,3 +1,7 @@
+const fs = require('fs');
+const path = require('path');
+const stream = require('stream');
+const streamPipeline = require('util').promisify(stream.pipeline);
 const changeCase = require('change-case');
 const DataService = require('../../database/data_service');
 
@@ -9,11 +13,21 @@ const updateBookmark = async (job, module) => {
 	}
 
 	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
+	let icon = existingBookmark.icon;
+	if (config?.icon) {
+		const iconFilename = config.icon.split('/').pop();
+		const responseIcon = await fetch(config.icon);
+		if (responseIcon.ok) {
+			await fs.promises.mkdir(module.bookmarkIconsDir, { recursive: true });
+			await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.bookmarkIconsDir, iconFilename)));
+			icon = iconFilename;
+		}
+	}
 	const bookmark = {
 		id: existingBookmark.id,
 		name: config.name || changeCase.kebabCase(config.title),
 		category: config.category,
-		icon: existingBookmark.icon,
+		icon,
 		title: config.title,
 		url: config.url,
 		traefik: config.traefik,
