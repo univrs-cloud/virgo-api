@@ -9,14 +9,15 @@ class MetricsModule extends BaseModule {
 	#networkSpeedBytesPerSec = (1000 * 1000000) / 8;
 	#defaultInterface = '';
 	#pcpApiUrl = 'http://127.0.0.1:44322';
+	#scaleSatCPU = 4;
+	#scaleUseDisks = 10000;
+	#systemInfoReady;
 
 	constructor() {
 		super('metrics');
 
-		this.scaleSatCPU = 4;
-		this.scaleUseDisks = 10000;
-		
-		this.#loadSystemInfo();
+		// Store the promise so callers can await system info being loaded
+		this.#systemInfoReady = this.#loadSystemInfo();
 
 		this.eventEmitter
 			.on('host:network:interface:updated', async () => {
@@ -79,15 +80,22 @@ class MetricsModule extends BaseModule {
 		return Math.ceil(x / scale) * scale;
 	}
 
+	#snapToMinute(timestamp) {
+		const d = new Date(timestamp);
+		d.setUTCSeconds(0, 0);
+		return d.getTime();
+	}
+
 	#counterToRate(values) {
-		if (values.length < 2) return [];
+		if (values.length < 2) {
+			return [];
+		}
 		
 		const rates = [];
 		for (let i = 1; i < values.length; i++) {
 			const prev = values[i - 1];
 			const curr = values[i];
 			const timeDeltaSec = (curr.timestamp - prev.timestamp) / 1000;
-			
 			if (timeDeltaSec > 0) {
 				const valueDelta = curr.value - prev.value;
 				const rate = valueDelta >= 0 ? valueDelta / timeDeltaSec : 0;
@@ -101,11 +109,24 @@ class MetricsModule extends BaseModule {
 		return rates;
 	}
 
-	#buildMetricGrid(values, mapFn) {
+	/**
+	 * Aggregates values into a per-minute grid.
+	 * 
+	 * @param {Array} values - Raw data points with timestamps
+	 * @param {Function} mapFn - Maps each point to { normalized, raw } or null
+	 * @param {Object} [options]
+	 * @param {string} [options.aggregate='sum'] - How to combine multiple points
+	 *   in the same minute bucket: 'sum' (for rates/counters) or 'average' (for gauges)
+	 */
+	#buildMetricGrid(values, mapFn, { aggregate = 'sum' } = {}) {
 		const dataMap = new Map();
+		const countMap = new Map();
+
 		for (const p of values) {
 			const mapped = mapFn(p);
-			if (mapped === null) continue;
+			if (mapped === null) {
+				continue;
+			}
 			
 			const d = new Date(p.timestamp);
 			d.setUTCSeconds(0, 0);
@@ -121,6 +142,7 @@ class MetricsModule extends BaseModule {
 				} else {
 					existing.raw += mapped.raw;
 				}
+				countMap.set(tsMs, (countMap.get(tsMs) || 1) + 1);
 			} else {
 				dataMap.set(tsMs, {
 					normalized: mapped.normalized,
@@ -128,8 +150,27 @@ class MetricsModule extends BaseModule {
 						? { ...mapped.raw } 
 						: mapped.raw
 				});
+				countMap.set(tsMs, 1);
 			}
 		}
+
+		// For gauge-type metrics, average the accumulated values instead of summing
+		if (aggregate === 'average') {
+			for (const [tsMs, entry] of dataMap.entries()) {
+				const count = countMap.get(tsMs);
+				if (count > 1) {
+					entry.normalized /= count;
+					if (typeof entry.raw === 'object' && entry.raw !== null) {
+						for (const key of Object.keys(entry.raw)) {
+							entry.raw[key] /= count;
+						}
+					} else {
+						entry.raw /= count;
+					}
+				}
+			}
+		}
+
 		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
@@ -139,10 +180,14 @@ class MetricsModule extends BaseModule {
 				`${this.#pcpApiUrl}/series/query?expr=${encodeURIComponent(metric)}`,
 				{ signal: AbortSignal.timeout(10000) }
 			);
-			if (!response.ok) return { values: [] };
+			if (!response.ok) {
+				return { values: [] };
+			}
 			
 			const seriesIds = await response.json();
-			if (seriesIds.length === 0) return { values: [] };
+			if (seriesIds.length === 0) {
+				return { values: [] };
+			}
 			
 			const extraMinutes = new Date().getMinutes();
 			const totalMinutes = this.#HOURS * 60 + extraMinutes + 1;
@@ -158,7 +203,9 @@ class MetricsModule extends BaseModule {
 						`${this.#pcpApiUrl}/series/instances?series=${seriesId}`,
 						{ signal: AbortSignal.timeout(10000) }
 					);
-					if (!instResponse.ok) continue;
+					if (!instResponse.ok) {
+						continue;
+					}
 					
 					const instances = await instResponse.json();
 					targetInstance = instances.find(i => 
@@ -172,7 +219,9 @@ class MetricsModule extends BaseModule {
 					}
 				}
 				
-				if (!targetInstance) return { values: [] };
+				if (!targetInstance) {
+					return { values: [] };
+				}
 			}
 			
 			const seriesToQuery = targetSeriesId ? [targetSeriesId] : seriesIds;
@@ -185,14 +234,20 @@ class MetricsModule extends BaseModule {
 						{ signal: AbortSignal.timeout(30000) }
 					);
 					
-					if (!valResponse.ok) continue;
+					if (!valResponse.ok) {
+						continue;
+					}
 
 					let values = await valResponse.json();
-					if (!values || values.length === 0) continue;
+					if (!values || values.length === 0) {
+						continue;
+					}
 
 					values = values.filter(v => v.instance === targetInstance.instance);
 
-					if (values.length === 0) continue;
+					if (values.length === 0) {
+						continue;
+					}
 
 					const parsedValues = values
 						.map(v => ({
@@ -222,14 +277,20 @@ class MetricsModule extends BaseModule {
 						{ signal: AbortSignal.timeout(30000) }
 					);
 					
-					if (!valResponse.ok) continue;
+					if (!valResponse.ok) {
+						continue;
+					}
 
 					let values = await valResponse.json();
-					if (!values || values.length === 0) continue;
+					if (!values || values.length === 0) {
+						continue;
+					}
 
 					for (const v of values) {
 						const value = parseFloat(v.value);
-						if (isNaN(value)) continue;
+						if (isNaN(value)) {
+							continue;
+						}
 
 						const existing = allValuesByTimestamp.get(v.timestamp);
 						if (existing) {
@@ -256,10 +317,14 @@ class MetricsModule extends BaseModule {
 					{ signal: AbortSignal.timeout(30000) }
 				);
 				
-				if (!valResponse.ok) continue;
+				if (!valResponse.ok) {
+					continue;
+				}
 
 				let values = await valResponse.json();
-				if (!values || values.length === 0) continue;
+				if (!values || values.length === 0) {
+					continue;
+				}
 
 				const parsedValues = values
 					.map(v => ({
@@ -283,6 +348,10 @@ class MetricsModule extends BaseModule {
 	}
 
 	async #loadMetrics() {
+		// Ensure system info (CPU cores, network interface) is loaded before
+		// computing metrics, so we don't use stale defaults on the first call.
+		await this.#systemInfoReady;
+
 		const isEnabled = await this.isPcpRunning();
 		let grid = {};
 		
@@ -306,19 +375,24 @@ class MetricsModule extends BaseModule {
 			const diskRates = this.#counterToRate(diskTotalRaw.values);
 			const netRates = this.#counterToRate(netTotalRaw.values);
 
+			// Merge CPU nice/user/sys rates by minute-snapped timestamps so that
+			// slight timestamp offsets between the three series don't cause misses.
 			const cpuByTs = new Map();
 			for (const v of cpuNiceRates) {
-				cpuByTs.set(v.timestamp, { nice: v.value, user: 0, sys: 0 });
+				const ts = this.#snapToMinute(v.timestamp);
+				cpuByTs.set(ts, { nice: v.value, user: 0, sys: 0 });
 			}
 			for (const v of cpuUserRates) {
-				const entry = cpuByTs.get(v.timestamp) || { nice: 0, user: 0, sys: 0 };
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = cpuByTs.get(ts) || { nice: 0, user: 0, sys: 0 };
 				entry.user = v.value;
-				cpuByTs.set(v.timestamp, entry);
+				cpuByTs.set(ts, entry);
 			}
 			for (const v of cpuSysRates) {
-				const entry = cpuByTs.get(v.timestamp) || { nice: 0, user: 0, sys: 0 };
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = cpuByTs.get(ts) || { nice: 0, user: 0, sys: 0 };
 				entry.sys = v.value;
-				cpuByTs.set(v.timestamp, entry);
+				cpuByTs.set(ts, entry);
 			}
 
 			const cpuUtilValues = Array.from(cpuByTs.entries()).map(([timestamp, cpu]) => ({
@@ -344,23 +418,34 @@ class MetricsModule extends BaseModule {
 
 			// Pre-compute max load to ensure consistent normalization across all data points
 			const maxLoad = loadAvgRaw.values.reduce((max, p) => Math.max(max, p.value), 0);
-			if (maxLoad > this.scaleSatCPU) this.scaleSatCPU = this.#scaleForValue(maxLoad);
+			if (maxLoad > this.#scaleSatCPU) {
+				this.#scaleSatCPU = this.#scaleForValue(maxLoad);
+			}
 
 			const cpuSat = this.#buildMetricGrid(loadAvgRaw.values, p => {
 				const load = p.value;
 				return {
-					normalized: this.#clamp01(load / this.scaleSatCPU),
+					normalized: this.#clamp01(load / this.#scaleSatCPU),
 					raw: load
 				};
-			});
+			}, { aggregate: 'average' });
 
+			// Build memTotal lookup keyed by minute-snapped timestamps for robust matching.
+			// PCP may return slightly different timestamps for mem.physmem vs mem.util.available,
+			// so exact timestamp matching can fail. Snapping to the minute boundary ensures
+			// the two series align correctly. We also keep track of the last known total as a
+			// fallback since physical memory is constant and shouldn't prevent data from showing.
 			const memTotalByTs = new Map();
+			let lastKnownMemTotal = null;
 			for (const v of memTotalRaw.values) {
-				memTotalByTs.set(v.timestamp, v.value);
+				const snappedTs = this.#snapToMinute(v.timestamp);
+				memTotalByTs.set(snappedTs, v.value);
+				lastKnownMemTotal = v.value;
 			}
 
 			const memUtil = this.#buildMetricGrid(memAvailRaw.values, p => {
-				const total = memTotalByTs.get(p.timestamp);
+				const snappedTs = this.#snapToMinute(p.timestamp);
+				const total = memTotalByTs.get(snappedTs) ?? lastKnownMemTotal;
 				const avail = p.value;
 				if (total && avail !== undefined) {
 					const used = total - avail;
@@ -370,7 +455,7 @@ class MetricsModule extends BaseModule {
 					};
 				}
 				return null;
-			});
+			}, { aggregate: 'average' });
 
 			const memSat = this.#buildMetricGrid(swapOutRates, p => {
 				const swapoutRate = p.value;
@@ -386,7 +471,9 @@ class MetricsModule extends BaseModule {
 			// Pre-compute max disk I/O to ensure consistent normalization across all data points
 			// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
 			const maxDiskBytesPerSec = diskRates.reduce((max, p) => Math.max(max, p.value * 1024), 0);
-			if (maxDiskBytesPerSec > this.scaleUseDisks) this.scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
+			if (maxDiskBytesPerSec > this.#scaleUseDisks) {
+				this.#scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
+			}
 
 			const diskUtil = this.#buildMetricGrid(diskRates, p => {
 				// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
@@ -394,7 +481,7 @@ class MetricsModule extends BaseModule {
 				const kibibytesPerSec = p.value;
 				const bytesPerSec = kibibytesPerSec * 1024;
 				return {
-					normalized: this.#clamp01(bytesPerSec / this.scaleUseDisks),
+					normalized: this.#clamp01(bytesPerSec / this.#scaleUseDisks),
 					raw: bytesPerSec
 				};
 			});
@@ -437,7 +524,7 @@ class MetricsModule extends BaseModule {
 			const defaultRoutes = JSON.parse(defaultRoutesOutput);
 			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {
 				this.#defaultInterface = defaultRoutes[0].dev;
-				const speed = this.#getInterfaceSpeed(this.#defaultInterface);
+				const speed = await this.#getInterfaceSpeed(this.#defaultInterface);
 				if (speed > 0) {
 					this.#networkSpeedBytesPerSec = (speed * 1000000) / 8;
 				}
