@@ -356,7 +356,12 @@ class MetricsModule extends BaseModule {
 		let grid = {};
 		
 		if (isEnabled) {
-			const [cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw, memTotalRaw, memAvailRaw, swapOutRaw, diskTotalRaw, netTotalRaw] = await Promise.all([
+			const [
+				cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw,
+				memTotalRaw, memAvailRaw, swapOutRaw,
+				diskTotalRaw, diskReadRaw, diskWriteRaw,
+				netTotalRaw, netInRaw, netOutRaw
+			] = await Promise.all([
 				this.#pcpQuery('kernel.all.cpu.nice'),
 				this.#pcpQuery('kernel.all.cpu.user'),
 				this.#pcpQuery('kernel.all.cpu.sys'),
@@ -365,7 +370,11 @@ class MetricsModule extends BaseModule {
 				this.#pcpQuery('mem.util.available'),
 				this.#pcpQuery('swap.pagesout'),
 				this.#pcpQuery('disk.all.total_bytes', null, true),
+				this.#pcpQuery('disk.all.read_bytes', null, true),
+				this.#pcpQuery('disk.all.write_bytes', null, true),
 				this.#pcpQuery('network.interface.total.bytes', this.#defaultInterface),
+				this.#pcpQuery('network.interface.in.bytes', this.#defaultInterface),
+				this.#pcpQuery('network.interface.out.bytes', this.#defaultInterface),
 			]);
 
 			const cpuNiceRates = this.#counterToRate(cpuNiceRaw.values);
@@ -373,7 +382,11 @@ class MetricsModule extends BaseModule {
 			const cpuSysRates = this.#counterToRate(cpuSysRaw.values);
 			const swapOutRates = this.#counterToRate(swapOutRaw.values);
 			const diskRates = this.#counterToRate(diskTotalRaw.values);
+			const diskReadRates = this.#counterToRate(diskReadRaw.values);
+			const diskWriteRates = this.#counterToRate(diskWriteRaw.values);
 			const netRates = this.#counterToRate(netTotalRaw.values);
+			const netInRates = this.#counterToRate(netInRaw.values);
+			const netOutRates = this.#counterToRate(netOutRaw.values);
 
 			// Merge CPU nice/user/sys rates by minute-snapped timestamps so that
 			// slight timestamp offsets between the three series don't cause misses.
@@ -475,22 +488,66 @@ class MetricsModule extends BaseModule {
 				this.#scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
 			}
 
+			// Build disk read/write lookup by minute-snapped timestamp so the grid
+			// entries contain the breakdown alongside the total.
+			const diskRwByTs = new Map();
+			for (const v of diskReadRates) {
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = diskRwByTs.get(ts) || { read: 0, write: 0 };
+				entry.read = v.value * 1024; // KiB/s → bytes/s
+				diskRwByTs.set(ts, entry);
+			}
+			for (const v of diskWriteRates) {
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = diskRwByTs.get(ts) || { read: 0, write: 0 };
+				entry.write = v.value * 1024; // KiB/s → bytes/s
+				diskRwByTs.set(ts, entry);
+			}
+
 			const diskUtil = this.#buildMetricGrid(diskRates, p => {
 				// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
 				// Convert to bytes/s for consistency with other metrics
 				const kibibytesPerSec = p.value;
 				const bytesPerSec = kibibytesPerSec * 1024;
+				const ts = this.#snapToMinute(p.timestamp);
+				const rw = diskRwByTs.get(ts) || { read: 0, write: 0 };
 				return {
 					normalized: this.#clamp01(bytesPerSec / this.#scaleUseDisks),
-					raw: bytesPerSec
+					raw: {
+						total: bytesPerSec,
+						read: rw.read,
+						write: rw.write
+					}
 				};
 			});
 
+			// Build network rx/tx lookup by minute-snapped timestamp so the grid
+			// entries contain the breakdown alongside the total.
+			const netRxTxByTs = new Map();
+			for (const v of netInRates) {
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = netRxTxByTs.get(ts) || { rx: 0, tx: 0 };
+				entry.rx = v.value;
+				netRxTxByTs.set(ts, entry);
+			}
+			for (const v of netOutRates) {
+				const ts = this.#snapToMinute(v.timestamp);
+				const entry = netRxTxByTs.get(ts) || { rx: 0, tx: 0 };
+				entry.tx = v.value;
+				netRxTxByTs.set(ts, entry);
+			}
+
 			const netUtil = this.#buildMetricGrid(netRates, p => {
 				const bytesPerSec = p.value || 0;
+				const ts = this.#snapToMinute(p.timestamp);
+				const rxtx = netRxTxByTs.get(ts) || { rx: 0, tx: 0 };
 				return {
 					normalized: this.#clamp01(bytesPerSec / this.#networkSpeedBytesPerSec),
-					raw: bytesPerSec
+					raw: {
+						total: bytesPerSec,
+						rx: rxtx.rx,
+						tx: rxtx.tx
+					}
 				};
 			});
 
