@@ -359,7 +359,8 @@ class MetricsModule extends BaseModule {
 			const [
 				cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw,
 				memTotalRaw, memAvailRaw, swapOutRaw,
-				diskTotalRaw, diskReadRaw, diskWriteRaw,
+				diskReadNvmeRaw, diskWriteNvmeRaw,
+				diskReadSdRaw, diskWriteSdRaw,
 				netTotalRaw, netInRaw, netOutRaw
 			] = await Promise.all([
 				this.#pcpQuery('kernel.all.cpu.nice'),
@@ -369,9 +370,10 @@ class MetricsModule extends BaseModule {
 				this.#pcpQuery('mem.physmem'),
 				this.#pcpQuery('mem.util.available'),
 				this.#pcpQuery('swap.pagesout'),
-				this.#pcpQuery('disk.all.total_bytes'),
-				this.#pcpQuery('disk.all.read_bytes'),
-				this.#pcpQuery('disk.all.write_bytes'),
+				this.#pcpQuery('disk.dev.read_bytes', 'nvme0n1'),
+				this.#pcpQuery('disk.dev.write_bytes', 'nvme0n1'),
+				this.#pcpQuery('disk.dev.read_bytes', 'mmcblk0'),
+				this.#pcpQuery('disk.dev.write_bytes', 'mmcblk0'),
 				this.#pcpQuery('network.interface.total.bytes', this.#defaultInterface),
 				this.#pcpQuery('network.interface.in.bytes', this.#defaultInterface),
 				this.#pcpQuery('network.interface.out.bytes', this.#defaultInterface),
@@ -381,9 +383,25 @@ class MetricsModule extends BaseModule {
 			const cpuUserRates = this.#counterToRate(cpuUserRaw.values);
 			const cpuSysRates = this.#counterToRate(cpuSysRaw.values);
 			const swapOutRates = this.#counterToRate(swapOutRaw.values);
-			const diskRates = this.#counterToRate(diskTotalRaw.values);
-			const diskReadRates = this.#counterToRate(diskReadRaw.values);
-			const diskWriteRates = this.#counterToRate(diskWriteRaw.values);
+			const diskReadNvmeRates = this.#counterToRate(diskReadNvmeRaw.values);
+			const diskWriteNvmeRates = this.#counterToRate(diskWriteNvmeRaw.values);
+			const diskReadSdRates = this.#counterToRate(diskReadSdRaw.values);
+			const diskWriteSdRates = this.#counterToRate(diskWriteSdRaw.values);
+
+			// Combine NVMe + SD card rates by minute-snapped timestamp
+			// This avoids mirror double-counting (only one NVMe) while including SD card
+			const diskReadByTs = new Map();
+			for (const v of [...diskReadNvmeRates, ...diskReadSdRates]) {
+				const ts = this.#snapToMinute(v.timestamp);
+				diskReadByTs.set(ts, (diskReadByTs.get(ts) || 0) + v.value * 1024);
+			}
+			const diskWriteByTs = new Map();
+			for (const v of [...diskWriteNvmeRates, ...diskWriteSdRates]) {
+				const ts = this.#snapToMinute(v.timestamp);
+				diskWriteByTs.set(ts, (diskWriteByTs.get(ts) || 0) + v.value * 1024);
+			}
+			const diskReadRates = Array.from(diskReadByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
+			const diskWriteRates = Array.from(diskWriteByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
 			const netRates = this.#counterToRate(netTotalRaw.values);
 			const netInRates = this.#counterToRate(netInRaw.values);
 			const netOutRates = this.#counterToRate(netOutRaw.values);
@@ -482,41 +500,41 @@ class MetricsModule extends BaseModule {
 			});
 
 			// Pre-compute max disk I/O to ensure consistent normalization across all data points
-			// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
-			const maxDiskBytesPerSec = diskRates.reduce((max, p) => Math.max(max, p.value * 1024), 0);
+			// Values are already in bytes/s (converted during NVMe + SD card merge above)
+			const allDiskRates = [...diskReadRates, ...diskWriteRates];
+			const maxDiskBytesPerSec = allDiskRates.reduce((max, p) => Math.max(max, p.value), 0);
 			if (maxDiskBytesPerSec > this.#scaleUseDisks) {
 				this.#scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
 			}
 
-			// Build disk read/write lookup by minute-snapped timestamp so the grid
-			// entries contain the breakdown alongside the total.
-			const diskRwByTs = new Map();
+			// Build disk read/write lookup by minute-snapped timestamp
+			const diskByTs = new Map();
 			for (const v of diskReadRates) {
-				const ts = this.#snapToMinute(v.timestamp);
-				const entry = diskRwByTs.get(ts) || { read: 0, write: 0 };
-				entry.read = v.value * 1024; // KiB/s → bytes/s
-				diskRwByTs.set(ts, entry);
+				const entry = diskByTs.get(v.timestamp) || { read: 0, write: 0 };
+				entry.read = v.value;
+				diskByTs.set(v.timestamp, entry);
 			}
 			for (const v of diskWriteRates) {
-				const ts = this.#snapToMinute(v.timestamp);
-				const entry = diskRwByTs.get(ts) || { read: 0, write: 0 };
-				entry.write = v.value * 1024; // KiB/s → bytes/s
-				diskRwByTs.set(ts, entry);
+				const entry = diskByTs.get(v.timestamp) || { read: 0, write: 0 };
+				entry.write = v.value;
+				diskByTs.set(v.timestamp, entry);
 			}
 
-			const diskUtil = this.#buildMetricGrid(diskRates, p => {
-				// disk.all.total_bytes is in KiB (despite the name), so rate is KiB/s
-				// Convert to bytes/s for consistency with other metrics
-				const kibibytesPerSec = p.value;
-				const bytesPerSec = kibibytesPerSec * 1024;
-				const ts = this.#snapToMinute(p.timestamp);
-				const rw = diskRwByTs.get(ts) || { read: 0, write: 0 };
+			// Build grid from merged read/write entries
+			const diskMerged = Array.from(diskByTs.entries()).map(([ts, rw]) => ({
+				timestamp: ts,
+				read: rw.read,
+				write: rw.write,
+				total: rw.read + rw.write
+			}));
+
+			const diskUtil = this.#buildMetricGrid(diskMerged, p => {
 				return {
-					normalized: this.#clamp01(bytesPerSec / this.#scaleUseDisks),
+					normalized: this.#clamp01(p.total / this.#scaleUseDisks),
 					raw: {
-						total: bytesPerSec,
-						read: rw.read,
-						write: rw.write
+						total: p.total,
+						read: p.read,
+						write: p.write
 					}
 				};
 			});
