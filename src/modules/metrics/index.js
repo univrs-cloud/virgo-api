@@ -174,6 +174,76 @@ class MetricsModule extends BaseModule {
 		return Array.from(dataMap.entries()).sort((a, b) => a[0] - b[0]);
 	}
 
+	async #pcpQueryAllInstances(metric) {
+		try {
+			const response = await fetch(
+				`${this.#pcpApiUrl}/series/query?expr=${encodeURIComponent(metric)}`,
+				{ signal: AbortSignal.timeout(10000) }
+			);
+			if (!response.ok) {
+				return {};
+			}
+
+			const seriesIds = await response.json();
+			if (seriesIds.length === 0) {
+				return {};
+			}
+
+			const extraMinutes = new Date().getMinutes();
+			const totalMinutes = this.#HOURS * 60 + extraMinutes + 1;
+			const start = `-${totalMinutes}minute`;
+
+			// Build instance ID → name mapping
+			const instanceNames = new Map();
+			for (const seriesId of seriesIds) {
+				const instResponse = await fetch(
+					`${this.#pcpApiUrl}/series/instances?series=${seriesId}`,
+					{ signal: AbortSignal.timeout(10000) }
+				);
+				if (!instResponse.ok) continue;
+				const instances = await instResponse.json();
+				for (const inst of instances) {
+					instanceNames.set(inst.instance, inst.name);
+				}
+			}
+
+			// Fetch all values and group by instance name
+			const byDevice = {};
+			for (const seriesId of seriesIds) {
+				const valResponse = await fetch(
+					`${this.#pcpApiUrl}/series/values?series=${seriesId}&start=${start}&finish=now&interval=${this.#INTERVAL_SECONDS}s`,
+					{ signal: AbortSignal.timeout(30000) }
+				);
+				if (!valResponse.ok) continue;
+
+				const values = await valResponse.json();
+				if (!values || values.length === 0) continue;
+
+				for (const v of values) {
+					const value = parseFloat(v.value);
+					if (isNaN(value)) continue;
+					const name = instanceNames.get(v.instance) || v.instance;
+					if (!byDevice[name]) byDevice[name] = [];
+					byDevice[name].push({
+						timestamp: v.timestamp,
+						value,
+						instance: v.instance
+					});
+				}
+			}
+
+			// Sort each device's values by timestamp
+			for (const name of Object.keys(byDevice)) {
+				byDevice[name].sort((a, b) => a.timestamp - b.timestamp);
+			}
+
+			return byDevice;
+		} catch (error) {
+			console.error('Failed to query PCP metric instances', metric, ':', error.message);
+			return {};
+		}
+	}
+
 	async #pcpQuery(metric, instanceFilter = null, aggregateInstances = false) {
 		try {
 			const response = await fetch(
@@ -359,8 +429,7 @@ class MetricsModule extends BaseModule {
 			const [
 				cpuNiceRaw, cpuUserRaw, cpuSysRaw, loadAvgRaw,
 				memTotalRaw, memAvailRaw, swapOutRaw,
-				diskReadNvmeRaw, diskWriteNvmeRaw,
-				diskReadSdRaw, diskWriteSdRaw,
+				diskReadByDevice, diskWriteByDevice,
 				netTotalRaw, netInRaw, netOutRaw
 			] = await Promise.all([
 				this.#pcpQuery('kernel.all.cpu.nice'),
@@ -370,10 +439,8 @@ class MetricsModule extends BaseModule {
 				this.#pcpQuery('mem.physmem'),
 				this.#pcpQuery('mem.util.available'),
 				this.#pcpQuery('swap.pagesout'),
-				this.#pcpQuery('disk.dev.read_bytes', 'nvme0n1'),
-				this.#pcpQuery('disk.dev.write_bytes', 'nvme0n1'),
-				this.#pcpQuery('disk.dev.read_bytes', 'mmcblk0'),
-				this.#pcpQuery('disk.dev.write_bytes', 'mmcblk0'),
+				this.#pcpQueryAllInstances('disk.dev.read_bytes'),
+				this.#pcpQueryAllInstances('disk.dev.write_bytes'),
 				this.#pcpQuery('network.interface.total.bytes', this.#defaultInterface),
 				this.#pcpQuery('network.interface.in.bytes', this.#defaultInterface),
 				this.#pcpQuery('network.interface.out.bytes', this.#defaultInterface),
@@ -383,23 +450,63 @@ class MetricsModule extends BaseModule {
 			const cpuUserRates = this.#counterToRate(cpuUserRaw.values);
 			const cpuSysRates = this.#counterToRate(cpuSysRaw.values);
 			const swapOutRates = this.#counterToRate(swapOutRaw.values);
-			const diskReadNvmeRates = this.#counterToRate(diskReadNvmeRaw.values);
-			const diskWriteNvmeRates = this.#counterToRate(diskWriteNvmeRaw.values);
-			const diskReadSdRates = this.#counterToRate(diskReadSdRaw.values);
-			const diskWriteSdRates = this.#counterToRate(diskWriteSdRaw.values);
 
-			// Combine NVMe + SD card rates by minute-snapped timestamp
-			// This avoids mirror double-counting (only one NVMe) while including SD card
+			// Compute per-device rates and detect mirror pairs (nvmeXn1 devices).
+			// Mirror drives are averaged; all other devices are summed.
+			const deviceReadRates = {};
+			for (const [dev, values] of Object.entries(diskReadByDevice)) {
+				deviceReadRates[dev] = this.#counterToRate(values);
+			}
+			const deviceWriteRates = {};
+			for (const [dev, values] of Object.entries(diskWriteByDevice)) {
+				deviceWriteRates[dev] = this.#counterToRate(values);
+			}
+
+			const allDevices = new Set([...Object.keys(deviceReadRates), ...Object.keys(deviceWriteRates)]);
+			const nvmeDevices = [...allDevices].filter(d => /^nvme\d+n\d+$/.test(d));
+			const otherDevices = [...allDevices].filter(d => !/^nvme\d+n\d+$/.test(d) && !/^zram/.test(d) && !/^loop/.test(d) && !/^dm-/.test(d));
+
+			// Merge rates by minute-snapped timestamp:
+			// - NVMe devices: sum then divide by count (average for mirror)
+			// - Other devices: add directly
 			const diskReadByTs = new Map();
-			for (const v of [...diskReadNvmeRates, ...diskReadSdRates]) {
-				const ts = this.#snapToMinute(v.timestamp);
-				diskReadByTs.set(ts, (diskReadByTs.get(ts) || 0) + v.value * 1024);
-			}
 			const diskWriteByTs = new Map();
-			for (const v of [...diskWriteNvmeRates, ...diskWriteSdRates]) {
-				const ts = this.#snapToMinute(v.timestamp);
-				diskWriteByTs.set(ts, (diskWriteByTs.get(ts) || 0) + v.value * 1024);
+			const nvmeReadCount = new Map();
+			const nvmeWriteCount = new Map();
+
+			for (const dev of nvmeDevices) {
+				for (const v of (deviceReadRates[dev] || [])) {
+					const ts = this.#snapToMinute(v.timestamp);
+					diskReadByTs.set(ts, (diskReadByTs.get(ts) || 0) + v.value * 1024);
+					nvmeReadCount.set(ts, (nvmeReadCount.get(ts) || 0) + 1);
+				}
+				for (const v of (deviceWriteRates[dev] || [])) {
+					const ts = this.#snapToMinute(v.timestamp);
+					diskWriteByTs.set(ts, (diskWriteByTs.get(ts) || 0) + v.value * 1024);
+					nvmeWriteCount.set(ts, (nvmeWriteCount.get(ts) || 0) + 1);
+				}
 			}
+
+			// Average the NVMe mirror values
+			for (const [ts, count] of nvmeReadCount) {
+				if (count > 1) diskReadByTs.set(ts, diskReadByTs.get(ts) / count);
+			}
+			for (const [ts, count] of nvmeWriteCount) {
+				if (count > 1) diskWriteByTs.set(ts, diskWriteByTs.get(ts) / count);
+			}
+
+			// Add non-NVMe devices (SD card, etc.)
+			for (const dev of otherDevices) {
+				for (const v of (deviceReadRates[dev] || [])) {
+					const ts = this.#snapToMinute(v.timestamp);
+					diskReadByTs.set(ts, (diskReadByTs.get(ts) || 0) + v.value * 1024);
+				}
+				for (const v of (deviceWriteRates[dev] || [])) {
+					const ts = this.#snapToMinute(v.timestamp);
+					diskWriteByTs.set(ts, (diskWriteByTs.get(ts) || 0) + v.value * 1024);
+				}
+			}
+
 			const diskReadRates = Array.from(diskReadByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
 			const diskWriteRates = Array.from(diskWriteByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
 			const netRates = this.#counterToRate(netTotalRaw.values);
