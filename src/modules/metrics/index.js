@@ -464,7 +464,8 @@ class MetricsModule extends BaseModule {
 
 			const allDevices = new Set([...Object.keys(deviceReadRates), ...Object.keys(deviceWriteRates)]);
 			const nvmeDevices = [...allDevices].filter(d => /^nvme\d+n\d+$/.test(d));
-			const otherDevices = [...allDevices].filter(d => !/^nvme\d+n\d+$/.test(d) && !/^zram/.test(d) && !/^loop/.test(d) && !/^dm-/.test(d));
+			const otherDevices = [...allDevices].filter(d => !/^nvme\d+n\d+$/.test(d)
+				&& !/^zram/.test(d) && !/^loop/.test(d) && !/^dm-/.test(d));
 
 			// Merge rates by minute-snapped timestamp:
 			// - NVMe devices: sum then divide by count (average for mirror)
@@ -507,8 +508,10 @@ class MetricsModule extends BaseModule {
 				}
 			}
 
-			const diskReadRates = Array.from(diskReadByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
-			const diskWriteRates = Array.from(diskWriteByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v }));
+			// Convert rates (bytes/s) to total bytes per interval
+			const intervalSec = this.#INTERVAL_SECONDS;
+			const diskReadRates = Array.from(diskReadByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v * intervalSec }));
+			const diskWriteRates = Array.from(diskWriteByTs.entries()).map(([ts, v]) => ({ timestamp: ts, value: v * intervalSec }));
 			const netRates = this.#counterToRate(netTotalRaw.values);
 			const netInRates = this.#counterToRate(netInRaw.values);
 			const netOutRates = this.#counterToRate(netOutRaw.values);
@@ -607,11 +610,11 @@ class MetricsModule extends BaseModule {
 			});
 
 			// Pre-compute max disk I/O to ensure consistent normalization across all data points
-			// Values are already in bytes/s (converted during NVMe + SD card merge above)
+			// Values are total bytes per interval (rate × interval seconds)
 			const allDiskRates = [...diskReadRates, ...diskWriteRates];
-			const maxDiskBytesPerSec = allDiskRates.reduce((max, p) => Math.max(max, p.value), 0);
-			if (maxDiskBytesPerSec > this.#scaleUseDisks) {
-				this.#scaleUseDisks = this.#scaleForValue(maxDiskBytesPerSec);
+			const maxDiskBytes = allDiskRates.reduce((max, p) => Math.max(max, p.value), 0);
+			if (maxDiskBytes > this.#scaleUseDisks) {
+				this.#scaleUseDisks = this.#scaleForValue(maxDiskBytes);
 			}
 
 			// Build disk read/write lookup by minute-snapped timestamp

@@ -14,7 +14,7 @@ const updateBookmark = async (job, module) => {
 
 	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
 	let icon = existingBookmark.icon;
-	if (config?.icon) {
+	if (config?.icon && config.icon !== '') {
 		const iconFilename = config.icon.split('/').pop();
 		const responseIcon = await fetch(config.icon);
 		if (responseIcon.ok) {

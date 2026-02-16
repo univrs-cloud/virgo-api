@@ -9,7 +9,7 @@ const createBookmark = async (job, module) => {
 	const { config } = job.data;
 	await module.updateJobProgress(job, `${config?.title} bookmark is creating...`);
 	let icon = '';
-	if (config?.icon) {
+	if (config?.icon && config.icon !== '') {
 		const iconFilename = config.icon.split('/').pop();
 		const responseIcon = await fetch(config.icon);
 		if (responseIcon.ok) {
