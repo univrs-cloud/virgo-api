@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { Queue, Worker } = require('bullmq');
-const { getIO } = require('../socket');
-const eventEmitter = require('../utils/event_emitter');
-const nlp = require('../utils/nlp');
 const config = require('../../config');
+const eventEmitter = require('../utils/event_emitter');
+const { getIO } = require('../socket');
+const { isFromTrustedProxy } = require('../utils/trusted_proxy');
+const nlp = require('../utils/nlp');
 const { getQueueName } = require('../queues');
 
 class BaseModule {
@@ -97,9 +98,10 @@ class BaseModule {
 
 	#setupMiddleware() {
 		this.#nsp.use((socket, next) => {
-			socket.isAuthenticated = (socket.handshake.headers['remote-user'] !== undefined);
-			socket.isAdmin = (socket.isAuthenticated ? socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') : false);
-			socket.username = (socket.isAuthenticated ? socket.handshake.headers['remote-user'] : 'guest');
+			const remoteUser = (isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['remote-user'] : undefined);
+			socket.isAuthenticated = (remoteUser !== undefined);
+			socket.isAdmin = (socket.isAuthenticated && socket.handshake.headers['remote-groups']?.split(',')?.includes('admins')) || false;
+			socket.username = (socket.isAuthenticated ? remoteUser : 'guest');
 			next();
 		});
 	}

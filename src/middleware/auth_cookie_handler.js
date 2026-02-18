@@ -1,5 +1,10 @@
+const { isFromTrustedProxy } = require('../utils/trusted_proxy');
+
 /**
- * Middleware to handle authentication cookies based on request headers.
+ * Middleware for non-WebSocket HTTP requests only.
+ * Sets the account cookie from request headers so the UI can show who is authenticated.
+ * Only sets the cookie when the request came from proxy (loopback),
+ * so remote-user is not spoofed.
  */
 module.exports = (req, res, next) => {
 	const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
@@ -11,8 +16,10 @@ module.exports = (req, res, next) => {
 		sameSite: 'lax',
 		maxAge: SIX_MONTHS_MS
 	};
-	if (req.headers['remote-user']) {
-		let account = {
+	// Node’s HTTP API calls the TCP connection “socket” (not WebSocket). We need that connection’s
+	// peer address so we can tell proxy (loopback) from direct clients.
+	if (isFromTrustedProxy(req.socket?.remoteAddress) && req.headers['remote-user']) {
+		const account = {
 			name: req.headers['remote-name'],
 			user: req.headers['remote-user'],
 			email: req.headers['remote-email'],
