@@ -12,7 +12,13 @@ const getNetworkStats = async (module) => {
 		const ifaceName = defaultInterface?.ifname || null;
 		const networkStats = await si.networkStats(ifaceName);
 		let networkInterfaceStats = networkStats[0];
-		if (networkInterfaceStats.rx_sec === null) {
+		if (!networkInterfaceStats) {
+			networkInterfaceStats = {
+				rx_sec: 0,
+				tx_sec: 0
+			};
+		}
+		if (networkInterfaceStats?.rx_sec === null) {
 			networkInterfaceStats.rx_sec = 0;
 		}
 		if (networkInterfaceStats.tx_sec === null) {
@@ -20,6 +26,7 @@ const getNetworkStats = async (module) => {
 		}
 		module.setState('networkStats', networkInterfaceStats);
 	} catch (error) {
+		console.error('getNetworkStats:', error);
 		module.setState('networkStats', false);
 	}
 	module.nsp.emit('host:network:stats', module.getState('networkStats'));
@@ -32,6 +39,7 @@ const getCpuStats = async (module) => {
 		const { stdout: fan } = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true });
 		module.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan ? fan.trim() : '') });
 	} catch (error) {
+		console.error('getCpuStats:', error);
 		module.setState('cpuStats', false);
 	}
 	module.nsp.emit('host:cpu:stats', module.getState('cpuStats'));
@@ -42,9 +50,9 @@ const getMemory = async (module) => {
 		const memory = await si.mem();
 		module.setState('memory', memory);
 	} catch (error) {
+		console.error('getMemory:', error);
 		module.setState('memory', false);
 	}
-
 	module.nsp.emit('host:memory', module.getState('memory'));
 };
 
@@ -53,21 +61,22 @@ const getDrives = async (module) => {
 		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
-		])
+		]);
 		let drives = JSON.parse(smartctl);
 		let nvme = JSON.parse(nvmeList);
 		module.setState('drives', drives.map((drive, index) => {
 			return {
-				name: drive.device.name,
-				model: drive.model_name,
-				serialNumber: drive.serial_number,
-				capacity: drive.user_capacity,
-				temperature: drive.temperature.current,
+				name: drive?.device?.name,
+				model: drive?.model_name,
+				serialNumber: drive?.serial_number,
+				capacity: drive?.user_capacity,
+				temperature: drive?.temperature?.current,
 				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
 				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp : 99)
 			};
 		}));
 	} catch (error) {
+		console.error('getDrives:', error);
 		module.setState('drives', false);
 	}
 	module.nsp.emit('host:drives', module.getState('drives'));
@@ -75,46 +84,49 @@ const getDrives = async (module) => {
 
 const getStorage = async (module) => {
 	try {
-		const [{ stdout: zpoolList }, { stdout: zpoolStatus }] = await Promise.all([
-			execa('zpool', ['list', '-j', '--json-int']),
-			execa('zpool', ['status', '-j', '--json-int'])
+		const [{ stdout: zpoolList }, { stdout: zpoolStatus }, { stdout: zfsList }] = await Promise.all([
+			execa('zpool', ['list', '-j', '--json-int']).catch(() => ({ stdout: '{"pools":{}}' })),
+			execa('zpool', ['status', '-j', '--json-int']).catch(() => ({ stdout: '{"pools":{}}' })),
+			execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', '-j', '--json-int']).catch(() => ({ stdout: '{"datasets":{}}' }))
 		]);
 		const pools = JSON.parse(zpoolList)?.pools || {};
 		const statuses = JSON.parse(zpoolStatus)?.pools || {};
+		const datasets = JSON.parse(zfsList)?.datasets || {};
 		let storage = [];
 		for (const pool of Object.values(pools)) {
-				const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', pool.name, '-j', '--json-int']);
-				const datasets = JSON.parse(zfsList)?.datasets || {};
-				const datasetsSize = Object.values(datasets).reduce((sum, dataset) => {
-					return sum + (dataset?.properties?.usedbydataset?.value || 0);
-				}, 0);
-				const snapshotsSize = Object.values(datasets).reduce((sum, dataset) => {
-					return sum + (dataset?.properties?.usedbysnapshots?.value || 0);
-				}, 0);
-				pool.properties.usedbydatasets = { value: datasetsSize };
-				pool.properties.usedbysnapshots = { value: snapshotsSize };
-				storage.push({ ...pool, ...statuses[pool.name] });
+			const poolDatasets = Object.values(datasets).filter((dataset) => {
+				return dataset?.name === pool?.name || dataset?.name?.startsWith(`${pool?.name}/`);
+			});
+			const datasetsSize = poolDatasets.reduce((sum, dataset) => {
+				return sum + (dataset?.properties?.usedbydataset?.value || 0);
+			}, 0);
+			const snapshotsSize = poolDatasets.reduce((sum, dataset) => {
+				return sum + (dataset?.properties?.usedbysnapshots?.value || 0);
+			}, 0);
+			pool.properties.usedbydatasets = { value: datasetsSize };
+			pool.properties.usedbysnapshots = { value: snapshotsSize };
+			storage.push({ ...pool, ...statuses[pool.name] });
 		}
 		const filesystems = await si.fsSize();
-		let filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
+		const filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
 		if (filesystem) {
-			let pool = {
+			const pool = {
 				name: 'system',
 				properties: {
 					health: {
 						value: 'ONLINE'
 					},
 					size: {
-						value: filesystem.size
+						value: filesystem?.size
 					},
 					allocated: {
-						value: filesystem.used
+						value: filesystem?.used
 					},
 					free: {
-						value: filesystem.available
+						value: filesystem?.available
 					},
 					capacity: {
-						value: filesystem.use
+						value: filesystem?.use
 					}
 				}
 			}
@@ -123,6 +135,7 @@ const getStorage = async (module) => {
 		storage = camelcaseKeys(storage, { deep: true });
 		module.setState('storage', storage);
 	} catch (error) {
+		console.error('getStorage:', error);
 		module.setState('storage', false);
 	}
 	module.nsp.emit('host:storage', module.getState('storage'));
@@ -135,13 +148,25 @@ const getSnapshots = async (module) => {
 		const snapshots = camelcaseKeys(datasets, { deep: true });
 		module.setState('snapshots', snapshots);
 	} catch (error) {
+		console.error('getSnapshots:', error);
 		module.setState('snapshots', false);
 	}
-	module.nsp.emit('host:storage:snapshots', module.getState('snapshots'));
+	const snapshotsData = module.getState('snapshots');
+	for (const socket of module.nsp.sockets.values()) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			socket.emit('host:storage:snapshots', snapshotsData);
+		}
+	}
 };
 
-const getTime = async (module) => {
-	module.setState('time', si.time());
+const getTime = (module) => {
+	try {
+		const time = si.time();
+		module.setState('time', time);
+	} catch (error) {
+		console.error('getTime:', error);
+		module.setState('time', false);
+	}
 	module.nsp.emit('host:time', module.getState('time'));
 };
 
