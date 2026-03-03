@@ -54,7 +54,7 @@
 		"sequelize": "^6.37.7",
 		"socket.io": "^4.8.3",
 		"sqlite3": "^5.1.7",
-		"systeminformation": "^5.31.1",
+		"systeminformation": "^5.31.2",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
@@ -62,7 +62,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^25.3.1",
+		"@types/node": "^25.3.3",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
