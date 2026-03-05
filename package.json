@@ -34,7 +34,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^5.70.1",
+		"bullmq": "^5.70.2",
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -43,7 +43,7 @@
 		"dockerode": "^4.0.9",
 		"execa": "^9.6.1",
 		"express": "^5.2.1",
-		"express-rate-limit": "^8.2.1",
+		"express-rate-limit": "^8.3.0",
 		"express-validator": "^7.3.1",
 		"ini": "^6.0.0",
 		"js-yaml": "^4.1.1",
@@ -54,7 +54,7 @@
 		"sequelize": "^6.37.7",
 		"socket.io": "^4.8.3",
 		"sqlite3": "^5.1.7",
-		"systeminformation": "^5.31.2",
+		"systeminformation": "^5.31.3",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
