@@ -34,7 +34,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^5.70.2",
+		"bullmq": "^5.70.4",
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -43,7 +43,7 @@
 		"dockerode": "^4.0.9",
 		"execa": "^9.6.1",
 		"express": "^5.2.1",
-		"express-rate-limit": "^8.3.0",
+		"express-rate-limit": "^8.3.1",
 		"express-validator": "^7.3.1",
 		"ini": "^6.0.0",
 		"js-yaml": "^4.1.1",
@@ -51,10 +51,10 @@
 		"linux-sys-user": "^1.2.0",
 		"path": "^0.12.7",
 		"plist": "^3.1.0",
-		"sequelize": "^6.37.7",
+		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.3",
 		"sqlite3": "^5.1.7",
-		"systeminformation": "^5.31.3",
+		"systeminformation": "^5.31.4",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
@@ -62,7 +62,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^25.3.3",
+		"@types/node": "^25.4.0",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
