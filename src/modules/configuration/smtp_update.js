@@ -66,13 +66,20 @@ const updateSmtpConfiguration = async (job, module) => {
 
 const updateNotificationConfigurationFiles = async () => {
 	const configuration = await DataService.getConfiguration();
-	if (configuration.smtp === null) {
+	if (!configuration?.smtp) {
 		return;
 	}
-	
-	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(configuration.smtp), 'utf8');
-	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(configuration.smtp), 'utf8');
-	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(configuration.smtp), 'utf8');
+
+	const smtp = configuration.smtp;
+
+	// Ensure recipients is a non-empty array so downstream generators don't throw.
+	if (!Array.isArray(smtp.recipients) || smtp.recipients.length === 0) {
+		smtp.recipients = ['voyager@univrs.cloud'];
+	}
+
+	await fs.promises.writeFile(msmtpConfigurationFile, generateMsmtpConfig(smtp), 'utf8');
+	await fs.promises.writeFile(zedConfigurationFile, generateZedConfig(smtp), 'utf8');
+	await fs.promises.writeFile(aptListchangesConfigurationFile, generateAptListchangesConfig(smtp), 'utf8');
 	await execa('systemctl', ['restart', 'zfs-zed'], { reject: false });
 };
 
