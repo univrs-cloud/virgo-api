@@ -330,10 +330,81 @@ const setup = async () => {
 			log(18, `Docker network "virgo" created`);
 		}
 
-		log(19, `Setting directory ownership...`);
+		log(19, `Ensuring messier internal directories and setting directory ownership...`);
+
+		const messierSharesDir = '/messier/.shares';
+		const messierConfigDir = '/messier/.config';
+
+		// Ensure directories exist
+		let createdSharesDir = false;
+		for (const dir of [messierSharesDir, messierConfigDir]) {
+			if (!fs.existsSync(dir)) {
+				fs.mkdirSync(dir, { recursive: true });
+				if (dir === messierSharesDir) {
+					createdSharesDir = true;
+				}
+			}
+		}
+
+		// Ensure share config files exist
+		const allConfPath = `${messierSharesDir}/all.conf`;
+		const shareConfFiles = [
+			'downloads.conf',
+			'nextcloud.conf',
+			'time_machines.conf'
+		];
+
+		// Create all.conf with includes if it does not exist
+		if (!fs.existsSync(allConfPath)) {
+			const allConfContent = shareConfFiles
+				.map(name => `include = ${messierSharesDir}/${name}`)
+				.join('\n') + '\n';
+			fs.writeFileSync(allConfPath, allConfContent, { encoding: 'utf8' });
+		}
+
+		// Ensure the individual share conf files exist (empty)
+		for (const filename of shareConfFiles) {
+			const filePath = `${messierSharesDir}/${filename}`;
+			if (!fs.existsSync(filePath)) {
+				fs.writeFileSync(filePath, '', { encoding: 'utf8' });
+			}
+		}
+
 		await execSilent('chown', ['voyager:users', '/downloads']);
 		await execSilent('chown', ['-R', 'voyager:users', '/messier/apps']);
-		log(19, `Ownership set`);
+		await execSilent('chown', ['-R', 'voyager:users', messierSharesDir]);
+		await execSilent('chown', ['-R', 'voyager:users', messierConfigDir]);
+
+		log(19, `Ownership and messier internal directories set`);
+
+		log(20, `Running database move migration if needed...`);
+		try {
+			await require('./move_database_location')();
+			log(20, `Database move migration completed (or skipped).`);
+		} catch (error) {
+			console.error(`Database move migration failed:`, error);
+			throw error;
+		}
+
+		log(21, `Copying icon assets into messier config if needed...`);
+		try {
+			await require('./copy_icons_to_config')();
+			log(21, `Icon copy migration completed (or skipped).`);
+		} catch (error) {
+			console.error(`Icon copy migration failed:`, error);
+			throw error;
+		}
+
+		log(22, `Restarting virgo-api service to pick up new configuration...`);
+		try {
+			await execa('systemctl', ['restart', 'virgo-api.service']);
+			log(22, `virgo-api.service restarted successfully`);
+		} catch (error) {
+			console.error(
+				`Failed to restart virgo-api.service. Please restart it manually. Error:`,
+				error?.message || error
+			);
+		}
 
 		console.log(`\n========================================`);
 		console.log(`Setup completed successfully!`);
