@@ -224,7 +224,7 @@ const setup = async () => {
 				await backupDockerData(5);
 				
 				log(6, `Importing pool "messier"...`);
-				await exec('zpool', ['import', 'messier']);
+				await exec('zpool', ['import', '-f', 'messier']);
 				poolReady = true;
 				log(6, `Pool "messier" imported successfully (datasets auto-mounted)`);
 				
