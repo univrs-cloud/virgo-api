@@ -10,7 +10,7 @@ const cleanupSession = (socket) => {
 		return;
 	}
 	
-	socket.off('logs:disconnect', session.disconnectHandler);
+	socket.off('docker:container:logs:disconnect', session.disconnectHandler);
 	socket.off('disconnect', session.socketDisconnectHandler);
 	session.logsStream?.destroy();
 	activeSessions.delete(socket);
@@ -55,8 +55,8 @@ const logsConnect = async (socket, containerId) => {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		stdout.on('data', (data) => { socket.emit('logs:output', data.toString('utf8')) });
-		stderr.on('data', (data) => { socket.emit('logs:output', data.toString('utf8')) });
+		stdout.on('data', (data) => { socket.emit('docker:container:logs:output', data.toString('utf8')) });
+		stderr.on('data', (data) => { socket.emit('docker:container:logs:output', data.toString('utf8')) });
 		docker.modem.demuxStream(logsStream, stdout, stderr);
 
 		// Handle stream end/error
@@ -64,18 +64,18 @@ const logsConnect = async (socket, containerId) => {
 		logsStream.on('error', () => cleanupSession(socket));
 
 		// Client terminated the connection
-		socket.on('logs:disconnect', disconnectHandler);
+		socket.on('docker:container:logs:disconnect', disconnectHandler);
 		socket.on('disconnect', socketDisconnectHandler);
 
-		socket.emit('logs:connected');
+		socket.emit('docker:container:logs:connected');
 	} catch (error) {
 		cleanupSession(socket);
-		socket.emit('logs:error', 'Failed to start container logs stream.');
+		socket.emit('docker:container:logs:error', 'Failed to start container logs stream.');
 	}
 };
 
 const onConnection = (socket, module) => {
-	socket.on('logs:connect', (containerId) => {
+	socket.on('docker:container:logs:connect', (containerId) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}

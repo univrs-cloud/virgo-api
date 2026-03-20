@@ -11,9 +11,9 @@ const cleanupSession = async (socket) => {
 		return;
 	}
 
-	socket.off('terminal:input', session.inputHandler);
-	socket.off('terminal:resize', session.resizeHandler);
-	socket.off('terminal:disconnect', session.disconnectHandler);
+	socket.off('docker:container:terminal:input', session.inputHandler);
+	socket.off('docker:container:terminal:resize', session.resizeHandler);
+	socket.off('docker:container:terminal:disconnect', session.disconnectHandler);
 	socket.off('disconnect', session.socketDisconnectHandler);
 	// Kill the exec process before destroying the stream
 	if (session.containerExec) {
@@ -48,7 +48,7 @@ const terminalConnect = async (socket, containerId) => {
 
 		let shell = await findContainerShell(containerId);
 		if (!shell) {
-			socket.emit('terminal:error', 'No compatible shell found in container.');
+			socket.emit('docker:container:terminal:error', 'No compatible shell found in container.');
 			return;
 		}
 		
@@ -106,8 +106,8 @@ const terminalConnect = async (socket, containerId) => {
 		// Create readable streams for stdout and stderr
 		const stdout = new stream.PassThrough();
 		const stderr = new stream.PassThrough();
-		stdout.on('data', (data) => { socket.emit('terminal:output', data.toString('utf8')) });
-		stderr.on('data', (data) => { socket.emit('terminal:output', data.toString('utf8')) });
+		stdout.on('data', (data) => { socket.emit('docker:container:terminal:output', data.toString('utf8')) });
+		stderr.on('data', (data) => { socket.emit('docker:container:terminal:output', data.toString('utf8')) });
 		docker.modem.demuxStream(terminalStream, stdout, stderr);
 
 		// Handle stream end/error
@@ -115,17 +115,16 @@ const terminalConnect = async (socket, containerId) => {
 		terminalStream.on('error', () => cleanupSession(socket));
 
 		// Pipe client input to the container
-		socket.on('terminal:input', inputHandler);
-		socket.on('terminal:resize', resizeHandler);
-		// Client terminated the connection
-		socket.on('terminal:disconnect', disconnectHandler);
+		socket.on('docker:container:terminal:input', inputHandler);
+		socket.on('docker:container:terminal:resize', resizeHandler);
+		socket.on('docker:container:terminal:disconnect', disconnectHandler);
 		socket.on('disconnect', socketDisconnectHandler);
 
-		socket.emit('terminal:connected');
+		socket.emit('docker:container:terminal:connected');
 	} catch (error) {
 		console.error(error);
 		cleanupSession(socket);
-		socket.emit('terminal:error', 'Failed to start container terminal stream.');
+		socket.emit('docker:container:terminal:error', 'Failed to start container terminal stream.');
 	}
 };
 
@@ -143,7 +142,7 @@ const findContainerShell = async (id) => {
 };
 
 const onConnection = (socket, module) => {
-	socket.on('terminal:connect', (containerId) => { 
+	socket.on('docker:container:terminal:connect', (containerId) => { 
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}
