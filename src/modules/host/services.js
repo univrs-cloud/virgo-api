@@ -43,25 +43,6 @@ const loadServices = async (module) => {
 				usage: memoryUsage,
 				percent: totalMemory ? (memoryUsage / totalMemory) * 100 : 0
 			};
-			let state = `${service.active}:${service.sub}`;
-			if (service.active === 'active' && service.sub === 'running') {
-				state = 'running';
-			} else if (service.active === 'active' && service.sub === 'exited') {
-				state = 'oneshot';
-			} else if (service.active === 'active' && service.sub === 'listening') {
-				state = 'listening';
-			} else if (service.active === 'active' && service.sub === 'waiting') {
-				state = 'waiting';
-			} else if (service.active === 'active' && service.sub === 'elapsed') {
-				state = 'elapsed';
-			} else if (service.active === 'active' && service.sub === 'active') {
-				state = 'active';
-			} else if (service.active === 'inactive' && service.sub === 'dead') {
-				state = 'stopped';
-			} else if (service.active === 'failed') {
-				state = 'failed';
-			}
-			service.state = state;
 			return service;
 		});
 		module.setState('services', services);
