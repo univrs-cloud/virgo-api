@@ -26,17 +26,17 @@ const loadServices = async (module) => {
 					currentMemory = undefined;
 				}
 			}
-			// Handle last service (no trailing blank line)
 			if (currentId !== null && currentMemory !== undefined) {
 				memoryMap.set(currentId, currentMemory);
 			}
 		}
 
 		const services = serviceUnits.map((service) => {
-			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === service.unit; });
+			const templateName = service.unit.replace(/@[^.]+(\.[^.]+)$/, '@$1');
+			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => serviceUnitFile.unit_file === service.unit) || serviceUnitFiles.find((serviceUnitFile) => serviceUnitFile.unit_file === templateName);
 			service.type = service.unit.split('.').pop();
 			service.unitFileState = serviceUnitFile?.state || 'unknown';
-			service.broken = (service.load === 'not-found');
+			service.broken = (service.load === 'not-found' || service.load === 'error');
 			const memoryUsage = memoryMap.get(service.unit) || 0;
 			const totalMemory = module.getState('memory')?.total;
 			service.memory = {
