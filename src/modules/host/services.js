@@ -173,6 +173,25 @@ const stopService = async (job, module) => {
 	return `${config.unit} ${actionVerbs.pastTense}.`;
 };
 
+const restartService = async (job, module) => {
+	const { config } = job.data;
+	if (unitType(config.unit) === 'target') {
+		throw new Error(`Cannot restart a target unit.`);
+	}
+
+	const services = module.getState('services');
+	const service = services?.find((service) => service.unit === config.unit);
+	if (service?.broken) {
+		throw new Error(`Unit file not found for ${config.unit}.`);
+	}
+
+	const actionVerbs = module.nlp.conjugate('restart');
+	await module.updateJobProgress(job, `${config.unit} is ${actionVerbs.gerund}...`);
+	await execa('systemctl', ['restart', config.unit]);
+	module.eventEmitter.emit('host:system:services:updated');
+	return `${config.unit} ${actionVerbs.pastTense}.`;
+};
+
 const register = (module) => {
 	loadServices(module);
 
@@ -244,6 +263,14 @@ const onConnection = (socket, module) => {
 
 		await module.addJob('host:system:service:stop', { config, username: socket.username });
 	});
+
+	socket.on('host:system:service:restart', async (config) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:system:service:restart', { config, username: socket.username });
+	});
 };
 
 module.exports = {
@@ -256,6 +283,7 @@ module.exports = {
 		'host:system:service:disable': disableService,
 		'host:system:service:disable-stop': disableStopService,
 		'host:system:service:start': startService,
-		'host:system:service:stop': stopService
+		'host:system:service:stop': stopService,
+		'host:system:service:restart': restartService
 	}
 };
