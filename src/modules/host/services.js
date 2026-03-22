@@ -84,69 +84,93 @@ const broadcastServices = async (module) => {
 const enableService = async (job, module) => {
 	const { config } = job.data;
 	const actionVerbs = module.nlp.conjugate('enable');
-	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
-	await execa('systemctl', ['enable', config.serviceName]);
+	await module.updateJobProgress(job, `${config.unit} is ${actionVerbs.gerund}...`);
+	await execa('systemctl', ['enable', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} ${actionVerbs.pastTense}.`;
+	return `${config.unit} ${actionVerbs.pastTense}.`;
 };
 
 const enableStartService = async (job, module) => {
 	const { config } = job.data;
-	if (unitType(config.serviceName) === 'target') {
+	if (unitType(config.unit) === 'target') {
 		throw new Error(`Cannot start a target unit.`);
 	}
 
-	await module.updateJobProgress(job, `${config.serviceName} is enabling and starting...`);
-	await execa('systemctl', ['enable', '--now', config.serviceName]);
+	const services = module.getState('services');
+	const service = services?.find((service) => service.unit === config.unit);
+	if (service?.broken) {
+		throw new Error(`Unit file not found for ${config.unit}.`);
+	}
+
+	await module.updateJobProgress(job, `${config.unit} is enabling and starting...`);
+	await execa('systemctl', ['enable', '--now', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} enabled and started.`;
+	return `${config.unit} enabled and started.`;
 };
 
 const disableService = async (job, module) => {
 	const { config } = job.data;
 	const actionVerbs = module.nlp.conjugate('disable');
-	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
-	await execa('systemctl', ['disable', config.serviceName]);
+	await module.updateJobProgress(job, `${config.unit} is ${actionVerbs.gerund}...`);
+	await execa('systemctl', ['disable', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} ${actionVerbs.pastTense}.`;
+	return `${config.unit} ${actionVerbs.pastTense}.`;
 };
 
 const disableStopService = async (job, module) => {
 	const { config } = job.data;
-	if (unitType(config.serviceName) === 'target') {
+	if (unitType(config.unit) === 'target') {
 		throw new Error(`Cannot stop a target unit.`);
 	}
 
-	await module.updateJobProgress(job, `${config.serviceName} is disabling and stopping...`);
-	await execa('systemctl', ['disable', '--now', config.serviceName]);
+	const services = module.getState('services');
+	const service = services?.find((service) => service.unit === config.unit);
+	if (service?.broken) {
+		throw new Error(`Unit file not found for ${config.unit}.`);
+	}
+
+	await module.updateJobProgress(job, `${config.unit} is disabling and stopping...`);
+	await execa('systemctl', ['disable', '--now', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} disabled and stopped.`;
+	return `${config.unit} disabled and stopped.`;
 };
 
 const startService = async (job, module) => {
 	const { config } = job.data;
-	if (unitType(config.serviceName) === 'target') {
+	if (unitType(config.unit) === 'target') {
 		throw new Error(`Cannot start a target unit.`);
 	}
 
+	const services = module.getState('services');
+	const service = services?.find((service) => service.unit === config.unit);
+	if (service?.broken) {
+		throw new Error(`Unit file not found for ${config.unit}.`);
+	}
+
 	const actionVerbs = module.nlp.conjugate('start');
-	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
-	await execa('systemctl', ['start', config.serviceName]);
+	await module.updateJobProgress(job, `${config.unit} is ${actionVerbs.gerund}...`);
+	await execa('systemctl', ['start', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} ${actionVerbs.pastTense}.`;
+	return `${config.unit} ${actionVerbs.pastTense}.`;
 };
 
 const stopService = async (job, module) => {
 	const { config } = job.data;
-	if (unitType(config.serviceName) === 'target') {
+	if (unitType(config.unit) === 'target') {
 		throw new Error(`Cannot stop a target unit.`);
 	}
-	
+
+	const services = module.getState('services');
+	const service = services?.find((service) => service.unit === config.unit);
+	if (service?.broken) {
+		throw new Error(`Unit file not found for ${config.unit}.`);
+	}
+
 	const actionVerbs = module.nlp.conjugate('stop');
-	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
-	await execa('systemctl', ['stop', config.serviceName]);
+	await module.updateJobProgress(job, `${config.unit} is ${actionVerbs.gerund}...`);
+	await execa('systemctl', ['stop', config.unit]);
 	module.eventEmitter.emit('host:system:services:updated');
-	return `${config.serviceName} ${actionVerbs.pastTense}.`;
+	return `${config.unit} ${actionVerbs.pastTense}.`;
 };
 
 const register = (module) => {
