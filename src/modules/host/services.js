@@ -3,12 +3,12 @@ const { execa } = require('execa');
 const loadServices = async (module) => {
 	try {
 		const [{ stdout: serviceUnitsList }, { stdout: serviceUnitFilesList }] = await Promise.all([
-			execa('systemctl', ['list-units', '--type=service', '--all', '--output=json']),
-			execa('systemctl', ['list-unit-files', '--type=service', '--output=json'])
+			execa('systemctl', ['list-units', '--type=service,target,socket,timer,path', '--all', '--output=json']),
+			execa('systemctl', ['list-unit-files', '--type=service,target,socket,timer,path', '--output=json'])
 		]);
 		const serviceUnits = JSON.parse(serviceUnitsList);
 		const serviceUnitFiles = JSON.parse(serviceUnitFilesList);
-		const activeServiceUnits = serviceUnits.filter((serviceUnit) => { return serviceUnit.active === 'active'; }).map((serviceUnit) => { return serviceUnit.unit; });
+		const activeServiceUnits = serviceUnits.filter((serviceUnit) => { return serviceUnit.active === 'active' && serviceUnit.unit.endsWith('.service'); }).map((serviceUnit) => { return serviceUnit.unit; });
 		const memoryMap = new Map();
 		if (activeServiceUnits.length > 0) {
 			const { stdout } = await execa('systemctl', ['show', ...activeServiceUnits, '--property=Id,MemoryCurrent']);
@@ -34,8 +34,9 @@ const loadServices = async (module) => {
 
 		const services = serviceUnits.map((service) => {
 			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === service.unit; });
+			service.type = service.unit.split('.').pop();
 			service.unitFileState = serviceUnitFile?.state || 'unknown';
-			service.broken = service.load === 'not-found';
+			service.broken = (service.load === 'not-found');
 			const memoryUsage = memoryMap.get(service.unit) || 0;
 			const totalMemory = module.getState('memory')?.total;
 			service.memory = {
@@ -47,6 +48,14 @@ const loadServices = async (module) => {
 				state = 'running';
 			} else if (service.active === 'active' && service.sub === 'exited') {
 				state = 'oneshot';
+			} else if (service.active === 'active' && service.sub === 'listening') {
+				state = 'listening';
+			} else if (service.active === 'active' && service.sub === 'waiting') {
+				state = 'waiting';
+			} else if (service.active === 'active' && service.sub === 'elapsed') {
+				state = 'elapsed';
+			} else if (service.active === 'active' && service.sub === 'active') {
+				state = 'active';
 			} else if (service.active === 'inactive' && service.sub === 'dead') {
 				state = 'stopped';
 			} else if (service.active === 'failed') {
@@ -60,6 +69,8 @@ const loadServices = async (module) => {
 
 	}
 };
+
+const unitType = (serviceName) => serviceName.split('.').pop();
 
 const broadcastServices = async (module) => {
 	await loadServices(module);
@@ -81,6 +92,10 @@ const enableService = async (job, module) => {
 
 const enableStartService = async (job, module) => {
 	const { config } = job.data;
+	if (unitType(config.serviceName) === 'target') {
+		throw new Error(`Cannot start a target unit.`);
+	}
+
 	await module.updateJobProgress(job, `${config.serviceName} is enabling and starting...`);
 	await execa('systemctl', ['enable', '--now', config.serviceName]);
 	module.eventEmitter.emit('host:system:services:updated');
@@ -98,6 +113,10 @@ const disableService = async (job, module) => {
 
 const disableStopService = async (job, module) => {
 	const { config } = job.data;
+	if (unitType(config.serviceName) === 'target') {
+		throw new Error(`Cannot stop a target unit.`);
+	}
+
 	await module.updateJobProgress(job, `${config.serviceName} is disabling and stopping...`);
 	await execa('systemctl', ['disable', '--now', config.serviceName]);
 	module.eventEmitter.emit('host:system:services:updated');
@@ -106,6 +125,10 @@ const disableStopService = async (job, module) => {
 
 const startService = async (job, module) => {
 	const { config } = job.data;
+	if (unitType(config.serviceName) === 'target') {
+		throw new Error(`Cannot start a target unit.`);
+	}
+
 	const actionVerbs = module.nlp.conjugate('start');
 	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
 	await execa('systemctl', ['start', config.serviceName]);
@@ -115,6 +138,10 @@ const startService = async (job, module) => {
 
 const stopService = async (job, module) => {
 	const { config } = job.data;
+	if (unitType(config.serviceName) === 'target') {
+		throw new Error(`Cannot stop a target unit.`);
+	}
+	
 	const actionVerbs = module.nlp.conjugate('stop');
 	await module.updateJobProgress(job, `${config.serviceName} is ${actionVerbs.gerund}...`);
 	await execa('systemctl', ['stop', config.serviceName]);
