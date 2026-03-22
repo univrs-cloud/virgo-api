@@ -8,50 +8,85 @@ const loadServices = async (module) => {
 		]);
 		const serviceUnits = JSON.parse(serviceUnitsList);
 		const serviceUnitFiles = JSON.parse(serviceUnitFilesList);
-		const activeServiceUnits = serviceUnits.filter((serviceUnit) => { return serviceUnit.active === 'active' && serviceUnit.unit.endsWith('.service'); }).map((serviceUnit) => { return serviceUnit.unit; });
+		const loadedUnitNames = new Set(serviceUnits.map((unit) => { return unit.unit; }));
+		const totalMemory = module.getState('memory')?.total;
+
+		// template unit files (e.g. foo@.service) are not useful without an instance
+		const isTemplate = (name) => { return /@[^.]*\./.test(name) || name.endsWith('@'); };
+		const unloadedUnitFiles = serviceUnitFiles.filter((unitFile) => {
+			const name = unitFile.unit_file.split('/').pop();
+			return !loadedUnitNames.has(name) && !isTemplate(name);
+		});
+
+		const activeServiceUnits = serviceUnits.filter((unit) => { return unit.active === 'active' && unit.unit.endsWith('.service'); }).map((unit) => { return unit.unit; });
+		const unloadedUnitNames = unloadedUnitFiles.map((unitFile) => { return unitFile.unit_file.split('/').pop(); });
+		const showUnits = [...activeServiceUnits, ...unloadedUnitNames];
+
 		const memoryMap = new Map();
-		if (activeServiceUnits.length > 0) {
-			const { stdout } = await execa('systemctl', ['show', ...activeServiceUnits, '--property=Id,MemoryCurrent']);
+		const descriptionMap = new Map();
+		if (showUnits.length > 0) {
+			const { stdout } = await execa('systemctl', ['show', ...showUnits, '--property=Id,MemoryCurrent,Description']);
 			let currentId = null;
 			let currentMemory = undefined;
+			let currentDescription = undefined;
 			for (const line of stdout.split('\n')) {
 				if (line.startsWith('Id=')) {
 					currentId = line.slice(3);
 				} else if (line.startsWith('MemoryCurrent=')) {
 					const value = line.slice(14);
 					currentMemory = /^\d+$/.test(value) ? parseInt(value, 10) : null;
-				} else if (line === '' && currentId !== null && currentMemory !== undefined) {
-					memoryMap.set(currentId, currentMemory);
+				} else if (line.startsWith('Description=')) {
+					currentDescription = line.slice(12);
+				} else if (line === '' && currentId) {
+					if (currentMemory !== undefined) memoryMap.set(currentId, currentMemory);
+					if (currentDescription !== undefined) descriptionMap.set(currentId, currentDescription);
 					currentId = null;
 					currentMemory = undefined;
+					currentDescription = undefined;
 				}
 			}
-			if (currentId !== null && currentMemory !== undefined) {
-				memoryMap.set(currentId, currentMemory);
+			if (currentId) {
+				if (currentMemory !== undefined) memoryMap.set(currentId, currentMemory);
+				if (currentDescription !== undefined) descriptionMap.set(currentId, currentDescription);
 			}
 		}
 
 		const services = serviceUnits.map((service) => {
 			const templateName = service.unit.replace(/@[^.]+(\.[^.]+)$/, '@$1');
-			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => serviceUnitFile.unit_file === service.unit) || serviceUnitFiles.find((serviceUnitFile) => serviceUnitFile.unit_file === templateName);
+			const serviceUnitFile = serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === service.unit; }) || serviceUnitFiles.find((serviceUnitFile) => { return serviceUnitFile.unit_file === templateName; });
 			service.type = service.unit.split('.').pop();
 			service.unitFileState = serviceUnitFile?.state || 'unknown';
 			service.broken = (service.load === 'not-found' || service.load === 'error');
 			const memoryUsage = memoryMap.get(service.unit) || 0;
-			const totalMemory = module.getState('memory')?.total;
 			service.memory = {
 				usage: memoryUsage,
 				percent: totalMemory ? (memoryUsage / totalMemory) * 100 : 0
 			};
 			return service;
 		});
+
+		for (const unitFile of unloadedUnitFiles) {
+			const name = unitFile.unit_file.split('/').pop();
+			services.push({
+				unit: name,
+				load: 'not-loaded',
+				active: 'inactive',
+				sub: 'dead',
+				description: descriptionMap.get(name) || '',
+				type: name.split('.').pop(),
+				unitFileState: unitFile.state,
+				broken: false,
+				memory: { usage: 0, percent: 0 },
+			});
+		}
+
 		module.setState('services', services);
 	} catch (error) {
 
 	}
 };
 
-const unitType = (serviceName) => serviceName.split('.').pop();
+const unitType = (serviceName) => { return serviceName.split('.').pop(); };
 
 const broadcastServices = async (module) => {
 	await loadServices(module);
@@ -78,7 +113,7 @@ const enableStartService = async (job, module) => {
 	}
 
 	const services = module.getState('services');
-	const service = services?.find((service) => service.unit === config.unit);
+	const service = services?.find((service) => { return service.unit === config.unit; });
 	if (service?.broken) {
 		throw new Error(`Unit file not found for ${config.unit}.`);
 	}
@@ -105,7 +140,7 @@ const disableStopService = async (job, module) => {
 	}
 
 	const services = module.getState('services');
-	const service = services?.find((service) => service.unit === config.unit);
+	const service = services?.find((service) => { return service.unit === config.unit; });
 	if (service?.broken) {
 		throw new Error(`Unit file not found for ${config.unit}.`);
 	}
@@ -123,7 +158,7 @@ const startService = async (job, module) => {
 	}
 
 	const services = module.getState('services');
-	const service = services?.find((service) => service.unit === config.unit);
+	const service = services?.find((service) => { return service.unit === config.unit; });
 	if (service?.broken) {
 		throw new Error(`Unit file not found for ${config.unit}.`);
 	}
@@ -142,7 +177,7 @@ const stopService = async (job, module) => {
 	}
 
 	const services = module.getState('services');
-	const service = services?.find((service) => service.unit === config.unit);
+	const service = services?.find((service) => { return service.unit === config.unit; });
 	if (service?.broken) {
 		throw new Error(`Unit file not found for ${config.unit}.`);
 	}
@@ -161,7 +196,7 @@ const restartService = async (job, module) => {
 	}
 
 	const services = module.getState('services');
-	const service = services?.find((service) => service.unit === config.unit);
+	const service = services?.find((service) => { return service.unit === config.unit; });
 	if (service?.broken) {
 		throw new Error(`Unit file not found for ${config.unit}.`);
 	}
