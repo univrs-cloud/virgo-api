@@ -4,105 +4,158 @@ const yaml = require('js-yaml');
 const camelcaseKeys = require('camelcase-keys').default;
 const docker = require('../../utils/docker_client');
 
-const getRegistry = (imageName) => {
-	if (imageName.startsWith('ghcr.io/')) return 'ghcr';
-	if (imageName.startsWith('lscr.io/')) return 'lscr';
-	return 'dockerhub';
+const MANIFEST_ACCEPT = [
+	'application/vnd.docker.distribution.manifest.list.v2+json',
+	'application/vnd.oci.image.index.v1+json',
+	'application/vnd.docker.distribution.manifest.v2+json',
+	'application/vnd.oci.image.manifest.v1+json'
+].join(',');
+
+const parseImageRef = (image) => {
+	let remaining = image;
+	let registry = 'registry-1.docker.io';
+
+	// If the first path component contains a dot, colon, or is "localhost" it's a registry host
+	const firstSlash = remaining.indexOf('/');
+	if (firstSlash !== -1) {
+		const firstPart = remaining.slice(0, firstSlash);
+		if (firstPart.includes('.') || firstPart.includes(':') || firstPart === 'localhost') {
+			registry = firstPart;
+			remaining = remaining.slice(firstSlash + 1);
+		}
+	}
+
+	// docker.io is an alias — the actual API lives at registry-1.docker.io
+	if (registry === 'docker.io') {
+		registry = 'registry-1.docker.io';
+	}
+
+	// Extract tag (last colon that is not part of a port)
+	const lastColon = remaining.lastIndexOf(':');
+	let tag = 'latest';
+	let repoPath = remaining;
+	if (lastColon !== -1 && !remaining.slice(lastColon + 1).includes('/')) {
+		tag = remaining.slice(lastColon + 1);
+		repoPath = remaining.slice(0, lastColon);
+	}
+
+	// Docker Hub official images require the library/ namespace
+	if (registry === 'registry-1.docker.io' && !repoPath.includes('/')) {
+		repoPath = `library/${repoPath}`;
+	}
+
+	return { registry, repoPath, tag };
 };
 
-const parseDockerHubRepo = (image) => {
-	let [repoPath, tag = 'latest'] = image.split(':');
-	if (repoPath.startsWith('docker.io/')) {
-		repoPath = repoPath.replace('docker.io/', '');
-	}
-	if (!repoPath.includes('/')) {
-		return { repoPath: `library/${repoPath}`, tag };
-	}
-	return { repoPath, tag };
-};
+/**
+ * Fetches the manifest digest for an image using the standard Docker Registry v2
+ * WWW-Authenticate challenge-response flow. Works with any public registry.
+ * Returns null (silently) for private registries or images that require credentials.
+ */
+const getRegistryDigest = async (image) => {
+	const { registry, repoPath, tag } = parseImageRef(image);
+	const registryBase = `https://${registry}`;
 
-const getDockerHubDigest = async (image, platform = { os: 'linux', architecture: 'arm64' }) => {
 	try {
-		const { repoPath, tag } = parseDockerHubRepo(image);
-		const tokenResponse = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
-		const headers = {
-			Method: 'HEAD',
-			Authorization: `Bearer ${tokenData.token}`,
-			Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
-		};
-		const manifestResponse = await fetch(`https://registry-1.docker.io/v2/${repoPath}/manifests/${tag}`, { headers });
+		// Step 1: Challenge request — the registry tells us where to get a token
+		const challengeResponse = await fetch(`${registryBase}/v2/`);
+		let authHeader = null;
+
+		if (challengeResponse.status === 401) {
+			await challengeResponse.arrayBuffer().catch(() => {});
+			const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
+
+			if (wwwAuth.toLowerCase().startsWith('basic')) {
+				// Basic auth means credentials are required — private registry, skip
+				return null;
+			}
+
+			if (wwwAuth.toLowerCase().startsWith('bearer')) {
+				const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
+				const serviceMatch = wwwAuth.match(/service="([^"]+)"/i);
+				if (!realmMatch) {
+					throw new Error(`No realm in WWW-Authenticate header from ${registry}`);
+				}
+
+				const tokenUrl = new URL(realmMatch[1]);
+				if (serviceMatch) {
+					tokenUrl.searchParams.set('service', serviceMatch[1]);
+				}
+				tokenUrl.searchParams.set('scope', `repository:${repoPath}:pull`);
+
+				const tokenResponse = await fetch(tokenUrl.toString());
+				if (!tokenResponse.ok) {
+					// Token request failed — likely a private repo, skip silently
+					await tokenResponse.arrayBuffer().catch(() => {});
+					return null;
+				}
+				const { token, access_token } = await tokenResponse.json();
+				const resolved = token || access_token;
+				if (!resolved) {
+					return null;
+				}
+				authHeader = `Bearer ${resolved}`;
+			}
+		} else {
+			await challengeResponse.arrayBuffer().catch(() => {});
+		}
+
+		// Step 2: HEAD the manifest — cheap, returns digest in response header
+		const headers = { Accept: MANIFEST_ACCEPT };
+		if (authHeader) {
+			headers.Authorization = authHeader;
+		}
+
+		const manifestResponse = await fetch(`${registryBase}/v2/${repoPath}/manifests/${tag}`, {
+			method: 'HEAD',
+			headers,
+		});
+
+		if (manifestResponse.status === 429) {
+			const retryAfter = manifestResponse.headers.get('Retry-After');
+			console.warn(`Rate limited by registry for ${image}${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
+			await manifestResponse.arrayBuffer().catch(() => {});
+			return null;
+		}
+
+		if (manifestResponse.status === 401 || manifestResponse.status === 403) {
+			// Private registry — skip silently
+			await manifestResponse.arrayBuffer().catch(() => {});
+			return null;
+		}
+
 		if (!manifestResponse.ok) {
-			throw new Error(`HTTP ${manifestResponse.status} manifest ${repoPath}`);
+			await manifestResponse.arrayBuffer().catch(() => {});
+			throw new Error(`HTTP ${manifestResponse.status} fetching manifest for ${image}`);
 		}
 
 		return manifestResponse.headers.get('docker-content-digest');
 	} catch (error) {
-		console.warn(error.message);
-		return null;
-	}
-};
-
-const getGHCRDigest = async (image, platform = { os: 'linux', architecture: 'arm64' }) => {
-	try {
-		const [imageName, tag = 'latest'] = image.split(':');
-		const repoPath = imageName.replace('ghcr.io/', '');
-		const tokenResponse = await fetch(`https://ghcr.io/token?scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
-		const headers = {
-			Method: 'HEAD',
-			Authorization: `Bearer ${tokenData.token}`,
-			Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
-		};
-		const manifestResponse = await fetch(`https://ghcr.io/v2/${repoPath}/manifests/${tag}`, { headers });
-		if (!manifestResponse.ok) {
-			throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
-		}
-
-		return manifestResponse.headers.get('docker-content-digest');
-	} catch (error) {
-		console.warn(error.message);
-		return null;
-	}
-};
-
-const getLSCRDigest = async (image, platform = { os: 'linux', architecture: 'arm64' }) => {
-	try {
-		const [imageName, tag = 'latest'] = image.split(':');
-		const repoPath = imageName.replace('lscr.io/', '');
-		const tokenResponse = await fetch(`https://ghcr.io/token?scope=repository:${repoPath}:pull`);
-		const tokenData = await tokenResponse.json();
-		const headers = {
-			Method: 'HEAD',
-			Authorization: `Bearer ${tokenData.token}`,
-			Accept: 'application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json'
-		};
-		const manifestResponse = await fetch(`https://lscr.io/v2/${repoPath}/manifests/${tag}`, { headers });
-		if (!manifestResponse.ok) {
-			throw new Error(`HTTP ${manifestResponse.status} manifest ${imageName}`);
-		}
-
-		return manifestResponse.headers.get('docker-content-digest');
-	} catch (error) {
-		console.warn(error.message);
+		console.warn(`Could not fetch digest for ${image}: ${error.message}`);
 		return null;
 	}
 };
 
 const checkForUpdates = async (module) => {
-	let updates = [];
-	module.setState('updates', updates);
+	const updates = [];
 	let images = await docker.listImages({ all: true, digests: true });
 	images = camelcaseKeys(images, { deep: true });
 	let containers = await docker.listContainers({ all: true });
 	containers = camelcaseKeys(containers, { deep: true });
+
+	// Map of imageName -> { localDigests, containerIds[] } for deduplicating registry checks
+	const registryCheckMap = new Map();
+
 	for (const { id, imageId, image: imageName, labels } of containers) {
-		const image = images.find((image) => { return image.id === imageId });
+		const image = images.find((image) => { return image.id === imageId; });
 		if (!Array.isArray(image?.repoDigests) || image.repoDigests.length === 0) {
 			continue;
 		}
 
 		const localDigests = image.repoDigests.map((repoDigest) => { return repoDigest.split('@')[1] || null; });
+
+		// Check compose file first — if image name has changed, no registry request needed
+		let resolvedByCompose = false;
 		try {
 			const composeFilePath = labels?.comDockerComposeProjectConfigFiles || path.join(module.composeDir, labels?.comDockerComposeProject, 'docker-compose.yml');
 			try {
@@ -111,55 +164,53 @@ const checkForUpdates = async (module) => {
 				// Compose file doesn't exist, skip image comparison and fall back to digest comparison
 				throw error;
 			}
-			
+
 			const composeFileContent = await fs.promises.readFile(composeFilePath, 'utf-8');
 			const composeData = yaml.load(composeFileContent);
 			const service = composeData?.services?.[labels?.comDockerComposeService];
-			if (service?.image) {
-				if (imageName !== service.image) {
-					updates.push({ imageName: imageName, containerId: id });
-					module.setState('updates', updates);
-					continue;
-				}
+			if (service?.image && imageName !== service.image) {
+				updates.push({ imageName, containerId: id });
+				resolvedByCompose = true;
 			}
 		} catch (error) {
 			// If we can't read/parse compose file, fall back to digest comparison
-			// console.log(`Could not read compose file: ${error.message}`);
-		}
-		
-		const registry = getRegistry(imageName);
-		let remoteDigest = null;
-		switch (registry) {
-			case 'dockerhub':
-				try {
-					remoteDigest = await getDockerHubDigest(imageName);
-				} catch (error) {}
-				break;
-			case 'ghcr':
-				try {
-					remoteDigest = await getGHCRDigest(imageName);
-				} catch (error) {}
-				break;
-			case 'lscr':
-				try {
-					remoteDigest = await getLSCRDigest(imageName);
-				} catch (error) {}
-				break;
-			default:
-				// console.log(`Unknown registry for image ${imageName}`);
-				continue;
 		}
 
-		if (!remoteDigest) {
-			// console.log(`Could not fetch remote digest for ${imageName}`);
+		if (resolvedByCompose) {
 			continue;
 		}
-		
-		if (!localDigests.includes(remoteDigest)) {
-			updates.push({ imageName: imageName, containerId: id });
-			module.setState('updates', updates);
+
+		// Queue for registry check, grouped by image name to avoid duplicate requests
+		if (!registryCheckMap.has(imageName)) {
+			registryCheckMap.set(imageName, { localDigests, containerIds: [] });
+		}
+		registryCheckMap.get(imageName).containerIds.push(id);
+	}
+
+	// Run all registry checks in parallel
+	const imageNames = Array.from(registryCheckMap.keys());
+	const results = await Promise.allSettled(
+		imageNames.map((imageName) => { return getRegistryDigest(imageName); })
+	);
+
+	for (let i = 0; i < imageNames.length; i++) {
+		const result = results[i];
+		if (result.status !== 'fulfilled' || !result.value) {
+			continue;
+		}
+
+		const imageName = imageNames[i];
+		const { localDigests, containerIds } = registryCheckMap.get(imageName);
+
+		if (!localDigests.includes(result.value)) {
+			for (const containerId of containerIds) {
+				updates.push({ imageName, containerId });
+			}
 		}
 	}
+
+	module.setState('updates', updates);
+
 	for (const socket of module.nsp.sockets.values()) {
 		if (socket.isAuthenticated && socket.isAdmin) {
 			socket.emit('app:updates', module.getState('updates'));
@@ -170,7 +221,7 @@ const checkForUpdates = async (module) => {
 const fetchStackFiles = async (module) => {
 	try {
 		const composeDir = module.composeDir;
-		
+
 		// Check if compose directory exists
 		try {
 			await fs.promises.access(composeDir);
@@ -182,15 +233,15 @@ const fetchStackFiles = async (module) => {
 		// Get all installed applications from module state (configured)
 		const configured = module.getState('configured') || [];
 		const installedApps = configured.filter((item) => { return item.type === 'app'; });
-		
+
 		// Get templates from module state
 		const templates = module.getState('templates') || [];
-		
+
 		// Update compose files for each installed app that has a template
 		for (const app of installedApps) {
 			const appName = app.name;
 			const template = templates.find((template) => { return template.name === appName; });
-			
+
 			if (!template) {
 				continue; // Skip if no template exists for this app
 			}
@@ -202,7 +253,7 @@ const fetchStackFiles = async (module) => {
 
 			try {
 				const composeFilePath = path.join(composeDir, appName, 'docker-compose.yml');
-				
+
 				// Check if docker-compose.yml file exists
 				try {
 					await fs.promises.access(composeFilePath);
@@ -219,7 +270,7 @@ const fetchStackFiles = async (module) => {
 				}
 
 				const stack = await response.text();
-				
+
 				// Replace the docker-compose.yml file
 				await fs.promises.writeFile(composeFilePath, stack, 'utf-8');
 				console.log(`Updated docker-compose.yml for ${appName}`);
