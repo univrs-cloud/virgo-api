@@ -143,8 +143,10 @@ const checkForUpdates = async (module) => {
 	let containers = await docker.listContainers({ all: true });
 	containers = camelcaseKeys(containers, { deep: true });
 
-	// Map of imageName -> { localDigests, containerIds[] } for deduplicating registry checks
-	const registryCheckMap = new Map();
+	// Map of imageId -> { imageName, localDigests, containerIds[] }
+	// Keyed by imageId so containers running different pulled versions of the same image
+	// name each get their own digest comparison rather than sharing the first one seen.
+	const imageIdMap = new Map();
 
 	for (const { id, imageId, image: imageName, labels } of containers) {
 		const image = images.find((image) => { return image.id === imageId; });
@@ -169,7 +171,7 @@ const checkForUpdates = async (module) => {
 			const composeData = yaml.load(composeFileContent);
 			const service = composeData?.services?.[labels?.comDockerComposeService];
 			if (service?.image && imageName !== service.image) {
-				updates.push({ imageName, containerId: id });
+				updates.push({ containerId: id });
 				resolvedByCompose = true;
 			}
 		} catch (error) {
@@ -180,31 +182,37 @@ const checkForUpdates = async (module) => {
 			continue;
 		}
 
-		// Queue for registry check, grouped by image name to avoid duplicate requests
-		if (!registryCheckMap.has(imageName)) {
-			registryCheckMap.set(imageName, { localDigests, containerIds: [] });
+		if (!imageIdMap.has(imageId)) {
+			imageIdMap.set(imageId, { imageName, localDigests, containerIds: [] });
 		}
-		registryCheckMap.get(imageName).containerIds.push(id);
+		imageIdMap.get(imageId).containerIds.push(id);
 	}
 
-	// Run all registry checks in parallel
-	const imageNames = Array.from(registryCheckMap.keys());
+	// Deduplicate registry requests by image name — one HTTP request per unique name
+	const uniqueImageNames = [...new Set([...imageIdMap.values()].map((v) => { return v.imageName; }))];
 	const results = await Promise.allSettled(
-		imageNames.map((imageName) => { return getRegistryDigest(imageName); })
+		uniqueImageNames.map((imageName) => { return getRegistryDigest(imageName); })
 	);
 
-	for (let i = 0; i < imageNames.length; i++) {
+	const registryDigestByName = new Map();
+	for (let i = 0; i < uniqueImageNames.length; i++) {
 		const result = results[i];
-		if (result.status !== 'fulfilled' || !result.value) {
+		if (result.status === 'fulfilled' && result.value) {
+			registryDigestByName.set(uniqueImageNames[i], result.value);
+		}
+	}
+
+	// Each imageId entry is compared independently — containers still on a stale image
+	// are flagged even if another container has already pulled the latest version.
+	for (const { imageName, localDigests, containerIds } of imageIdMap.values()) {
+		const registryDigest = registryDigestByName.get(imageName);
+		if (!registryDigest) {
 			continue;
 		}
 
-		const imageName = imageNames[i];
-		const { localDigests, containerIds } = registryCheckMap.get(imageName);
-
-		if (!localDigests.includes(result.value)) {
+		if (!localDigests.includes(registryDigest)) {
 			for (const containerId of containerIds) {
-				updates.push({ imageName, containerId });
+				updates.push({ containerId });
 			}
 		}
 	}
