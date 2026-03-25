@@ -68,6 +68,10 @@ class HostModule extends BaseModule {
 			});
 	}
 
+	get setupCompletedFile() {
+		return this.#setupCompletedFile;
+	}
+
 	get etcHosts() {
 		return this.#etcHostsFile;
 	}

@@ -1,8 +1,42 @@
 const fs = require('fs');
+const path = require('path');
 const touch = require('touch');
 const FileWatcher = require('../../utils/file_watcher');
 
+let setupCompletedWatcher;
 let updateLogsWatcher;
+
+const watchSetupCompleted = async (module) => {
+	const syncSetupCompletedState = async () => {
+		let setupCompleted = false;
+		try {
+			await fs.promises.access(module.setupCompletedFile);
+			setupCompleted = true;
+		} catch (error) {}
+
+		module.setState('setupCompleted', setupCompleted);
+		module.nsp.emit('host:setupCompleted', module.getState('setupCompleted'));
+	};
+
+	if (setupCompletedWatcher) {
+		return setupCompletedWatcher;
+	}
+
+	const setupCompletedDir = path.dirname(module.setupCompletedFile);
+	setupCompletedWatcher = new FileWatcher(setupCompletedDir);
+	setupCompletedWatcher.onChange(async (event, changedPath) => {
+		if (changedPath !== module.setupCompletedFile) {
+			return;
+		}
+
+		if (event === 'add' || event === 'unlink') {
+			await syncSetupCompletedState();
+		}
+	});
+
+	await syncSetupCompletedState();
+	return setupCompletedWatcher;
+};
 
 const watchUpdateLog = async (module) => {
 	const readFile = async () => {
@@ -45,7 +79,12 @@ const watchUpdateLog = async (module) => {
 	return updateLogsWatcher;
 };
 
+const register = (module) => {
+	watchSetupCompleted(module);
+};
+
 module.exports = {
 	name: 'watcher',
+	register,
 	watchUpdateLog
 };
