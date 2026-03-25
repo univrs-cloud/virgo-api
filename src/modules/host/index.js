@@ -7,7 +7,8 @@ const { version } = require('../../../package.json');
 const BaseModule = require('../base');
 
 class HostModule extends BaseModule {
-	#etcHosts = '/etc/hosts';
+	#setupCompletedFile = '/var/www/virgo-api/setup_completed';
+	#etcHostsFile = '/etc/hosts';
 	#rebootRequiredFile = '/run/reboot-required';
 	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
 	#updatePidFile = '/var/www/virgo-api/update.pid';
@@ -18,6 +19,7 @@ class HostModule extends BaseModule {
 	constructor() {
 		super('host');
 
+		this.#loadSetupCompleted();
 		this.setState('system', {
 			api: {
 				version: version
@@ -67,7 +69,7 @@ class HostModule extends BaseModule {
 	}
 
 	get etcHosts() {
-		return this.#etcHosts;
+		return this.#etcHostsFile;
 	}
 
 	get updateExitStatusFile() {
@@ -102,6 +104,9 @@ class HostModule extends BaseModule {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin?.startPolling(this);
 
+		if (this.getState('setupCompleted') !== undefined) {
+			socket.emit('host:setupCompleted', this.getState('setupCompleted'));
+		}
 		this.checkUpdate();
 		if (this.getState('update') !== undefined) {
 			socket.emit('host:update', this.getState('update'));
@@ -273,6 +278,16 @@ class HostModule extends BaseModule {
 			return false;
 		} catch (error) {
 			return false;
+		}
+	}
+
+	#loadSetupCompleted() {
+		try {
+			if (fs.existsSync(this.#setupCompletedFile)) { // Check if it exists, if it exists, setup is compelted
+				this.setState('setupCompleted', true);
+			}
+		} catch (error) {
+			this.setState('setupCompleted', false);
 		}
 	}
 
