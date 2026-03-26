@@ -11,6 +11,11 @@ const createUser = async (job, module) => {
 		throw new Error(`User already exists.`);
 	}
 
+	const authenticatedUser = module.getState('users')?.find((user) => { return user.username === job.data.username; });
+	if (authenticatedUser?.uid !== 1000 && config.role === 'admin') {
+		config.role = '';
+	}
+
 	await module.updateJobProgress(job, `Creating system user ${config.username}...`);
 	await linuxUser.addUser({
 		username: config.username,
@@ -36,7 +41,7 @@ const createUser = async (job, module) => {
 			password: bcrypt.hashSync(config.password, module.cost),
 			displayname: config.fullname,
 			email: config.email,
-			groups: ['users'],
+			groups: (config.role === 'admin' ? ['admins'] : ['users']),
 			disabled: false
 		};
 		const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });

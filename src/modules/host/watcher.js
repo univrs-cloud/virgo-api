@@ -7,17 +7,6 @@ let setupCompletedWatcher;
 let updateLogsWatcher;
 
 const watchSetupCompleted = async (module) => {
-	const syncSetupCompletedState = async () => {
-		let setupCompleted = false;
-		try {
-			await fs.promises.access(module.setupCompletedFile);
-			setupCompleted = true;
-		} catch (error) {}
-
-		module.setState('setupCompleted', setupCompleted);
-		module.nsp.emit('host:setupCompleted', module.getState('setupCompleted'));
-	};
-
 	if (setupCompletedWatcher) {
 		return setupCompletedWatcher;
 	}
@@ -36,20 +25,20 @@ const watchSetupCompleted = async (module) => {
 
 	await syncSetupCompletedState();
 	return setupCompletedWatcher;
+
+	async function syncSetupCompletedState() {
+		let setupCompleted = false;
+		try {
+			await fs.promises.access(module.setupCompletedFile);
+			setupCompleted = true;
+		} catch (error) {}
+
+		module.setState('setupCompleted', setupCompleted);
+		module.nsp.emit('host:setupCompleted', module.getState('setupCompleted'));
+	}
 };
 
 const watchUpdateLog = async (module) => {
-	const readFile = async () => {
-		let data = '';
-		try {
-			data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
-		} catch (error) {}
-		if (data !== '') {
-			module.setState('update', { ...module.getState('update'), steps: data.split('\n'), state: 'running' });
-			module.nsp.emit('host:update', module.getState('update'));
-		}
-	};
-
 	if (updateLogsWatcher) {
 		return updateLogsWatcher;
 	}
@@ -77,6 +66,17 @@ const watchUpdateLog = async (module) => {
 			updateLogsWatcher = null;
 		});
 	return updateLogsWatcher;
+
+	async function readFile() {
+		let data = '';
+		try {
+			data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+		} catch (error) {}
+		if (data !== '') {
+			module.setState('update', { ...module.getState('update'), steps: data.split('\n'), state: 'running' });
+			module.nsp.emit('host:update', module.getState('update'));
+		}
+	}
 };
 
 const register = (module) => {

@@ -13,6 +13,9 @@ const updateUser = async (job, module) => {
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
 		throw new Error(`Only the owner can update his own profile.`);
 	}
+	if (authenticatedUser?.uid !== 1000 && config.role === 'admin') {
+		config.role = '';
+	}
 
 	await module.updateJobProgress(job, `Updating system user ${config.username}...`);
 	await execa('chfn', ['-f', config.fullname, config.username]);
@@ -24,9 +27,10 @@ const updateUser = async (job, module) => {
 	async function updateAutheliaUser() {
 		const fileContents = await fs.promises.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
-		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
+		if (autheliaUsersConfig?.users?.[config.username]) {
 			autheliaUsersConfig.users[config.username].displayname = config.fullname;
 			autheliaUsersConfig.users[config.username].email = config.email;
+			autheliaUsersConfig.users[config.username].groups = (config.role === 'admin' ? ['admins'] : ['users']);
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 		}

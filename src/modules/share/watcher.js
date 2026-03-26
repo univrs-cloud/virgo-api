@@ -9,19 +9,6 @@ let configurationWatcher;
 let timeMachineWatcher;
 
 const watchConfigurations = (module) => {
-	const isPathWatched = (pathToCheck) => {
-		const normalizedPath = path.normalize(pathToCheck);
-		const watchedPaths = configurationWatcher.getWatched();
-		// If it's a directory
-		if (fs.existsSync(normalizedPath) && fs.lstatSync(normalizedPath).isDirectory()) {
-			return watchedPaths[normalizedPath] !== undefined;
-		}
-		// If it's a file
-		const dir = path.dirname(normalizedPath);
-		const file = path.basename(normalizedPath);
-		return watchedPaths[dir] && watchedPaths[dir].includes(file);
-	};
-	
 	if (configurationWatcher) {
 		return configurationWatcher;
 	}
@@ -67,6 +54,19 @@ const watchConfigurations = (module) => {
 			clearInterval(retryInterval);
 		}
 	}, 10000);
+
+	function isPathWatched(pathToCheck) {
+		const normalizedPath = path.normalize(pathToCheck);
+		const watchedPaths = configurationWatcher.getWatched();
+		// If it's a directory
+		if (fs.existsSync(normalizedPath) && fs.lstatSync(normalizedPath).isDirectory()) {
+			return watchedPaths[normalizedPath] !== undefined;
+		}
+		// If it's a file
+		const dir = path.dirname(normalizedPath);
+		const file = path.basename(normalizedPath);
+		return watchedPaths[dir] && watchedPaths[dir].includes(file);
+	}
 };
 
 const getTimeMachinePathsFromConfig = async () => {
