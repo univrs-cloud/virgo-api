@@ -116,13 +116,14 @@ async function run(opts = {}) {
 
   const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
   const maxAttempts = Math.max(1, maxRestarts + 1);
+  const sessionWallT0 = Date.now();
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) {
       console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
     }
     try {
-      await runIndexerPass(opts);
+      await runIndexerPass(opts, sessionWallT0, attempt);
       return;
     } catch (e) {
       if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
@@ -137,7 +138,7 @@ async function run(opts = {}) {
   }
 }
 
-async function runIndexerPass(opts) {
+async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
   const config = getConfig(opts);
 
   const pool = (config.DATASET ?? config.DATASETS[0]).split('/')[0];
@@ -384,7 +385,7 @@ async function runIndexerPass(opts) {
     disableBulkMode(db);
 
     console.log('\n✅ Indexing complete.');
-    printStats(db, perf);
+    printStats(db, perf, sessionWallT0, restartCount);
   } finally {
     db.close();
   }
@@ -824,8 +825,9 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
 // ─── Stats ──────────────────────────────────────────────────────────────────
 
-function printStats(db, perf) {
-  const totalMs = Date.now() - perf.t0;
+function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
+  const totalMs =
+    sessionWallT0 != null ? Date.now() - sessionWallT0 : Date.now() - perf.t0;
   const stats = db.prepare(`SELECT (SELECT COUNT(*) FROM datasets) AS datasets, (SELECT COUNT(*) FROM snapshots) AS snapshots, (SELECT COUNT(*) FROM files) AS files, (SELECT COUNT(*) FROM file_versions) AS versions, (SELECT COUNT(*) FROM changes) AS changes, (SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted`).get();
 
   const pgSz = Object.values(db.prepare('SELECT * FROM pragma_page_size()').get())[0];
@@ -852,6 +854,10 @@ function printStats(db, perf) {
 
   console.log('\n⏱  Performance:');
   console.log(`   Total runtime:   ${formatDuration(totalMs)}`);
+  if (restartCount > 0) {
+    console.log(`   Restarts:        ${restartCount}`);
+    console.log('   Note: Crawl/diff/SQL counters below are for the last completed pass only.');
+  }
   console.log(`   Crawl time:      ${formatDuration(perf.crawlMs)}`);
   console.log(`   Diff time:       ${formatDuration(perf.diffMs)}`);
   console.log(`   Stat time:       ${formatDuration(perf.statMs)}`);
