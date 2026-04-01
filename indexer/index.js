@@ -337,8 +337,12 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 
 // ─── Batch constants ────────────────────────────────────────────────────────
 
-const INCR_BATCH_SIZE = 2000;
+const INCR_BATCH_SIZE = 4096;
 const STAT_CONCURRENCY = 64;
+
+function sizeFromStat(st) {
+  return st.isDirectory() ? 0 : st.size;
+}
 
 // ─── Incremental (standalone, no changes table) ────────────────────────────
 
@@ -459,7 +463,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -473,7 +477,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const fileRow = stmt.getFileByPath.get(datasetId, relPath);
           perf.sqlSelects++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -488,7 +492,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (newFile) {
-            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -514,8 +518,9 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
       const relNewPath = c.changeType === 'renamed' ? resolveRelPath(c.newPath, mountpoint) : null;
       const st = statMap.get(i) ?? null;
 
-      // ── Incremental index updates ──
       let fileId = null;
+      let oldSize = null;
+      let newSize = null;
 
       if (c.changeType === 'added') {
         if (st) {
@@ -524,7 +529,8 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
           perf.sqlUpserts++;
           if (fileRow) {
             fileId = fileRow.id;
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            newSize = sizeFromStat(st);
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -533,6 +539,8 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
         perf.sqlSelects++;
         if (fileRow) {
           fileId = fileRow.id;
+          oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
+          perf.sqlSelects++;
           stmt.markDeleted.run(snap.id, fileRow.id);
           perf.sqlUpdates++;
         }
@@ -542,16 +550,22 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
           perf.sqlSelects++;
           if (fileRow) {
             fileId = fileRow.id;
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
+            perf.sqlSelects++;
+            newSize = sizeFromStat(st);
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
       } else if (c.changeType === 'renamed') {
         if (st) {
+          newSize = sizeFromStat(st);
           const oldFile = stmt.getFileByPath.get(datasetId, relPath);
           perf.sqlSelects++;
           if (oldFile) {
             fileId = oldFile.id;
+            oldSize = stmt.getLatestSize.get(oldFile.id)?.size ?? null;
+            perf.sqlSelects++;
             stmt.markDeleted.run(snap.id, oldFile.id);
             perf.sqlUpdates++;
           }
@@ -559,30 +573,40 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
           const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (newFile) {
-            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
       }
 
-      // ── Changes table (diff) ──
       if (fileId == null) {
         const row = stmt.getFileByPath.get(datasetId, relPath);
         fileId = row?.id ?? null;
         perf.sqlSelects++;
       }
 
-      let oldSize = null, newSize = null;
-      if (c.changeType === 'removed') {
-        if (fileId) { oldSize = stmt.getLatestSize.get(fileId)?.size ?? null; perf.sqlSelects++; }
-      } else if (c.changeType === 'added') {
-        if (fileId) { newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null; perf.sqlSelects++; }
-        if (newSize == null) { newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relPath, snap.id)?.size ?? null; perf.sqlSelects++; }
-      } else {
-        if (fileId) {
+      if (c.changeType === 'added' && fileId && newSize == null) {
+        newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
+        perf.sqlSelects++;
+        if (newSize == null) {
+          newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relPath, snap.id)?.size ?? null;
+          perf.sqlSelects++;
+        }
+      } else if (c.changeType === 'removed' && fileId && oldSize == null) {
+        oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
+        perf.sqlSelects++;
+      } else if ((c.changeType === 'modified' || c.changeType === 'renamed') && fileId) {
+        if (oldSize == null) {
           oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
+          perf.sqlSelects++;
+        }
+        if (c.changeType === 'modified' && newSize == null) {
           newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
-          perf.sqlSelects += 2;
+          perf.sqlSelects++;
+        }
+        if (c.changeType === 'renamed' && newSize == null && relNewPath != null) {
+          newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relNewPath, snap.id)?.size ?? null;
+          perf.sqlSelects++;
         }
       }
 
@@ -600,7 +624,7 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
   const changes = [];
   for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name)) {
     changes.push(change);
-    if (changes.length >= 2000) {
+    if (changes.length >= INCR_BATCH_SIZE) {
       flushChanges(db, stmt, perf, changes.splice(0), snap, datasetId, mountpoint);
     }
   }

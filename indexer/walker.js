@@ -86,7 +86,7 @@ if (!isMainThread) {
   const ctrl  = new Int32Array(sharedBuf, 0, CTRL_INTS);
   const queue = new Uint8Array(sharedBuf, CTRL_INTS * 4);
 
-  const BATCH_SIZE  = 2048;
+  const BATCH_SIZE  = 4096;
   const batch       = [];
 
   function dequeue() {
