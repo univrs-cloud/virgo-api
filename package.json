@@ -13,6 +13,7 @@
 		"virgo": "./bin/virgo"
 	},
 	"node_deb": {
+		"executable_name": "virgo",
 		"architecture": "arm64",
 		"init": "systemd",
 		"install_dir": "/var/www",
@@ -24,7 +25,8 @@
 			"systemd_service": "templates/systemd.service"
 		},
 		"entrypoints": {
-			"daemon": "index.js"
+			"daemon": "index.js",
+			"cli": "bin/virgo"
 		}
 	},
 	"engines": {
