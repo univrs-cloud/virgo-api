@@ -23,7 +23,7 @@ function openDb(path) {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
-    PRAGMA cache_size = -65536;
+    PRAGMA cache_size = -262144;
     PRAGMA temp_store = MEMORY;
     PRAGMA mmap_size = 2147483648;
   `);
@@ -102,21 +102,16 @@ function openDb(path) {
       tokenize="unicode61 tokenchars './-_'"
     );
 
-    CREATE TRIGGER IF NOT EXISTS fts_paths_ai AFTER INSERT ON file_versions BEGIN
-      INSERT INTO fts_paths(rowid, path) VALUES (new.id, new.path);
-    END;
-    CREATE TRIGGER IF NOT EXISTS fts_paths_ad AFTER DELETE ON file_versions BEGIN
-      INSERT INTO fts_paths(fts_paths, rowid, path) VALUES('delete', old.id, old.path);
-    END;
-    CREATE TRIGGER IF NOT EXISTS fts_paths_au AFTER UPDATE ON file_versions BEGIN
-      INSERT INTO fts_paths(fts_paths, rowid, path) VALUES('delete', old.id, old.path);
-      INSERT INTO fts_paths(rowid, path) VALUES (new.id, new.path);
-    END;
+    -- FTS triggers are created on demand outside of bulk indexing.
+    -- During bulk indexing they are dropped and FTS is rebuilt in one
+    -- shot at the end via disableBulkMode() for dramatically less overhead.
 
     CREATE INDEX IF NOT EXISTS idx_fv_path       ON file_versions(path);
     CREATE INDEX IF NOT EXISTS idx_fv_snapshot   ON file_versions(snapshot_id);
     CREATE INDEX IF NOT EXISTS idx_fv_file       ON file_versions(file_id);
+    CREATE INDEX IF NOT EXISTS idx_fv_file_size  ON file_versions(file_id, snapshot_id DESC, size);
     CREATE INDEX IF NOT EXISTS idx_files_path    ON files(dataset_id, path);
+    CREATE INDEX IF NOT EXISTS idx_files_dataset ON files(dataset_id, deleted_at_snap_id);
     CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at_snap_id);
     CREATE INDEX IF NOT EXISTS idx_changes_snap  ON changes(snapshot_id);
     CREATE INDEX IF NOT EXISTS idx_changes_file  ON changes(file_id, snapshot_id);
@@ -174,4 +169,54 @@ function transaction(db, fn) {
   }
 }
 
-module.exports = { openDb, transaction };
+/**
+ * Drop FTS triggers and switch to synchronous=OFF for bulk indexing.
+ * Data is reproducible from ZFS snapshots so crash-safety is not needed.
+ */
+function enableBulkMode(db) {
+  db.exec(`
+    DROP TRIGGER IF EXISTS fts_paths_ai;
+    DROP TRIGGER IF EXISTS fts_paths_ad;
+    DROP TRIGGER IF EXISTS fts_paths_au;
+    PRAGMA synchronous = OFF;
+  `);
+}
+
+/**
+ * Checkpoint WAL to keep it from growing unboundedly during long runs.
+ */
+function checkpoint(db) {
+  db.exec(`PRAGMA wal_checkpoint(PASSIVE)`);
+}
+
+/**
+ * Rebuild FTS index from file_versions in one shot, re-create triggers,
+ * and restore normal synchronous mode.
+ */
+function disableBulkMode(db) {
+  console.log('  📇 Rebuilding FTS index...');
+  const t = Date.now();
+  db.exec(`
+    INSERT INTO fts_paths(fts_paths) VALUES('delete-all');
+    INSERT INTO fts_paths(rowid, path) SELECT id, path FROM file_versions;
+  `);
+  console.log(`     FTS rebuilt in ${((Date.now() - t) / 1000).toFixed(1)}s`);
+
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS fts_paths_ai AFTER INSERT ON file_versions BEGIN
+      INSERT INTO fts_paths(rowid, path) VALUES (new.id, new.path);
+    END;
+    CREATE TRIGGER IF NOT EXISTS fts_paths_ad AFTER DELETE ON file_versions BEGIN
+      INSERT INTO fts_paths(fts_paths, rowid, path) VALUES('delete', old.id, old.path);
+    END;
+    CREATE TRIGGER IF NOT EXISTS fts_paths_au AFTER UPDATE ON file_versions BEGIN
+      INSERT INTO fts_paths(fts_paths, rowid, path) VALUES('delete', old.id, old.path);
+      INSERT INTO fts_paths(rowid, path) VALUES (new.id, new.path);
+    END;
+    PRAGMA synchronous = NORMAL;
+  `);
+
+  checkpoint(db);
+}
+
+module.exports = { openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };

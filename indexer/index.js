@@ -1,11 +1,12 @@
 'use strict';
 
-const { openDb, transaction } = require('./db');
+const { openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } = require('./db');
 const { discoverAll, diffSnapshots, snapshotMountPath } = require('./zfs');
 const { walkSnapshot } = require('./walker');
 const { getConfig } = require('./config');
 const { execaSync } = require('execa');
 const { statSync } = require('fs');
+const { stat } = require('fs/promises');
 
 // ─── Dataset filtering ─────────────────────────────────────────────────────
 
@@ -33,6 +34,26 @@ function umountSnapshot(snapPath) {
 
 function safeStat(path) {
   try { return statSync(path); } catch { return null; }
+}
+
+async function safeStatAsync(path) {
+  try { return await stat(path); } catch { return null; }
+}
+
+/**
+ * Stat an array of {fullPath, ...} entries in parallel, up to `concurrency` at a time.
+ * Returns an array of stat results (or null on error) matching the input order.
+ */
+async function batchStat(entries, concurrency = 64) {
+  const results = new Array(entries.length);
+  for (let i = 0; i < entries.length; i += concurrency) {
+    const slice = entries.slice(i, i + concurrency);
+    const stats = await Promise.all(slice.map(e => safeStatAsync(e.fullPath)));
+    for (let j = 0; j < slice.length; j++) {
+      results[i + j] = stats[j];
+    }
+  }
+  return results;
 }
 
 function formatSize(bytes) {
@@ -72,7 +93,7 @@ async function run(opts = {}) {
     t0: Date.now(), snapsCrawled: 0, snapsIncremental: 0, snapsSkipped: 0,
     diffsDone: 0, filesCrawled: 0, crawlMs: 0, diffMs: 0,
     sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
-    diffChanges: 0,
+    diffChanges: 0, statMs: 0,
   };
 
   // ── Prepared statements ──
@@ -154,20 +175,42 @@ async function run(opts = {}) {
     }
     stmt.deleteOrphanedFiles.run();
 
+    // Enable bulk mode: drop FTS triggers + synchronous=OFF
+    enableBulkMode(db);
+
     // Index snapshots
     for (const d of filteredDatasets) {
       const dsId = datasetIds[d.name];
       const dsSnaps = stmt.getSnapshotsForDataset.all(dsId);
       console.log(`\n📦 Dataset: ${d.name} (${dsSnaps.length} snapshots)`);
 
+      // Collect all snapshot IDs that will be processed incrementally so we
+      // can do a single bulk bumpLastSeen at the end instead of per-snapshot.
+      const lastIncrSnapId = findLastIncrementalSnapId(dsSnaps);
+
       let prevSnap = null;
+      let snapIdx = 0;
       for (const snap of dsSnaps) {
         const snapPath = snapshotMountPath(d.mountpoint, snap.name);
 
-        if (!snap.indexed_at) {
+        // Determine if we need indexing, diffing, or both
+        const needIndex = !snap.indexed_at;
+        const needDiff  = prevSnap && !snap.diff_done;
+        const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
+
+        if (needIndex) {
           if (!snapPath) { prevSnap = snap; continue; }
 
-          if (prevSnap && prevSnap.indexed_at) {
+          if (canIncremental && needDiff) {
+            // Unified pass: single zfs diff drives both incremental index + changes table
+            const t = Date.now();
+            await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
+            perf.crawlMs += Date.now() - t;
+            perf.snapsIncremental++;
+            perf.diffsDone++;
+            stmt.markDiffDone.run(snap.id);
+          } else if (canIncremental) {
+            // Incremental index only (diff already done)
             const t = Date.now();
             await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
             perf.crawlMs += Date.now() - t;
@@ -188,24 +231,77 @@ async function run(opts = {}) {
           console.log(`  ✓  ${snap.name} already indexed`);
         }
 
-        if (prevSnap && !snap.diff_done) {
-          console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
-          const t = Date.now();
-          await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
-          perf.diffMs += Date.now() - t;
-          perf.diffsDone++;
-          stmt.markDiffDone.run(snap.id);
+        // Standalone diff only when both snaps were already indexed
+        if (needDiff && !canIncremental) {
+          if (prevSnap) {
+            console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
+            const t = Date.now();
+            await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
+            perf.diffMs += Date.now() - t;
+            perf.diffsDone++;
+            stmt.markDiffDone.run(snap.id);
+          }
         }
 
         prevSnap = snap;
+        snapIdx++;
+
+        // Checkpoint WAL every 10 snapshots to prevent unbounded WAL growth
+        // that causes progressive slowdown as SQLite has to search through
+        // more and more WAL frames for each read.
+        if (snapIdx % 10 === 0) {
+          checkpoint(db);
+        }
+      }
+
+      // Single bulk bumpLastSeen at the end instead of per-snapshot.
+      // The old code ran `UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ?
+      // AND deleted_at_snap_id IS NULL` once per incremental snapshot, updating ALL
+      // non-deleted files (~143K rows) each time. Over 87 snapshots that's ~12.5M
+      // row updates just for bookkeeping. Instead, we do it once with the final
+      // snapshot ID — the semantic is the same because each snapshot overwrites the
+      // previous value anyway.
+      if (lastIncrSnapId != null) {
+        const t = Date.now();
+        stmt.bumpLastSeen.run(lastIncrSnapId, dsId);
+        perf.sqlUpdates++;
+        perf.sqlMs += Date.now() - t;
       }
     }
+
+    // Rebuild FTS in one shot and restore normal mode
+    disableBulkMode(db);
 
     console.log('\n✅ Indexing complete.');
     printStats(db, perf);
   } finally {
     db.close();
   }
+}
+
+/**
+ * Find the snapshot ID of the last snapshot that will be processed incrementally.
+ * Returns null if no incremental processing will happen.
+ */
+function findLastIncrementalSnapId(dsSnaps) {
+  let lastId = null;
+  let prevSnap = null;
+  for (const snap of dsSnaps) {
+    if (!snap.indexed_at && prevSnap && prevSnap.indexed_at) {
+      lastId = snap.id;
+    }
+    // After the first unindexed snap is processed, it becomes "indexed" for
+    // subsequent ones (the main loop sets snap.indexed_at = 1). Simulate that.
+    if (!snap.indexed_at) {
+      // This snap will be processed; subsequent snaps can be incremental from it.
+      snap._willBeIndexed = true;
+    }
+    if (prevSnap && (prevSnap.indexed_at || prevSnap._willBeIndexed) && !snap.indexed_at) {
+      lastId = snap.id;
+    }
+    prevSnap = snap;
+  }
+  return lastId;
 }
 
 // ─── Full crawl ─────────────────────────────────────────────────────────────
@@ -239,33 +335,131 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
   return count;
 }
 
-// ─── Incremental ────────────────────────────────────────────────────────────
+// ─── Batch constants ────────────────────────────────────────────────────────
+
+const INCR_BATCH_SIZE = 2000;
+const STAT_CONCURRENCY = 64;
+
+// ─── Incremental (standalone, no changes table) ────────────────────────────
 
 async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
   console.log(`  ⚡ Incremental ${snap.name} (from ${prevSnap.name})...`);
   const t0 = Date.now();
 
-  let t = Date.now();
-  stmt.bumpLastSeen.run(snap.id, datasetId);
-  perf.sqlUpdates++;
-  perf.sqlMs += Date.now() - t;
+  let changeCount = 0;
+  let batch = [];
+
+  for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
+    batch.push(c);
+    if (batch.length >= INCR_BATCH_SIZE) {
+      await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+      changeCount += batch.length;
+      batch = [];
+      if (changeCount % 50000 === 0) {
+        process.stdout.write(`\r    ${changeCount.toLocaleString()} changes @ ${(changeCount / ((Date.now() - t0) / 1000)).toFixed(0)}/s   `);
+      }
+    }
+  }
+  if (batch.length) {
+    await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+    changeCount += batch.length;
+  }
+
+  console.log(`\n    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+}
+
+// ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
+
+async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
+  console.log(`  ⚡ Incremental+diff ${snap.name} (from ${prevSnap.name})...`);
+  const t0 = Date.now();
 
   let changeCount = 0;
-  for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
-    const relPath = mountpoint && c.path.startsWith(mountpoint) ? c.path.slice(mountpoint.length) || '/' : c.path;
+  let batch = [];
 
-    t = Date.now();
-    transaction(db, () => {
-      perf.sqlTxns++;
+  for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
+    batch.push(c);
+    if (batch.length >= INCR_BATCH_SIZE) {
+      await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+      changeCount += batch.length;
+      batch = [];
+      if (changeCount % 50000 === 0) {
+        process.stdout.write(`\r    ${changeCount.toLocaleString()} changes @ ${(changeCount / ((Date.now() - t0) / 1000)).toFixed(0)}/s   `);
+      }
+    }
+  }
+  if (batch.length) {
+    await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+    changeCount += batch.length;
+  }
+
+  console.log(`\n    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+}
+
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+function resolveRelPath(path, mountpoint) {
+  return mountpoint && path.startsWith(mountpoint) ? path.slice(mountpoint.length) || '/' : path;
+}
+
+function typeFromStat(st) {
+  return st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : 'other';
+}
+
+function modeStr(st) {
+  return (st.mode & 0o7777).toString(8).padStart(4, '0');
+}
+
+/**
+ * Stat all entries in a batch that need stat info (added, modified, renamed).
+ * Returns a Map<batchIndex, StatResult|null>.
+ */
+async function statBatch(batch, mountpoint, snapPath) {
+  const entries = [];
+  for (let i = 0; i < batch.length; i++) {
+    const c = batch[i];
+    if (c.changeType === 'removed') continue;
+    let targetPath;
+    if (c.changeType === 'renamed') {
+      const relNew = resolveRelPath(c.newPath, mountpoint);
+      targetPath = snapPath + relNew;
+    } else {
+      const rel = resolveRelPath(c.path, mountpoint);
+      targetPath = snapPath + rel;
+    }
+    entries.push({ idx: i, fullPath: targetPath });
+  }
+
+  const stats = await batchStat(entries, STAT_CONCURRENCY);
+  const map = new Map();
+  for (let j = 0; j < entries.length; j++) {
+    map.set(entries[j].idx, stats[j]);
+  }
+  return map;
+}
+
+// ─── Batch flush: incremental only ─────────────────────────────────────────
+
+async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
+  const t0 = Date.now();
+  const statMap = await statBatch(batch, mountpoint, snapPath);
+  perf.statMs += Date.now() - t0;
+
+  const t = Date.now();
+  transaction(db, () => {
+    perf.sqlTxns++;
+    for (let i = 0; i < batch.length; i++) {
+      const c = batch[i];
+      const relPath = resolveRelPath(c.path, mountpoint);
 
       if (c.changeType === 'added') {
-        const st = safeStat(snapPath + relPath);
+        const st = statMap.get(i);
         if (st) {
-          const type = st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : 'other';
+          const type = typeFromStat(st);
           const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, (st.mode & 0o7777).toString(8).padStart(4, '0'));
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -274,46 +468,141 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
         perf.sqlSelects++;
         if (fileRow) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
       } else if (c.changeType === 'modified') {
-        const st = safeStat(snapPath + relPath);
+        const st = statMap.get(i);
         if (st) {
           const fileRow = stmt.getFileByPath.get(datasetId, relPath);
           perf.sqlSelects++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, (st.mode & 0o7777).toString(8).padStart(4, '0'));
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
       } else if (c.changeType === 'renamed') {
-        const relNewPath = c.newPath && mountpoint && c.newPath.startsWith(mountpoint) ? c.newPath.slice(mountpoint.length) || '/' : c.newPath;
-        const st = safeStat(snapPath + (relNewPath ?? relPath));
+        const relNewPath = resolveRelPath(c.newPath, mountpoint);
+        const st = statMap.get(i);
         if (st) {
           const oldFile = stmt.getFileByPath.get(datasetId, relPath);
           perf.sqlSelects++;
           if (oldFile) { stmt.markDeleted.run(snap.id, oldFile.id); perf.sqlUpdates++; }
-          const type = st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : 'other';
-          const newFile = stmt.upsertFile.get(datasetId, relNewPath ?? relPath, st.ino, type, snap.id, snap.id);
+          const type = typeFromStat(st);
+          const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (newFile) {
-            stmt.insertVersion.run(newFile.id, snap.id, relNewPath ?? relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, (st.mode & 0o7777).toString(8).padStart(4, '0'));
+            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
       }
-    });
-    perf.sqlMs += Date.now() - t;
-    changeCount++;
-  }
-
-  console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+    }
+  });
+  perf.sqlMs += Date.now() - t;
 }
 
-// ─── Diff for changes table ─────────────────────────────────────────────────
+// ─── Batch flush: unified incremental + diff ────────────────────────────────
+
+async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
+  const t0 = Date.now();
+  const statMap = await statBatch(batch, mountpoint, snapPath);
+  perf.statMs += Date.now() - t0;
+
+  const t = Date.now();
+  transaction(db, () => {
+    perf.sqlTxns++;
+    for (let i = 0; i < batch.length; i++) {
+      const c = batch[i];
+      const relPath = resolveRelPath(c.path, mountpoint);
+      const relNewPath = c.changeType === 'renamed' ? resolveRelPath(c.newPath, mountpoint) : null;
+      const st = statMap.get(i) ?? null;
+
+      // ── Incremental index updates ──
+      let fileId = null;
+
+      if (c.changeType === 'added') {
+        if (st) {
+          const type = typeFromStat(st);
+          const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
+          perf.sqlUpserts++;
+          if (fileRow) {
+            fileId = fileRow.id;
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            perf.sqlInserts++;
+          }
+        }
+      } else if (c.changeType === 'removed') {
+        const fileRow = stmt.getFileByPath.get(datasetId, relPath);
+        perf.sqlSelects++;
+        if (fileRow) {
+          fileId = fileRow.id;
+          stmt.markDeleted.run(snap.id, fileRow.id);
+          perf.sqlUpdates++;
+        }
+      } else if (c.changeType === 'modified') {
+        if (st) {
+          const fileRow = stmt.getFileByPath.get(datasetId, relPath);
+          perf.sqlSelects++;
+          if (fileRow) {
+            fileId = fileRow.id;
+            stmt.insertVersion.run(fileRow.id, snap.id, relPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            perf.sqlInserts++;
+          }
+        }
+      } else if (c.changeType === 'renamed') {
+        if (st) {
+          const oldFile = stmt.getFileByPath.get(datasetId, relPath);
+          perf.sqlSelects++;
+          if (oldFile) {
+            fileId = oldFile.id;
+            stmt.markDeleted.run(snap.id, oldFile.id);
+            perf.sqlUpdates++;
+          }
+          const type = typeFromStat(st);
+          const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
+          perf.sqlUpserts++;
+          if (newFile) {
+            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, st.isDirectory() ? 0 : st.size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            perf.sqlInserts++;
+          }
+        }
+      }
+
+      // ── Changes table (diff) ──
+      if (fileId == null) {
+        const row = stmt.getFileByPath.get(datasetId, relPath);
+        fileId = row?.id ?? null;
+        perf.sqlSelects++;
+      }
+
+      let oldSize = null, newSize = null;
+      if (c.changeType === 'removed') {
+        if (fileId) { oldSize = stmt.getLatestSize.get(fileId)?.size ?? null; perf.sqlSelects++; }
+      } else if (c.changeType === 'added') {
+        if (fileId) { newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null; perf.sqlSelects++; }
+        if (newSize == null) { newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relPath, snap.id)?.size ?? null; perf.sqlSelects++; }
+      } else {
+        if (fileId) {
+          oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
+          newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
+          perf.sqlSelects += 2;
+        }
+      }
+
+      stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, relNewPath, oldSize, newSize, (newSize ?? 0) - (oldSize ?? 0), snap.created_at);
+      perf.sqlInserts++;
+      perf.diffChanges++;
+    }
+  });
+  perf.sqlMs += Date.now() - t;
+}
+
+// ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
 async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
   const changes = [];
   for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name)) {
     changes.push(change);
-    if (changes.length >= 1000) flushChanges(db, stmt, perf, changes.splice(0), snap, datasetId, mountpoint);
+    if (changes.length >= 2000) {
+      flushChanges(db, stmt, perf, changes.splice(0), snap, datasetId, mountpoint);
+    }
   }
   if (changes.length) flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint);
 }
@@ -323,8 +612,8 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
   transaction(db, () => {
     perf.sqlTxns++;
     for (const c of changes) {
-      const relPath = mountpoint && c.path.startsWith(mountpoint) ? c.path.slice(mountpoint.length) || '/' : c.path;
-      const relNewPath = c.newPath && mountpoint && c.newPath.startsWith(mountpoint) ? c.newPath.slice(mountpoint.length) || '/' : c.newPath;
+      const relPath = resolveRelPath(c.path, mountpoint);
+      const relNewPath = c.newPath ? resolveRelPath(c.newPath, mountpoint) : null;
 
       const fileRow = stmt.getFileByPath.get(datasetId, relPath);
       let fileId = fileRow?.id ?? null;
@@ -386,6 +675,7 @@ function printStats(db, perf) {
   console.log(`   Total runtime:   ${formatDuration(totalMs)}`);
   console.log(`   Crawl time:      ${formatDuration(perf.crawlMs)}`);
   console.log(`   Diff time:       ${formatDuration(perf.diffMs)}`);
+  console.log(`   Stat time:       ${formatDuration(perf.statMs)}`);
   console.log(`   Full crawls:     ${perf.snapsCrawled}`);
   console.log(`   Incremental:     ${perf.snapsIncremental}`);
   console.log(`   Skipped:         ${perf.snapsSkipped}`);
