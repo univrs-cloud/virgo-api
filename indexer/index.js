@@ -331,7 +331,7 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
     }
   });
 
-  console.log(`\n    Done: ${count.toLocaleString()} entries in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+  console.log(`    Done: ${count.toLocaleString()} entries in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
   return count;
 }
 
@@ -369,7 +369,7 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
     changeCount += batch.length;
   }
 
-  console.log(`\n    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+  console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
 }
 
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
@@ -397,7 +397,7 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
     changeCount += batch.length;
   }
 
-  console.log(`\n    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+  console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
