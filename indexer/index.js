@@ -1,7 +1,7 @@
 'use strict';
 
 const { openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } = require('./db');
-const { discoverAll, diffSnapshots, snapshotMountPath } = require('./zfs');
+const { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure } = require('./zfs');
 const { walkSnapshot } = require('./walker');
 const { getConfig } = require('./config');
 const { execaSync } = require('execa');
@@ -73,6 +73,36 @@ function formatDuration(ms) {
   return `${m}m${s}s`;
 }
 
+function restartIndexerFromBeginning(message) {
+  const e = new Error(message);
+  e.code = 'INDEXER_RESTART_FROM_BEGINNING';
+  throw e;
+}
+
+/**
+ * After a failed zfs diff, drop partial work for `snapId` so the next full pass
+ * does not duplicate rows or leave dangling refs.
+ * - incremental / unified: versions + changes + snapshot pointers on files + orphans
+ * - changes_only: standalone doDiff (changes + deleted_at cleared for this snap)
+ */
+function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
+  transaction(db, () => {
+    stmt.deleteChangesBySnapshot.run(snapId);
+    if (mode === 'changes_only') {
+      stmt.clearDeletedAt.run(snapId);
+      return;
+    }
+    stmt.deleteVersionsBySnapshot.run(snapId);
+    stmt.clearFirstSeen.run(snapId);
+    stmt.clearLastSeen.run(snapId);
+    stmt.clearDeletedAt.run(snapId);
+    stmt.repairLastSeenNull.run(datasetId);
+    stmt.repairFirstSeenNull.run(datasetId);
+    stmt.deleteChangesForOrphanedFiles.run();
+    stmt.deleteOrphanedFiles.run();
+  });
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function run(opts = {}) {
@@ -83,6 +113,32 @@ async function run(opts = {}) {
     process.exitCode = 1;
     return;
   }
+
+  const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
+  const maxAttempts = Math.max(1, maxRestarts + 1);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
+    }
+    try {
+      await runIndexerPass(opts);
+      return;
+    } catch (e) {
+      if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
+        throw e;
+      }
+      if (attempt + 1 >= maxAttempts) {
+        console.error(`Fatal: zfs diff still failing after ${maxAttempts} full restarts.`);
+        process.exitCode = 1;
+        throw e;
+      }
+    }
+  }
+}
+
+async function runIndexerPass(opts) {
+  const config = getConfig(opts);
 
   const pool = (config.DATASET ?? config.DATASETS[0]).split('/')[0];
   const excludeMatchers = config.EXCLUDE_DATASETS.map(patternToMatcher);
@@ -125,6 +181,23 @@ async function run(opts = {}) {
       )
     `),
     deleteOrphanedFiles: db.prepare(`DELETE FROM files WHERE id NOT IN (SELECT DISTINCT file_id FROM file_versions)`),
+    repairLastSeenNull: db.prepare(`
+      UPDATE files SET last_seen_snap_id = (
+        SELECT snapshot_id FROM file_versions WHERE file_id = files.id
+        ORDER BY snapshot_id DESC LIMIT 1
+      )
+      WHERE dataset_id = ?
+      AND last_seen_snap_id IS NULL
+      AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
+    `),
+    repairFirstSeenNull: db.prepare(`
+      UPDATE files SET first_seen_snap_id = (
+        SELECT MIN(snapshot_id) FROM file_versions WHERE file_id = files.id
+      )
+      WHERE dataset_id = ?
+      AND first_seen_snap_id IS NULL
+      AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
+    `),
   };
 
   try {
@@ -212,7 +285,17 @@ async function run(opts = {}) {
           if (canIncremental && needDiff) {
             // Unified pass: single zfs diff drives both incremental index + changes table
             const t = Date.now();
-            await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
+            try {
+              await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
+            } catch (e) {
+              if (!isZfsDiffFailure(e)) throw e;
+              console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
+              console.log('  🧹 Cleaning up partial index/diff rows for this snapshot…');
+              cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'incremental');
+              restartIndexerFromBeginning(
+                `zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
+              );
+            }
             perf.crawlMs += Date.now() - t;
             perf.snapsIncremental++;
             perf.diffsDone++;
@@ -220,7 +303,17 @@ async function run(opts = {}) {
           } else if (canIncremental) {
             // Incremental index only (diff already done)
             const t = Date.now();
-            await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
+            try {
+              await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
+            } catch (e) {
+              if (!isZfsDiffFailure(e)) throw e;
+              console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
+              console.log('  🧹 Cleaning up partial index rows for this snapshot…');
+              cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'incremental');
+              restartIndexerFromBeginning(
+                `zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
+              );
+            }
             perf.crawlMs += Date.now() - t;
             perf.snapsIncremental++;
           } else {
@@ -244,7 +337,17 @@ async function run(opts = {}) {
           if (prevSnap) {
             console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
             const t = Date.now();
-            await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
+            try {
+              await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
+            } catch (e) {
+              if (!isZfsDiffFailure(e)) throw e;
+              console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
+              console.log('  🧹 Cleaning up partial change rows for this snapshot…');
+              cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'changes_only');
+              restartIndexerFromBeginning(
+                `zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
+              );
+            }
             perf.diffMs += Date.now() - t;
             perf.diffsDone++;
             stmt.markDiffDone.run(snap.id);

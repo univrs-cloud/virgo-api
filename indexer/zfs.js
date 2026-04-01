@@ -67,23 +67,19 @@ function discoverAll({ pool = null, dataset = null } = {}) {
 }
 
 async function* diffSnapshots(snapA, snapB) {
-  let child;
-  try {
-    child = execa('zfs', ['diff', '-FHt', snapA, snapB], {
-      buffer: false,
-    });
-  } catch (err) {
-    console.warn(`zfs diff failed for ${snapA} -> ${snapB}: ${err.message}`);
-    return;
-  }
+  const sub = execa('zfs', ['diff', '-FHt', snapA, snapB], {
+    reject: false,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
 
   let remainder = '';
 
   try {
-    for await (const chunk of child.stdout) {
-      const text  = remainder + chunk.toString('utf8');
+    for await (const chunk of sub.stdout) {
+      const text = remainder + chunk.toString('utf8');
       const lines = text.split('\n');
-      remainder   = lines.pop();
+      remainder = lines.pop();
 
       for (const line of lines) {
         const entry = parseDiffLine(line);
@@ -91,14 +87,37 @@ async function* diffSnapshots(snapA, snapB) {
       }
     }
   } catch (err) {
-    console.warn(`zfs diff stream error ${snapA} -> ${snapB}: ${err.message}`);
-    return;
+    try {
+      sub.kill('SIGTERM');
+    } catch {}
+    const r = await sub.catch(() => ({}));
+    const stderr = String(r.stderr ?? '').trim();
+    const e = new Error(stderr || `zfs diff stream error ${snapA} → ${snapB}: ${err.message}`);
+    e.code = 'ZFS_DIFF_FAILED';
+    e.snapA = snapA;
+    e.snapB = snapB;
+    throw e;
+  }
+
+  const r = await sub;
+  const stderr = (r.stderr && r.stderr.toString().trim()) || '';
+  if (r.exitCode !== 0) {
+    const e = new Error(stderr || `zfs diff exited with code ${r.exitCode}`);
+    e.code = 'ZFS_DIFF_FAILED';
+    e.exitCode = r.exitCode;
+    e.snapA = snapA;
+    e.snapB = snapB;
+    throw e;
   }
 
   if (remainder.trim()) {
     const entry = parseDiffLine(remainder);
     if (entry) yield entry;
   }
+}
+
+function isZfsDiffFailure(err) {
+  return Boolean(err && err.code === 'ZFS_DIFF_FAILED');
 }
 
 const CHANGE_MAP = {
@@ -159,4 +178,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
   return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-module.exports = { discoverAll, diffSnapshots, getPoolInfo, snapshotMountPath };
+module.exports = { discoverAll, diffSnapshots, getPoolInfo, snapshotMountPath, isZfsDiffFailure };
