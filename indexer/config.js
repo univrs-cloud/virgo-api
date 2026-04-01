@@ -1,7 +1,7 @@
 'use strict';
 
 const { resolve } = require('path');
-require('dotenv').config({ path: resolve(__dirname, '.env'), quiet: true });
+require('dotenv').config({ path: resolve(__dirname, '.config'), quiet: true });
 
 function getConfig(overrides = {}) {
   const DB_PATH = overrides.db || process.env.DB_PATH || '/messier/.config/index.db';
