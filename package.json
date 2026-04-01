@@ -6,8 +6,11 @@
 	"license": "UNLICENSED",
 	"main": "index.js",
 	"scripts": {
-		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js cert/ src/",
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js bin/ cert/ src/ indexer/",
 		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"bin": {
+		"virgo": "./bin/virgo"
 	},
 	"node_deb": {
 		"architecture": "arm64",
@@ -38,9 +41,11 @@
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
+		"commander": "^14.0.3",
 		"compromise": "^14.15.0",
 		"docker-compose": "^1.4.2",
 		"dockerode": "^4.0.10",
+		"dotenv": "^17.3.1",
 		"execa": "^9.6.1",
 		"express": "^5.2.1",
 		"express-rate-limit": "^8.3.2",

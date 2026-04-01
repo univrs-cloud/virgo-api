@@ -1,0 +1,162 @@
+'use strict';
+
+const { execaSync, execa } = require('execa');
+
+function zfsJson(subcmd, ...args) {
+  const { stdout } = execaSync('zfs', [subcmd, '-j', '--json-int', ...args]);
+  return JSON.parse(stdout);
+}
+
+function zpoolJson(subcmd, ...args) {
+  const { stdout } = execaSync('zpool', [subcmd, '-j', '--json-int', ...args]);
+  return JSON.parse(stdout);
+}
+
+function prop(properties, key) {
+  return properties?.[key]?.value ?? null;
+}
+
+function discoverAll({ pool = null, dataset = null } = {}) {
+  const json = zfsJson(
+    'list',
+    '-t', 'filesystem,snapshot',
+    '-o', 'name,type,creation,used,referenced,mountpoint',
+    '-r',
+    ...(dataset ? [dataset] : pool ? [pool] : [])
+  );
+
+  const datasets  = [];
+  const snapshots = [];
+
+  for (const [fullName, entry] of Object.entries(json.datasets ?? {})) {
+    const p = entry.properties;
+
+    if (entry.type === 'FILESYSTEM') {
+      if (!fullName.includes('/')) continue;
+
+      const mountpoint = prop(p, 'mountpoint');
+      datasets.push({
+        name:       fullName,
+        pool:       entry.pool,
+        mountpoint: mountpoint === 'none' ? null : mountpoint,
+        created_at: prop(p, 'creation'),
+      });
+
+    } else if (entry.type === 'SNAPSHOT') {
+      const atIdx       = fullName.indexOf('@');
+      const datasetName = fullName.slice(0, atIdx);
+
+      if (!datasetName.includes('/')) continue;
+
+      const snapName = fullName.slice(atIdx + 1);
+
+      snapshots.push({
+        dataset_name:     datasetName,
+        name:             snapName,
+        full_name:        fullName,
+        created_at:       prop(p, 'creation'),
+        used_bytes:       prop(p, 'used'),
+        referenced_bytes: prop(p, 'referenced'),
+      });
+    }
+  }
+
+  snapshots.sort((a, b) => a.created_at - b.created_at);
+
+  return { datasets, snapshots };
+}
+
+async function* diffSnapshots(snapA, snapB) {
+  let child;
+  try {
+    child = execa('zfs', ['diff', '-FHt', snapA, snapB], {
+      buffer: false,
+    });
+  } catch (err) {
+    console.warn(`zfs diff failed for ${snapA} -> ${snapB}: ${err.message}`);
+    return;
+  }
+
+  let remainder = '';
+
+  try {
+    for await (const chunk of child.stdout) {
+      const text  = remainder + chunk.toString('utf8');
+      const lines = text.split('\n');
+      remainder   = lines.pop();
+
+      for (const line of lines) {
+        const entry = parseDiffLine(line);
+        if (entry) yield entry;
+      }
+    }
+  } catch (err) {
+    console.warn(`zfs diff stream error ${snapA} -> ${snapB}: ${err.message}`);
+    return;
+  }
+
+  if (remainder.trim()) {
+    const entry = parseDiffLine(remainder);
+    if (entry) yield entry;
+  }
+}
+
+const CHANGE_MAP = {
+  '+': 'added',
+  '-': 'removed',
+  'M': 'modified',
+  'R': 'renamed',
+};
+
+const FILETYPE_MAP = {
+  'F': 'file',
+  '/': 'dir',
+  '@': 'link',
+  'B': 'block',
+  'C': 'char',
+  'P': 'pipe',
+  '=': 'socket',
+};
+
+function parseDiffLine(line) {
+  if (!line.trim()) return null;
+
+  const parts = line.split('\t');
+  if (parts.length < 4) return null;
+
+  const changedAt  = Math.floor(parseFloat(parts[0]));
+  const changeChar = parts[1];
+  const typeChar   = parts[2];
+  const path       = parts[3];
+  const newPath    = parts[4] ?? null;
+
+  return {
+    changeType: CHANGE_MAP[changeChar]   ?? 'modified',
+    fileType:   FILETYPE_MAP[typeChar]   ?? 'other',
+    path,
+    newPath,
+    changedAt,
+  };
+}
+
+function getPoolInfo(poolName = null) {
+  const json = zpoolJson('list', ...(poolName ? [poolName] : []));
+
+  return Object.values(json.pools ?? {}).map(pool => ({
+    name:          pool.name,
+    state:         pool.state,
+    guid:          pool.guid,
+    size:          prop(pool.properties, 'size'),
+    alloc_bytes:   prop(pool.properties, 'allocated'),
+    free_bytes:    prop(pool.properties, 'free'),
+    health:        prop(pool.properties, 'health'),
+    fragmentation: prop(pool.properties, 'fragmentation'),
+  }));
+}
+
+function snapshotMountPath(datasetMountpoint, snapshotName) {
+  if (!datasetMountpoint) return null;
+  return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
+}
+
+module.exports = { discoverAll, diffSnapshots, getPoolInfo, snapshotMountPath };

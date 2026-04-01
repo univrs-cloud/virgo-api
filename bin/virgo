@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const { Command } = require('commander');
+const pkg = require('../package.json');
+
+const program = new Command();
+
+program
+  .name('virgo')
+  .description('ZFS snapshot indexer and file search')
+  .version(pkg.version);
+
+// ─── index ──────────────────────────────────────────────────────────────────
+
+program
+  .command('index')
+  .description('Index ZFS datasets and snapshots')
+  .option('--db <path>', 'SQLite database path')
+  .option('--dataset <name>', 'Index a single dataset')
+  .action((opts) => {
+    const indexer = require('../indexer/index');
+    indexer.run(opts).catch(err => {
+      console.error(err);
+      process.exitCode = 1;
+    });
+  });
+
+// ─── query search ───────────────────────────────────────────────────────────
+
+program
+  .command('search <term>')
+  .description('Search files by path (FTS5 or glob with * ?)')
+  .option('--dataset <name>', 'Filter by dataset name')
+  .option('--type <type>', 'Filter by type: file, dir, link')
+  .option('--json', 'Output as JSON')
+  .action((term, opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.search(db, term, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+// ─── query history ──────────────────────────────────────────────────────────
+
+program
+  .command('history <path>')
+  .description('Full version history of a file')
+  .option('--json', 'Output as JSON')
+  .action((path, opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.history(db, path, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+// ─── query deleted ──────────────────────────────────────────────────────────
+
+program
+  .command('deleted')
+  .description('List deleted files')
+  .option('--dataset <name>', 'Filter by dataset name')
+  .option('--json', 'Output as JSON')
+  .action((opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.deleted(db, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+// ─── query changes ──────────────────────────────────────────────────────────
+
+program
+  .command('changes <snapshot>')
+  .description('Show all changes in a snapshot')
+  .option('--json', 'Output as JSON')
+  .action((snapshot, opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.changes(db, snapshot, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+// ─── query diff ─────────────────────────────────────────────────────────────
+
+program
+  .command('diff <snapA> <snapB>')
+  .description('Changes between two snapshots')
+  .option('--json', 'Output as JSON')
+  .action((snapA, snapB, opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.diff(db, snapA, snapB, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+// ─── query stats ────────────────────────────────────────────────────────────
+
+program
+  .command('stats')
+  .description('Database statistics')
+  .option('--json', 'Output as JSON')
+  .action((opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      const result = query.stats(db, opts);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+    } finally { db.close(); }
+  });
+
+program.parse();
