@@ -334,11 +334,10 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
     });
     perf.sqlMs += Date.now() - t;
     count += batch.length;
-    if (count % 50000 === 0) {
-      process.stdout.write(`\r    ${count.toLocaleString()} entries @ ${(count / ((Date.now() - t0) / 1000)).toFixed(0)}/s   `);
-    }
+    logBatchProgress('entries', batch.length, count, t0);
   });
 
+  if (count && process.stdout.isTTY) endProgressLine();
   console.log(`    Done: ${count.toLocaleString()} entries in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
   return count;
 }
@@ -350,6 +349,36 @@ const STAT_CONCURRENCY = 64;
 
 function sizeFromStat(st) {
   return st.isDirectory() ? 0 : st.size;
+}
+
+/** Sliding block; total unknown until stream ends (zfs diff / walk), so no %-bar without a second pass. */
+let _progressAnimTick = 0;
+
+function indeterminateBar(width, tick) {
+  const blockLen = Math.max(3, Math.floor(width / 4));
+  const range = Math.max(1, width - blockLen + 1);
+  const start = tick % range;
+  let s = '';
+  for (let i = 0; i < width; i++) {
+    s += i >= start && i < start + blockLen ? '█' : '░';
+  }
+  return s;
+}
+
+function logBatchProgress(unit, batchLen, total, t0) {
+  const elapsedSec = (Date.now() - t0) / 1000;
+  const rate = elapsedSec > 0 ? (total / elapsedSec).toFixed(0) : '0';
+  _progressAnimTick++;
+  if (process.stdout.isTTY) {
+    const bar = indeterminateBar(22, _progressAnimTick);
+    process.stdout.write(`\r    [${bar}] ${total.toLocaleString()} ${unit}  ${rate}/s\x1b[K`);
+  } else {
+    console.log(`    +${batchLen.toLocaleString()} ${unit} → ${total.toLocaleString()} total (${rate}/s)`);
+  }
+}
+
+function endProgressLine() {
+  if (process.stdout.isTTY) process.stdout.write('\n');
 }
 
 // ─── Incremental (standalone, no changes table) ────────────────────────────
@@ -364,19 +393,21 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
   for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
     batch.push(c);
     if (batch.length >= INCR_BATCH_SIZE) {
+      const n = batch.length;
       await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-      changeCount += batch.length;
+      changeCount += n;
       batch = [];
-      if (changeCount % 50000 === 0) {
-        process.stdout.write(`\r    ${changeCount.toLocaleString()} changes @ ${(changeCount / ((Date.now() - t0) / 1000)).toFixed(0)}/s   `);
-      }
+      logBatchProgress('changes', n, changeCount, t0);
     }
   }
   if (batch.length) {
+    const n = batch.length;
     await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-    changeCount += batch.length;
+    changeCount += n;
+    logBatchProgress('changes', n, changeCount, t0);
   }
 
+  if (changeCount && process.stdout.isTTY) endProgressLine();
   console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
 }
 
@@ -392,19 +423,21 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
   for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
     batch.push(c);
     if (batch.length >= INCR_BATCH_SIZE) {
+      const n = batch.length;
       await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-      changeCount += batch.length;
+      changeCount += n;
       batch = [];
-      if (changeCount % 50000 === 0) {
-        process.stdout.write(`\r    ${changeCount.toLocaleString()} changes @ ${(changeCount / ((Date.now() - t0) / 1000)).toFixed(0)}/s   `);
-      }
+      logBatchProgress('changes', n, changeCount, t0);
     }
   }
   if (batch.length) {
+    const n = batch.length;
     await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-    changeCount += batch.length;
+    changeCount += n;
+    logBatchProgress('changes', n, changeCount, t0);
   }
 
+  if (changeCount && process.stdout.isTTY) endProgressLine();
   console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
 }
 
@@ -630,13 +663,24 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
   const changes = [];
+  let changeCount = 0;
+  const t0 = Date.now();
   for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name)) {
     changes.push(change);
     if (changes.length >= INCR_BATCH_SIZE) {
-      flushChanges(db, stmt, perf, changes.splice(0), snap, datasetId, mountpoint);
+      const chunk = changes.splice(0, INCR_BATCH_SIZE);
+      flushChanges(db, stmt, perf, chunk, snap, datasetId, mountpoint);
+      changeCount += chunk.length;
+      logBatchProgress('changes', chunk.length, changeCount, t0);
     }
   }
-  if (changes.length) flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint);
+  if (changes.length) {
+    const n = changes.length;
+    flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint);
+    changeCount += n;
+    logBatchProgress('changes', n, changeCount, t0);
+  }
+  if (changeCount && process.stdout.isTTY) endProgressLine();
 }
 
 function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
