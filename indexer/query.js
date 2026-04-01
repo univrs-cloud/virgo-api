@@ -384,11 +384,12 @@ function stats(db, opts = {}) {
   `).get();
 
   const topDatasets = db.prepare(`
-    SELECT d.name, COUNT(f.id) AS file_count, COUNT(DISTINCT s.id) AS snap_count
+    SELECT d.name,
+      (SELECT COUNT(*) FROM files f WHERE f.dataset_id = d.id) AS file_count,
+      (SELECT COUNT(*) FROM snapshots s WHERE s.dataset_id = d.id) AS snap_count
     FROM datasets d
-    LEFT JOIN files f     ON f.dataset_id = d.id
-    LEFT JOIN snapshots s ON s.dataset_id = d.id
-    GROUP BY d.id ORDER BY file_count DESC LIMIT 10
+    ORDER BY file_count DESC
+    LIMIT 10
   `).all();
 
   const result = { ...s, top_datasets: topDatasets };
