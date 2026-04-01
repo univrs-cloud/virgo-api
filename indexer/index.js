@@ -119,6 +119,11 @@ async function run(opts = {}) {
     clearLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = NULL WHERE last_seen_snap_id = ?`),
     clearDeletedAt: db.prepare(`UPDATE files SET deleted_at_snap_id = NULL WHERE deleted_at_snap_id = ?`),
     deleteSnapshot: db.prepare(`DELETE FROM snapshots WHERE id = ?`),
+    deleteChangesForOrphanedFiles: db.prepare(`
+      DELETE FROM changes WHERE file_id IN (
+        SELECT id FROM files WHERE id NOT IN (SELECT DISTINCT file_id FROM file_versions)
+      )
+    `),
     deleteOrphanedFiles: db.prepare(`DELETE FROM files WHERE id NOT IN (SELECT DISTINCT file_id FROM file_versions)`),
   };
 
@@ -173,7 +178,10 @@ async function run(opts = {}) {
         }
       }
     }
-    stmt.deleteOrphanedFiles.run();
+    transaction(db, () => {
+      stmt.deleteChangesForOrphanedFiles.run();
+      stmt.deleteOrphanedFiles.run();
+    });
 
     // Enable bulk mode: drop FTS triggers + synchronous=OFF
     enableBulkMode(db);
