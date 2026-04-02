@@ -7,6 +7,7 @@ const DATASETS = [
 	{ name: 'messier/containerd', opts: ['-o', 'mountpoint=/var/lib/containerd'] },
 	{ name: 'messier/docker/compose', opts: ['-o', 'mountpoint=/opt/docker'] },
 	{ name: 'messier/apps', opts: [] },
+	{ name: 'messier/folders', opts: [] },
 	{ name: 'messier/time_machines', opts: ['-o', 'mountpoint=/time_machines'] },
 	{ name: 'messier/downloads', opts: ['-o', 'mountpoint=/downloads'] }
 ];
