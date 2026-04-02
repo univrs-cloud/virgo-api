@@ -8,7 +8,9 @@ class ShareModule extends BaseModule {
 		'/etc/samba/smb.conf',
 		'/messier/.shares'
 	];
+	#foldersConf = '/messier/.shares/folders.conf';
 	#timeMachinesConf = '/messier/.shares/time_machines.conf';
+	#foldersDataset = 'messier/folders';
 	#timeMachinesDataset = 'messier/time_machines';
 
 	constructor() {
@@ -29,8 +31,16 @@ class ShareModule extends BaseModule {
 		return this.#configurationFiles;
 	}
 
+	get foldersConf() {
+		return this.#foldersConf;
+	}
+
 	get timeMachinesConf() {
 		return this.#timeMachinesConf;
+	}
+
+	get foldersDataset() {
+		return this.#foldersDataset;
 	}
 
 	get timeMachinesDataset() {

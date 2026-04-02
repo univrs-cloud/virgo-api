@@ -7,6 +7,43 @@ const slug = (comment) => {
 	return (comment || '').toLowerCase().trim().replace(/\s+/g, '_');
 };
 
+const createFolder = async (job, module) => {
+	const { config } = job.data;
+	const { comment, validUsers = [], refquota: refquotaRaw } = config;
+	const dataset = `${module.foldersDataset}/${slug(comment)}`;
+	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
+	await module.updateJobProgress(job, `Creating folder ${comment}...`);
+	await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+	let shares = {};
+	try {
+		const existingConf = fs.readFileSync(module.foldersConf, 'utf8');
+		shares = ini.parse(existingConf);
+	} catch {
+		// missing or unreadable: treat as empty and write new file
+	}
+	shares[`${slug(comment)}`] = {
+		path: `/messier/folders/${slug(comment)}`,
+		comment,
+		'browseable': 'yes',
+		'writable': 'yes',
+		'read only': 'no',
+		'guest ok': 'no',
+		'create mask': '0775',
+		'directory mask': '0755',
+		'force user': 'voyager',
+		'force group': 'users',
+		'valid users': validUsers.join(' ')
+	};
+	const dir = path.dirname(module.foldersConf);
+	if (!fs.existsSync(dir)) {
+		fs.mkdirSync(dir, { recursive: true });
+	}
+	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
+	await execa('smbcontrol', ['all', 'reload-config']);
+	module.eventEmitter.emit('shares:updated');
+	return `Folder ${comment} created.`;
+};
+
 const createTimeMachine = async (job, module) => {
 	const { config } = job.data;
 	const { comment, validUsers = [], refquota: refquotaRaw } = config;
@@ -53,11 +90,14 @@ const createShare = async (job, module) => {
 		throw new Error(`Share type is required and must be one of: ${validTypes.join(', ')}.`);
 	}
 
+	if (type === 'folder') {
+		return createFolder(job, module);
+	}
+
 	if (type === 'timeMachine') {
 		return createTimeMachine(job, module);
 	}
 
-	// folder type not yet implemented
 	throw new Error(`Share type "${type}" is not yet implemented.`);
 };
 

@@ -1,5 +1,5 @@
-const { execa } = require('execa');
 const fs = require('fs');
+const { execa } = require('execa');
 
 // Dataset definitions (order matters: parent datasets must come before children)
 const DATASETS = [
@@ -351,7 +351,7 @@ const setup = async () => {
 		const allConfPath = `${messierSharesDir}/all.conf`;
 		const shareConfFiles = [
 			'downloads.conf',
-			'nextcloud.conf',
+			'folders.conf',
 			'time_machines.conf'
 		];
 
