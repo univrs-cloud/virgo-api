@@ -14,9 +14,13 @@ function open(dbPath) {
 // ─── Search ─────────────────────────────────────────────────────────────────
 
 function search(db, pattern, opts = {}) {
-  if (!pattern) { console.log('Usage: virgo search <term> [--dataset <n>] [--type file|dir]'); return null; }
+  if (!pattern) {
+    console.log('Usage: virgo search <term> [--dataset <n>] [--path <pattern>] [--type file|dir]');
+    return null;
+  }
 
   const datasetFilter = opts.dataset || null;
+  const pathFilterOpt = opts.path    || null;
   const typeFilter    = opts.type    || null;
   const json          = opts.json    || false;
   const limit         = opts.limit   || 100;
@@ -29,6 +33,16 @@ function search(db, pattern, opts = {}) {
   const DS_FILTER   = datasetFilter ? `AND d.name = ?` : '';
   const TYPE_FILTER = typeFilter    ? `AND f.type = ?`    : '';
   const baseParams  = [datasetFilter, typeFilter].filter(Boolean);
+
+  let pathParam = null;
+  if (pathFilterOpt) {
+    pathParam = pathFilterOpt.replace(/\*/g, '%').replace(/\?/g, '_');
+    if (!pathParam.includes('%') && !pathParam.includes('_')) {
+      pathParam += '%';
+    }
+  }
+  const PATH_FILTER = pathParam ? `AND f.path LIKE ?` : '';
+  const pathParams  = pathParam ? [pathParam] : [];
 
   const needVersionJoin = minSize != null || maxSize != null || since != null || until != null;
   const VER_JOIN = needVersionJoin
@@ -48,9 +62,9 @@ function search(db, pattern, opts = {}) {
     fileIds = db.prepare(`
       SELECT DISTINCT f.id FROM files f
       JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-      WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+      WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
       LIMIT ? OFFSET ?
-    `).all(glob, ...baseParams, ...filterParams, limit, offset);
+    `).all(glob, ...baseParams, ...filterParams, ...pathParams, limit, offset);
   } else {
     const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"';
     try {
@@ -58,18 +72,18 @@ function search(db, pattern, opts = {}) {
         SELECT DISTINCT f.id FROM fts_paths fp
         JOIN files f ON f.id = fp.rowid
         JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-        WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+        WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
         LIMIT ? OFFSET ?
-      `).all(ftsQuery, ...baseParams, ...filterParams, limit, offset);
+      `).all(ftsQuery, ...baseParams, ...filterParams, ...pathParams, limit, offset);
     } catch { fileIds = []; }
 
     if (!fileIds.length && offset === 0) {
       fileIds = db.prepare(`
         SELECT DISTINCT f.id FROM files f
         JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-        WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+        WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
         LIMIT ? OFFSET ?
-      `).all('%' + pattern + '%', ...baseParams, ...filterParams, limit, offset);
+      `).all('%' + pattern + '%', ...baseParams, ...filterParams, ...pathParams, limit, offset);
     }
   }
 
@@ -313,12 +327,28 @@ function deleted(db, opts = {}) {
 // ─── Changes ────────────────────────────────────────────────────────────────
 
 function changes(db, snapshotName, opts = {}) {
-  if (!snapshotName) { console.log('Usage: virgo changes <snapshot> [--dataset <name>]'); return null; }
+  if (!snapshotName) {
+    console.log('Usage: virgo changes <snapshot> [--dataset <name>] [--path <pattern>]');
+    return null;
+  }
 
-  const json        = opts.json    || false;
-  const datasetName = opts.dataset || null;
-  const limit       = opts.limit   || 5000;
-  const offset      = opts.offset  || 0;
+  const json          = opts.json    || false;
+  const datasetName   = opts.dataset || null;
+  const pathFilterOpt = opts.path    || null;
+  const limit         = opts.limit   || 5000;
+  const offset        = opts.offset  || 0;
+
+  let pathParam = null;
+  if (pathFilterOpt) {
+    pathParam = pathFilterOpt.replace(/\*/g, '%').replace(/\?/g, '_');
+    if (!pathParam.includes('%') && !pathParam.includes('_')) {
+      pathParam += '%';
+    }
+  }
+  const PATH_FILTER = pathParam
+    ? `AND ((c.old_path LIKE ?) OR (c.new_path LIKE ?))`
+    : '';
+  const pathParams = pathParam ? [pathParam, pathParam] : [];
 
   let snap;
   if (datasetName) {
@@ -346,10 +376,10 @@ function changes(db, snapshotName, opts = {}) {
     SELECT c.change_type, c.old_path, c.new_path,
            c.old_size, c.new_size, c.delta_bytes
     FROM changes c
-    WHERE c.snapshot_id = ?
+    WHERE c.snapshot_id = ? ${PATH_FILTER}
     ORDER BY c.change_type, c.new_path, c.old_path
     LIMIT ? OFFSET ?
-  `).all(snap.id, limit, offset);
+  `).all(snap.id, ...pathParams, limit, offset);
 
   const result = {
     snapshot: snap.full_name,
