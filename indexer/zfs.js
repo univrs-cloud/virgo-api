@@ -7,11 +7,6 @@ function zfsJson(subcmd, ...args) {
   return JSON.parse(stdout);
 }
 
-function zpoolJson(subcmd, ...args) {
-  const { stdout } = execaSync('zpool', [subcmd, '-j', '--json-int', ...args]);
-  return JSON.parse(stdout);
-}
-
 function prop(properties, key) {
   return properties?.[key]?.value ?? null;
 }
@@ -64,6 +59,15 @@ function discoverAll({ pool = null, dataset = null } = {}) {
   snapshots.sort((a, b) => a.created_at - b.created_at);
 
   return { datasets, snapshots };
+}
+
+/**
+ * Unescape octal sequences produced by `zfs diff -FHt`.
+ * e.g. \040 → space, \011 → tab
+ */
+function unescapeZfsPath(str) {
+  if (!str || !str.includes('\\')) return str;
+  return str.replace(/\\([0-7]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
 }
 
 async function* diffSnapshots(snapA, snapB) {
@@ -146,31 +150,21 @@ function parseDiffLine(line) {
   const changedAt  = Math.floor(parseFloat(parts[0]));
   const changeChar = parts[1];
   const typeChar   = parts[2];
-  const path       = parts[3];
-  const newPath    = parts[4] ?? null;
+  const rawPath    = parts[3];
+  const rawNewPath = parts[4] ?? null;
+
+  const changeType = CHANGE_MAP[changeChar];
+  if (!changeType) {
+    console.warn(`  ⚠  Unknown zfs diff change type '${changeChar}' for path: ${rawPath}`);
+  }
 
   return {
-    changeType: CHANGE_MAP[changeChar]   ?? 'modified',
-    fileType:   FILETYPE_MAP[typeChar]   ?? 'other',
-    path,
-    newPath,
+    changeType: changeType ?? 'unknown',
+    fileType:   FILETYPE_MAP[typeChar] ?? 'other',
+    path:       unescapeZfsPath(rawPath),
+    newPath:    rawNewPath ? unescapeZfsPath(rawNewPath) : null,
     changedAt,
   };
-}
-
-function getPoolInfo(poolName = null) {
-  const json = zpoolJson('list', ...(poolName ? [poolName] : []));
-
-  return Object.values(json.pools ?? {}).map(pool => ({
-    name:          pool.name,
-    state:         pool.state,
-    guid:          pool.guid,
-    size:          prop(pool.properties, 'size'),
-    alloc_bytes:   prop(pool.properties, 'allocated'),
-    free_bytes:    prop(pool.properties, 'free'),
-    health:        prop(pool.properties, 'health'),
-    fragmentation: prop(pool.properties, 'fragmentation'),
-  }));
 }
 
 function snapshotMountPath(datasetMountpoint, snapshotName) {
@@ -178,4 +172,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
   return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-module.exports = { discoverAll, diffSnapshots, getPoolInfo, snapshotMountPath, isZfsDiffFailure };
+module.exports = { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure };

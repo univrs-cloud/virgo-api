@@ -4,8 +4,8 @@ const { openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } = req
 const { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure } = require('./zfs');
 const { walkSnapshot } = require('./walker');
 const { getConfig } = require('./config');
+const { formatSize, formatDuration, acquireLock, releaseLock } = require('./utils');
 const { execaSync } = require('execa');
-const { statSync } = require('fs');
 const { stat } = require('fs/promises');
 
 // ─── Dataset filtering ─────────────────────────────────────────────────────
@@ -32,18 +32,10 @@ function umountSnapshot(snapPath) {
   try { execaSync('umount', [snapPath]); } catch {}
 }
 
-function safeStat(path) {
-  try { return statSync(path); } catch { return null; }
-}
-
 async function safeStatAsync(path) {
   try { return await stat(path); } catch { return null; }
 }
 
-/**
- * Stat an array of {fullPath, ...} entries in parallel, up to `concurrency` at a time.
- * Returns an array of stat results (or null on error) matching the input order.
- */
 async function batchStat(entries, concurrency = 64) {
   const results = new Array(entries.length);
   for (let i = 0; i < entries.length; i += concurrency) {
@@ -56,35 +48,12 @@ async function batchStat(entries, concurrency = 64) {
   return results;
 }
 
-function formatSize(bytes) {
-  if (bytes == null) return '?';
-  const abs = Math.abs(bytes);
-  if (abs < 1024) return `${bytes}B`;
-  if (abs < 1024**2) return `${(bytes/1024).toFixed(1)}K`;
-  if (abs < 1024**3) return `${(bytes/1024**2).toFixed(1)}M`;
-  return `${(bytes/1024**3).toFixed(2)}G`;
-}
-
-function formatDuration(ms) {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms/1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60000);
-  const s = ((ms % 60000) / 1000).toFixed(0);
-  return `${m}m${s}s`;
-}
-
 function restartIndexerFromBeginning(message) {
   const e = new Error(message);
   e.code = 'INDEXER_RESTART_FROM_BEGINNING';
   throw e;
 }
 
-/**
- * After a failed zfs diff, drop partial work for `snapId` so the next full pass
- * does not duplicate rows or leave dangling refs.
- * - incremental / unified: versions + changes + snapshot pointers on files + orphans
- * - changes_only: standalone doDiff (changes + deleted_at cleared for this snap)
- */
 function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
   transaction(db, () => {
     stmt.deleteChangesBySnapshot.run(snapId);
@@ -109,32 +78,37 @@ async function run(opts = {}) {
   const config = getConfig(opts);
 
   if (!config.DATASETS.length && !config.DATASET) {
-    console.error('Fatal: DATASETS not configured. Set DATASETS in indexer/.env');
+    console.error('Fatal: DATASETS not configured. Set DATASETS in indexer/.config');
     process.exitCode = 1;
     return;
   }
 
-  const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
-  const maxAttempts = Math.max(1, maxRestarts + 1);
-  const sessionWallT0 = Date.now();
+  const lockPath = acquireLock(config.DB_PATH);
+  try {
+    const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
+    const maxAttempts = Math.max(1, maxRestarts + 1);
+    const sessionWallT0 = Date.now();
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
-    }
-    try {
-      await runIndexerPass(opts, sessionWallT0, attempt);
-      return;
-    } catch (e) {
-      if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
-        throw e;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
       }
-      if (attempt + 1 >= maxAttempts) {
-        console.error(`Fatal: zfs diff still failing after ${maxAttempts} full restarts.`);
-        process.exitCode = 1;
-        throw e;
+      try {
+        await runIndexerPass(opts, sessionWallT0, attempt);
+        return;
+      } catch (e) {
+        if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
+          throw e;
+        }
+        if (attempt + 1 >= maxAttempts) {
+          console.error(`Fatal: zfs diff still failing after ${maxAttempts} full restarts.`);
+          process.exitCode = 1;
+          throw e;
+        }
       }
     }
+  } finally {
+    releaseLock(lockPath);
   }
 }
 
@@ -162,13 +136,13 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
     markIndexed: db.prepare(`UPDATE snapshots SET indexed_at=? WHERE id=?`),
     markDiffDone: db.prepare(`UPDATE snapshots SET diff_done=1 WHERE id=?`),
     upsertFile: db.prepare(`INSERT INTO files(dataset_id, path, inode, type, first_seen_snap_id, last_seen_snap_id) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(dataset_id, path) DO UPDATE SET inode=excluded.inode, type=excluded.type, last_seen_snap_id=excluded.last_seen_snap_id, deleted_at_snap_id=NULL RETURNING id`),
-    insertVersion: db.prepare(`INSERT OR IGNORE INTO file_versions(file_id, snapshot_id, path, size, mtime, ctime, nlink, mode) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`),
+    insertVersion: db.prepare(`INSERT OR IGNORE INTO file_versions(file_id, snapshot_id, size, mtime, ctime, nlink, mode) VALUES(?, ?, ?, ?, ?, ?, ?)`),
     getFileByPath: db.prepare(`SELECT id FROM files WHERE dataset_id = ? AND path = ?`),
     getLatestSize: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? ORDER BY snapshot_id DESC LIMIT 1`),
     getSizeAtSnapshot: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? AND snapshot_id = ? LIMIT 1`),
-    getSizeByPathAtSnapshot: db.prepare(`SELECT fv.size FROM file_versions fv JOIN files f ON f.id = fv.file_id WHERE f.dataset_id = ? AND fv.path = ? AND fv.snapshot_id = ? LIMIT 1`),
+    getSizeByPathAtSnapshot: db.prepare(`SELECT fv.size FROM file_versions fv JOIN files f ON f.id = fv.file_id WHERE f.dataset_id = ? AND f.path = ? AND fv.snapshot_id = ? LIMIT 1`),
     markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
-    insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes, changed_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`),
     bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
     deleteChangesBySnapshot: db.prepare(`DELETE FROM changes WHERE snapshot_id = ?`),
     deleteVersionsBySnapshot: db.prepare(`DELETE FROM file_versions WHERE snapshot_id = ?`),
@@ -178,10 +152,15 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
     deleteSnapshot: db.prepare(`DELETE FROM snapshots WHERE id = ?`),
     deleteChangesForOrphanedFiles: db.prepare(`
       DELETE FROM changes WHERE file_id IN (
-        SELECT id FROM files WHERE id NOT IN (SELECT DISTINCT file_id FROM file_versions)
+        SELECT f.id FROM files f
+        WHERE NOT EXISTS (SELECT 1 FROM file_versions fv WHERE fv.file_id = f.id)
       )
     `),
-    deleteOrphanedFiles: db.prepare(`DELETE FROM files WHERE id NOT IN (SELECT DISTINCT file_id FROM file_versions)`),
+    deleteOrphanedFiles: db.prepare(`
+      DELETE FROM files WHERE NOT EXISTS (
+        SELECT 1 FROM file_versions fv WHERE fv.file_id = files.id
+      )
+    `),
     repairLastSeenNull: db.prepare(`
       UPDATE files SET last_seen_snap_id = (
         SELECT snapshot_id FROM file_versions WHERE file_id = files.id
@@ -200,6 +179,19 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
       AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
     `),
   };
+
+  let inBulkMode = false;
+  const onSignal = (sig) => {
+    console.log(`\n⚠  Received ${sig} during indexing, restoring DB state…`);
+    if (inBulkMode) {
+      try { disableBulkMode(db); } catch {}
+    }
+    try { db.exec('PRAGMA optimize'); } catch {}
+    try { db.close(); } catch {}
+    process.exit(sig === 'SIGTERM' ? 143 : 130);
+  };
+  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
 
   try {
     console.log('🔍 Discovering ZFS datasets and snapshots...');
@@ -253,21 +245,23 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
       }
     }
     transaction(db, () => {
+      for (const d of filteredDatasets) {
+        const dsId = datasetIds[d.name];
+        stmt.repairLastSeenNull.run(dsId);
+        stmt.repairFirstSeenNull.run(dsId);
+      }
       stmt.deleteChangesForOrphanedFiles.run();
       stmt.deleteOrphanedFiles.run();
     });
 
-    // Enable bulk mode: drop FTS triggers + synchronous=OFF
     enableBulkMode(db);
+    inBulkMode = true;
 
-    // Index snapshots
     for (const d of filteredDatasets) {
       const dsId = datasetIds[d.name];
       const dsSnaps = stmt.getSnapshotsForDataset.all(dsId);
       console.log(`\n📦 Dataset: ${d.name} (${dsSnaps.length} snapshots)`);
 
-      // Collect all snapshot IDs that will be processed incrementally so we
-      // can do a single bulk bumpLastSeen at the end instead of per-snapshot.
       const lastIncrSnapId = findLastIncrementalSnapId(dsSnaps);
 
       let prevSnap = null;
@@ -275,7 +269,6 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
       for (const snap of dsSnaps) {
         const snapPath = snapshotMountPath(d.mountpoint, snap.name);
 
-        // Determine if we need indexing, diffing, or both
         const needIndex = !snap.indexed_at;
         const needDiff  = prevSnap && !snap.diff_done;
         const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
@@ -284,7 +277,6 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
           if (!snapPath) { prevSnap = snap; continue; }
 
           if (canIncremental && needDiff) {
-            // Unified pass: single zfs diff drives both incremental index + changes table
             const t = Date.now();
             try {
               await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
@@ -302,7 +294,6 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
             perf.diffsDone++;
             stmt.markDiffDone.run(snap.id);
           } else if (canIncremental) {
-            // Incremental index only (diff already done)
             const t = Date.now();
             try {
               await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
@@ -333,7 +324,6 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
           console.log(`  ✓  ${snap.name} already indexed`);
         }
 
-        // Standalone diff only when both snaps were already indexed
         if (needDiff && !canIncremental) {
           if (prevSnap) {
             console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
@@ -358,21 +348,11 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
         prevSnap = snap;
         snapIdx++;
 
-        // Checkpoint WAL every 10 snapshots to prevent unbounded WAL growth
-        // that causes progressive slowdown as SQLite has to search through
-        // more and more WAL frames for each read.
         if (snapIdx % 10 === 0) {
           checkpoint(db);
         }
       }
 
-      // Single bulk bumpLastSeen at the end instead of per-snapshot.
-      // The old code ran `UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ?
-      // AND deleted_at_snap_id IS NULL` once per incremental snapshot, updating ALL
-      // non-deleted files (~143K rows) each time. Over 87 snapshots that's ~12.5M
-      // row updates just for bookkeeping. Instead, we do it once with the final
-      // snapshot ID — the semantic is the same because each snapshot overwrites the
-      // previous value anyway.
       if (lastIncrSnapId != null) {
         const t = Date.now();
         stmt.bumpLastSeen.run(lastIncrSnapId, dsId);
@@ -381,35 +361,31 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
       }
     }
 
-    // Rebuild FTS in one shot and restore normal mode
     disableBulkMode(db);
+    inBulkMode = false;
 
     console.log('\n✅ Indexing complete.');
     printStats(db, perf, sessionWallT0, restartCount);
   } finally {
+    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGINT', onSignal);
+    try { db.exec('PRAGMA optimize'); } catch {}
     db.close();
   }
 }
 
-/**
- * Find the snapshot ID of the last snapshot that will be processed incrementally.
- * Returns null if no incremental processing will happen.
- */
 function findLastIncrementalSnapId(dsSnaps) {
   let lastId = null;
+  const willBeIndexed = new Set();
   let prevSnap = null;
+
   for (const snap of dsSnaps) {
-    if (!snap.indexed_at && prevSnap && prevSnap.indexed_at) {
+    const prevIsIndexed = prevSnap && (prevSnap.indexed_at || willBeIndexed.has(prevSnap.id));
+    if (!snap.indexed_at && prevIsIndexed) {
       lastId = snap.id;
     }
-    // After the first unindexed snap is processed, it becomes "indexed" for
-    // subsequent ones (the main loop sets snap.indexed_at = 1). Simulate that.
     if (!snap.indexed_at) {
-      // This snap will be processed; subsequent snaps can be incremental from it.
-      snap._willBeIndexed = true;
-    }
-    if (prevSnap && (prevSnap.indexed_at || prevSnap._willBeIndexed) && !snap.indexed_at) {
-      lastId = snap.id;
+      willBeIndexed.add(snap.id);
     }
     prevSnap = snap;
   }
@@ -432,7 +408,7 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
         const fileRow = stmt.upsertFile.get(datasetId, e.path, e.inode, e.type, snapId, snapId);
         perf.sqlUpserts++;
         if (!fileRow) continue;
-        stmt.insertVersion.run(fileRow.id, snapId, e.path, e.size, e.mtime, e.ctime, e.nlink, e.mode);
+        stmt.insertVersion.run(fileRow.id, snapId, e.size, e.mtime, e.ctime, e.nlink, e.mode);
         perf.sqlInserts++;
       }
     });
@@ -455,7 +431,6 @@ function sizeFromStat(st) {
   return st.isDirectory() ? 0 : st.size;
 }
 
-/** Sliding block; total unknown until stream ends (zfs diff / walk), so no %-bar without a second pass. */
 let _progressAnimTick = 0;
 
 function indeterminateBar(width, tick) {
@@ -559,10 +534,6 @@ function modeStr(st) {
   return (st.mode & 0o7777).toString(8).padStart(4, '0');
 }
 
-/**
- * Stat all entries in a batch that need stat info (added, modified, renamed).
- * Returns a Map<batchIndex, StatResult|null>.
- */
 async function statBatch(batch, mountpoint, snapPath) {
   const entries = [];
   for (let i = 0; i < batch.length; i++) {
@@ -608,7 +579,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -622,7 +593,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const fileRow = stmt.getFileByPath.get(datasetId, relPath);
           perf.sqlSelects++;
           if (fileRow) {
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -637,7 +608,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
           const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (newFile) {
-            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(newFile.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -675,7 +646,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
           if (fileRow) {
             fileId = fileRow.id;
             newSize = sizeFromStat(st);
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -698,7 +669,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
             oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
             perf.sqlSelects++;
             newSize = sizeFromStat(st);
-            stmt.insertVersion.run(fileRow.id, snap.id, relPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -718,7 +689,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
           const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
           perf.sqlUpserts++;
           if (newFile) {
-            stmt.insertVersion.run(newFile.id, snap.id, relNewPath, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+            stmt.insertVersion.run(newFile.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
             perf.sqlInserts++;
           }
         }
@@ -755,7 +726,8 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
         }
       }
 
-      stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, relNewPath, oldSize, newSize, (newSize ?? 0) - (oldSize ?? 0), snap.created_at);
+      const delta = (newSize != null || oldSize != null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
+      stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, relNewPath, oldSize, newSize, delta);
       perf.sqlInserts++;
       perf.diffChanges++;
     }
@@ -815,7 +787,8 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
       if (c.changeType === 'removed' && fileId) { stmt.markDeleted.run(snap.id, fileId); perf.sqlUpdates++; }
 
-      stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, c.changeType === 'renamed' ? relNewPath : null, oldSize, newSize, (newSize ?? 0) - (oldSize ?? 0), snap.created_at);
+      const delta = (newSize != null || oldSize != null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
+      stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, c.changeType === 'renamed' ? relNewPath : null, oldSize, newSize, delta);
       perf.sqlInserts++;
       perf.diffChanges++;
     }

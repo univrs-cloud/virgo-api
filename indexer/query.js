@@ -1,7 +1,8 @@
 'use strict';
 
-const { openDb } = require('./db');
+const { openDb, transaction } = require('./db');
 const { getConfig } = require('./config');
+const { formatSize } = require('./utils');
 
 // ─── Open DB helper for bin entry point ─────────────────────────────────────
 
@@ -18,32 +19,57 @@ function search(db, pattern, opts = {}) {
   const datasetFilter = opts.dataset || null;
   const typeFilter    = opts.type    || null;
   const json          = opts.json    || false;
+  const limit         = opts.limit   || 100;
+  const offset        = opts.offset  || 0;
+  const minSize       = opts.minSize ?? null;
+  const maxSize       = opts.maxSize ?? null;
+  const since         = opts.since ? Math.floor(new Date(opts.since).getTime() / 1000) : null;
+  const until         = opts.until ? Math.floor(new Date(opts.until).getTime() / 1000) : null;
 
-  const ID_JOINS = `
-    JOIN files    f ON f.id = fv.file_id
-    JOIN datasets d ON d.id = f.dataset_id`;
-
-  const DS_FILTER   = datasetFilter ? `AND d.name LIKE ?` : '';
+  const DS_FILTER   = datasetFilter ? `AND d.name = ?` : '';
   const TYPE_FILTER = typeFilter    ? `AND f.type = ?`    : '';
-  const dsParam     = datasetFilter
-    ? (datasetFilter.includes('/') ? datasetFilter : '%' + datasetFilter)
-    : null;
-  const extraParams = [dsParam, typeFilter].filter(Boolean);
+  const baseParams  = [datasetFilter, typeFilter].filter(Boolean);
+
+  const needVersionJoin = minSize != null || maxSize != null || since != null || until != null;
+  const VER_JOIN = needVersionJoin
+    ? `JOIN file_versions fv ON fv.file_id = f.id AND fv.snapshot_id = f.last_seen_snap_id`
+    : '';
+  const SIZE_MIN = minSize != null ? `AND fv.size >= ?` : '';
+  const SIZE_MAX = maxSize != null ? `AND fv.size <= ?` : '';
+  const SINCE    = since   != null ? `AND fv.mtime >= ?` : '';
+  const UNTIL    = until   != null ? `AND fv.mtime <= ?` : '';
+  const filterParams = [minSize, maxSize, since, until].filter(v => v != null);
 
   let fileIds;
   if (pattern.includes('*') || pattern.includes('?')) {
     let glob = pattern.replace(/\*/g, '%').replace(/\?/g, '_');
     if (!glob.startsWith('%') && !glob.startsWith('/')) glob = '%' + glob;
     if (!glob.endsWith('%')) glob = glob + '%';
-    fileIds = db.prepare(`SELECT DISTINCT f.id FROM file_versions fv ${ID_JOINS} WHERE fv.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} LIMIT 100`).all(glob, ...extraParams);
+    fileIds = db.prepare(`
+      SELECT DISTINCT f.id FROM files f
+      JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
+      WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+      LIMIT ? OFFSET ?
+    `).all(glob, ...baseParams, ...filterParams, limit, offset);
   } else {
     const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"';
     try {
-      fileIds = db.prepare(`SELECT DISTINCT f.id FROM fts_paths fp JOIN file_versions fv ON fv.id = fp.rowid ${ID_JOINS} WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} LIMIT 100`).all(ftsQuery, ...extraParams);
+      fileIds = db.prepare(`
+        SELECT DISTINCT f.id FROM fts_paths fp
+        JOIN files f ON f.id = fp.rowid
+        JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
+        WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+        LIMIT ? OFFSET ?
+      `).all(ftsQuery, ...baseParams, ...filterParams, limit, offset);
     } catch { fileIds = []; }
 
-    if (!fileIds.length) {
-      fileIds = db.prepare(`SELECT DISTINCT f.id FROM file_versions fv ${ID_JOINS} WHERE fv.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} LIMIT 100`).all('%' + pattern + '%', ...extraParams);
+    if (!fileIds.length && offset === 0) {
+      fileIds = db.prepare(`
+        SELECT DISTINCT f.id FROM files f
+        JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
+        WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL}
+        LIMIT ? OFFSET ?
+      `).all('%' + pattern + '%', ...baseParams, ...filterParams, limit, offset);
     }
   }
 
@@ -55,7 +81,7 @@ function search(db, pattern, opts = {}) {
   const rows = db.prepare(`
     SELECT
       f.id AS file_id,
-      d.name AS dataset, d.mountpoint, fv.path, f.type, fv.size, fv.mtime,
+      d.name AS dataset, d.mountpoint, f.path, f.type, fv.size, fv.mtime,
       strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
       s.name AS snapshot,
       strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
@@ -68,7 +94,7 @@ function search(db, pattern, opts = {}) {
     LEFT JOIN changes c ON c.file_id = f.id AND c.snapshot_id = fv.snapshot_id
     WHERE f.id IN (${placeholders})
     GROUP BY fv.id
-    ORDER BY d.name, fv.path, s.created_at
+    ORDER BY d.name, f.path, s.created_at
   `).all(...ids);
 
   const grouped = new Map();
@@ -137,9 +163,13 @@ function search(db, pattern, opts = {}) {
 // ─── History ────────────────────────────────────────────────────────────────
 
 function history(db, path, opts = {}) {
-  if (!path) { console.log('Usage: virgo history <path>'); return null; }
+  if (!path) { console.log('Usage: virgo history <path> [--dataset <name>]'); return null; }
 
-  const json = opts.json || false;
+  const json        = opts.json    || false;
+  const datasetName = opts.dataset || null;
+
+  const DS_FILTER = datasetName ? `AND d.name = ?` : '';
+  const dsParams  = datasetName ? [datasetName] : [];
 
   const versions = db.prepare(`
     SELECT
@@ -148,7 +178,7 @@ function history(db, path, opts = {}) {
       s.name       AS snapshot,
       s.full_name,
       strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
-      fv.path,
+      f.path,
       fv.size,
       strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
       fv.mode
@@ -156,9 +186,9 @@ function history(db, path, opts = {}) {
     JOIN files    f  ON f.id = fv.file_id
     JOIN datasets d  ON d.id = f.dataset_id
     JOIN snapshots s ON s.id = fv.snapshot_id
-    WHERE fv.path = ?
+    WHERE f.path = ? ${DS_FILTER}
     ORDER BY d.name, s.created_at
-  `).all(path);
+  `).all(path, ...dsParams);
 
   const chgs = db.prepare(`
     SELECT
@@ -220,13 +250,24 @@ function history(db, path, opts = {}) {
 
 function deleted(db, opts = {}) {
   const datasetName = opts.dataset || null;
+  const pathFilter  = opts.path    || null;
   const json        = opts.json    || false;
+  const limit       = opts.limit   || 2000;
+  const offset      = opts.offset  || 0;
+
+  let pathParam = null;
+  if (pathFilter) {
+    pathParam = pathFilter.replace(/\*/g, '%').replace(/\?/g, '_');
+    if (!pathParam.includes('%') && !pathParam.includes('_')) {
+      pathParam += '%';
+    }
+  }
 
   const rows = db.prepare(`
     SELECT
       d.name       AS dataset,
       d.mountpoint,
-      fv.path      AS last_path,
+      f.path       AS last_path,
       f.type,
       fv.size,
       s_last.name  AS last_seen_snap,
@@ -240,12 +281,15 @@ function deleted(db, opts = {}) {
     JOIN file_versions fv ON fv.file_id = f.id
       AND fv.id = (SELECT id FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1)
     WHERE f.deleted_at_snap_id IS NOT NULL
-      ${datasetName ? 'AND d.name LIKE ?' : ''}
-    ORDER BY s_del.created_at DESC, fv.path
-    LIMIT 2000
-  `).all(...(datasetName
-    ? [datasetName.includes('/') ? datasetName : '%' + datasetName]
-    : []));
+      ${datasetName ? 'AND d.name = ?' : ''}
+      ${pathParam ? 'AND f.path LIKE ?' : ''}
+    ORDER BY s_del.created_at DESC, f.path
+    LIMIT ? OFFSET ?
+  `).all(
+    ...(datasetName ? [datasetName] : []),
+    ...(pathParam ? [pathParam] : []),
+    limit, offset
+  );
 
   if (!rows.length) { console.log('No deleted files found.'); return { deleted: [] }; }
 
@@ -269,13 +313,33 @@ function deleted(db, opts = {}) {
 // ─── Changes ────────────────────────────────────────────────────────────────
 
 function changes(db, snapshotName, opts = {}) {
-  if (!snapshotName) { console.log('Usage: virgo changes <snapshot>'); return null; }
+  if (!snapshotName) { console.log('Usage: virgo changes <snapshot> [--dataset <name>]'); return null; }
 
-  const json = opts.json || false;
+  const json        = opts.json    || false;
+  const datasetName = opts.dataset || null;
+  const limit       = opts.limit   || 5000;
+  const offset      = opts.offset  || 0;
 
-  const snap = db.prepare(
-    `SELECT id, full_name, created_at FROM snapshots WHERE name=? OR full_name=? LIMIT 1`
-  ).get(snapshotName, snapshotName);
+  let snap;
+  if (datasetName) {
+    snap = db.prepare(`
+      SELECT s.id, s.full_name, s.created_at
+      FROM snapshots s
+      JOIN datasets d ON d.id = s.dataset_id
+      WHERE (s.name=? OR s.full_name=?) AND d.name = ?
+      LIMIT 1
+    `).get(snapshotName, snapshotName, datasetName);
+  } else {
+    snap = db.prepare(
+      `SELECT id, full_name, created_at FROM snapshots WHERE full_name=? LIMIT 1`
+    ).get(snapshotName);
+    if (!snap) {
+      snap = db.prepare(
+        `SELECT id, full_name, created_at FROM snapshots WHERE name=? LIMIT 1`
+      ).get(snapshotName);
+    }
+  }
+
   if (!snap) { console.log(`Snapshot '${snapshotName}' not found.`); return null; }
 
   const rows = db.prepare(`
@@ -284,7 +348,8 @@ function changes(db, snapshotName, opts = {}) {
     FROM changes c
     WHERE c.snapshot_id = ?
     ORDER BY c.change_type, c.new_path, c.old_path
-  `).all(snap.id);
+    LIMIT ? OFFSET ?
+  `).all(snap.id, limit, offset);
 
   const result = {
     snapshot: snap.full_name,
@@ -329,29 +394,72 @@ function changes(db, snapshotName, opts = {}) {
 function diff(db, snapA, snapB, opts = {}) {
   if (!snapA || !snapB) { console.log('Usage: virgo diff <snap_a> <snap_b>'); return null; }
 
-  const json = opts.json || false;
+  const json   = opts.json   || false;
+  const limit  = opts.limit  || 5000;
+  const offset = opts.offset || 0;
+
+  const sA = db.prepare(`SELECT id FROM snapshots WHERE full_name=? OR name=? LIMIT 1`).get(snapA, snapA);
+  const sB = db.prepare(`SELECT id FROM snapshots WHERE full_name=? OR name=? LIMIT 1`).get(snapB, snapB);
+  if (!sA) { console.log(`Snapshot '${snapA}' not found.`); return null; }
+  if (!sB) { console.log(`Snapshot '${snapB}' not found.`); return null; }
+  const idA = sA.id;
+  const idB = sB.id;
 
   const rows = db.prepare(`
     SELECT path, size_a, size_b, delta, status FROM (
+      -- Files present in both snapshots (modified or unchanged)
       SELECT
-        fv_b.path,
+        f.path,
         fv_a.size AS size_a,
         fv_b.size AS size_b,
-        (fv_b.size - COALESCE(fv_a.size, 0)) AS delta,
+        (fv_b.size - fv_a.size) AS delta,
         CASE
-          WHEN fv_a.file_id IS NULL THEN 'added'
           WHEN fv_b.mtime != fv_a.mtime THEN 'modified'
           ELSE 'unchanged'
         END AS status
       FROM file_versions fv_b
-      JOIN snapshots s_b ON s_b.id = fv_b.snapshot_id AND (s_b.name=? OR s_b.full_name=?)
-      LEFT JOIN snapshots s_a ON (s_a.name=? OR s_a.full_name=?)
-      LEFT JOIN file_versions fv_a ON fv_a.file_id = fv_b.file_id AND fv_a.snapshot_id = s_a.id
+      JOIN file_versions fv_a ON fv_a.file_id = fv_b.file_id AND fv_a.snapshot_id = ?
+      JOIN files f ON f.id = fv_b.file_id
+      WHERE fv_b.snapshot_id = ?
+
+      UNION ALL
+
+      -- Files only in snapshot B (added)
+      SELECT
+        f.path,
+        NULL AS size_a,
+        fv_b.size AS size_b,
+        fv_b.size AS delta,
+        'added' AS status
+      FROM file_versions fv_b
+      JOIN files f ON f.id = fv_b.file_id
+      WHERE fv_b.snapshot_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM file_versions fv_a
+          WHERE fv_a.file_id = fv_b.file_id AND fv_a.snapshot_id = ?
+        )
+
+      UNION ALL
+
+      -- Files only in snapshot A (removed)
+      SELECT
+        f.path,
+        fv_a.size AS size_a,
+        NULL AS size_b,
+        -fv_a.size AS delta,
+        'removed' AS status
+      FROM file_versions fv_a
+      JOIN files f ON f.id = fv_a.file_id
+      WHERE fv_a.snapshot_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM file_versions fv_b
+          WHERE fv_b.file_id = fv_a.file_id AND fv_b.snapshot_id = ?
+        )
     )
     WHERE status != 'unchanged'
     ORDER BY status, path
-    LIMIT 5000
-  `).all(snapB, snapB, snapA, snapA);
+    LIMIT ? OFFSET ?
+  `).all(idA, idB, idB, idA, idA, idB, limit, offset);
 
   const result = { from: snapA, to: snapB, total: rows.length, files: rows };
 
@@ -364,6 +472,35 @@ function diff(db, snapA, snapB, opts = {}) {
   }
 
   return result;
+}
+
+// ─── Reindex ────────────────────────────────────────────────────────────────
+
+function reindex(db, opts = {}) {
+  const datasetName = opts.dataset || null;
+
+  if (datasetName) {
+    const ds = db.prepare('SELECT id FROM datasets WHERE name = ?').get(datasetName);
+    if (!ds) { console.log(`Dataset '${datasetName}' not found.`); return; }
+
+    transaction(db, () => {
+      db.prepare('DELETE FROM changes WHERE snapshot_id IN (SELECT id FROM snapshots WHERE dataset_id = ?)').run(ds.id);
+      db.prepare('DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?)').run(ds.id);
+      db.prepare('DELETE FROM files WHERE dataset_id = ?').run(ds.id);
+      db.prepare('UPDATE snapshots SET indexed_at = NULL, diff_done = 0 WHERE dataset_id = ?').run(ds.id);
+    });
+
+    console.log(`Reset indexing state for ${datasetName}. Run 'virgo index' to rebuild.`);
+  } else {
+    transaction(db, () => {
+      db.exec('DELETE FROM changes');
+      db.exec('DELETE FROM file_versions');
+      db.exec('DELETE FROM files');
+      db.exec('UPDATE snapshots SET indexed_at = NULL, diff_done = 0');
+    });
+
+    console.log("Reset all indexing state. Run 'virgo index' to rebuild.");
+  }
 }
 
 // ─── Stats ──────────────────────────────────────────────────────────────────
@@ -412,16 +549,4 @@ function stats(db, opts = {}) {
   return result;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatSize(bytes) {
-  if (bytes == null) return '?';
-  const abs = Math.abs(bytes);
-  const sign = bytes < 0 ? '-' : '';
-  if (abs < 1024) return `${sign}${abs}B`;
-  if (abs < 1024**2) return `${sign}${(abs/1024).toFixed(1)}K`;
-  if (abs < 1024**3) return `${sign}${(abs/1024**2).toFixed(1)}M`;
-  return `${sign}${(abs/1024**3).toFixed(2)}G`;
-}
-
-module.exports = { open, search, history, deleted, changes, diff, stats };
+module.exports = { open, search, history, deleted, changes, diff, reindex, stats };

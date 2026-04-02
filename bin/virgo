@@ -27,13 +27,35 @@ program
     });
   });
 
+// ─── reindex ────────────────────────────────────────────────────────────────
+
+program
+  .command('reindex')
+  .description('Clear indexed data and force a full re-crawl on next run')
+  .option('--db <path>', 'SQLite database path')
+  .option('--dataset <name>', 'Only reset a specific dataset')
+  .action((opts) => {
+    const query = require('../indexer/query');
+    const db = query.open(opts.db);
+    try {
+      query.reindex(db, opts);
+    } finally { db.close(); }
+  });
+
 // ─── query search ───────────────────────────────────────────────────────────
 
 program
   .command('search <term>')
   .description('Search files by path (FTS5 or glob with * ?)')
+  .option('--db <path>', 'SQLite database path')
   .option('--dataset <name>', 'Filter by dataset name')
   .option('--type <type>', 'Filter by type: file, dir, link')
+  .option('--min-size <bytes>', 'Minimum file size in bytes', parseInt)
+  .option('--max-size <bytes>', 'Maximum file size in bytes', parseInt)
+  .option('--since <date>', 'Files modified after this date (ISO 8601)')
+  .option('--until <date>', 'Files modified before this date (ISO 8601)')
+  .option('--limit <n>', 'Max results (default 100)', parseInt)
+  .option('--offset <n>', 'Skip first N results', parseInt)
   .option('--json', 'Output as JSON')
   .action((term, opts) => {
     const query = require('../indexer/query');
@@ -49,6 +71,8 @@ program
 program
   .command('history <path>')
   .description('Full version history of a file')
+  .option('--db <path>', 'SQLite database path')
+  .option('--dataset <name>', 'Filter by dataset name')
   .option('--json', 'Output as JSON')
   .action((path, opts) => {
     const query = require('../indexer/query');
@@ -64,7 +88,11 @@ program
 program
   .command('deleted')
   .description('List deleted files')
+  .option('--db <path>', 'SQLite database path')
   .option('--dataset <name>', 'Filter by dataset name')
+  .option('--path <pattern>', 'Filter by path (prefix or glob with * ?)')
+  .option('--limit <n>', 'Max results (default 2000)', parseInt)
+  .option('--offset <n>', 'Skip first N results', parseInt)
   .option('--json', 'Output as JSON')
   .action((opts) => {
     const query = require('../indexer/query');
@@ -80,6 +108,10 @@ program
 program
   .command('changes <snapshot>')
   .description('Show all changes in a snapshot')
+  .option('--db <path>', 'SQLite database path')
+  .option('--dataset <name>', 'Filter by dataset name')
+  .option('--limit <n>', 'Max results (default 5000)', parseInt)
+  .option('--offset <n>', 'Skip first N results', parseInt)
   .option('--json', 'Output as JSON')
   .action((snapshot, opts) => {
     const query = require('../indexer/query');
@@ -95,6 +127,9 @@ program
 program
   .command('diff <snapA> <snapB>')
   .description('Changes between two snapshots')
+  .option('--db <path>', 'SQLite database path')
+  .option('--limit <n>', 'Max results (default 5000)', parseInt)
+  .option('--offset <n>', 'Skip first N results', parseInt)
   .option('--json', 'Output as JSON')
   .action((snapA, snapB, opts) => {
     const query = require('../indexer/query');
@@ -110,6 +145,7 @@ program
 program
   .command('stats')
   .description('Database statistics')
+  .option('--db <path>', 'SQLite database path')
   .option('--json', 'Output as JSON')
   .action((opts) => {
     const query = require('../indexer/query');
