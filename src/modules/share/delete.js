@@ -18,21 +18,24 @@ const deleteFolder = async (job, module) => {
 	}
 
 	if (!share.path) {
-		throw new Error(`Folder "${name}" has no path.`);
+		throw new Error(`Folder "${share.comment}" has no path.`);
 	}
 
-	const dataset = await module.pathToZfsDataset(share.path);
-	if (!dataset) {
+	const path = (share.path.startsWith('/messier/folders/') ? share.path : null);
+	const dataset = await module.pathToZfsDataset(path);
+	if (dataset === null && path !== null) {
 		throw new Error(`Cannot derive dataset from path "${share.path}".`);
 	}
 	
-	await module.updateJobProgress(job, `Deleting folder ${name}...`);
-	await execa('zfs', ['destroy', '-r', dataset]);
+	await module.updateJobProgress(job, `Deleting folder ${share.comment}...`);
+	if (dataset !== null) {
+		await execa('zfs', ['destroy', '-r', dataset]);
+	}
 	delete shares[name];
 	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Folder ${name} deleted.`;
+	return `Folder ${share.comment} deleted.`;
 };
 
 const deleteTimeMachine = async (job, module) => {
@@ -51,21 +54,22 @@ const deleteTimeMachine = async (job, module) => {
 	}
 
 	if (!share.path) {
-		throw new Error(`Time machine "${name}" has no path.`);
+		throw new Error(`Time machine "${share.comment}" has no path.`);
 	}
 
-	const dataset = await module.pathToZfsDataset(share.path);
-	if (!dataset) {
+	const path = (share.path.startsWith('/time_machines/') ? share.path : null);
+	const dataset = await module.pathToZfsDataset(path);
+	if (dataset === null) {
 		throw new Error(`Cannot derive dataset from path "${share.path}".`);
 	}
 
-	await module.updateJobProgress(job, `Deleting time machine ${name}...`);
+	await module.updateJobProgress(job, `Deleting time machine ${share.comment}...`);
 	await execa('zfs', ['destroy', '-r', dataset]);
 	delete shares[name];
 	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Time machine ${name} deleted.`;
+	return `Time machine ${share.comment} deleted.`;
 };
 
 const deleteShare = async (job, module) => {

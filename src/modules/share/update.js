@@ -22,13 +22,16 @@ const updateFolder = async (job, module) => {
 		throw new Error(`Folder "${name}" has no path.`);
 	}
 
-	const dataset = await module.pathToZfsDataset(share.path);
-	if (!dataset) {
+	const path = (share.path.startsWith('/messier/folders/') ? share.path : null);
+	const dataset = await module.pathToZfsDataset(path);
+	if (dataset === null && path !== null) {
 		throw new Error(`No dataset found for mountpoint "${share.path}".`);
 	}
 
 	await module.updateJobProgress(job, `Updating folder ${name}...`);
-	await execa('zfs', ['set', `refquota=${refquota}`, dataset]);
+	if (dataset !== null) {
+		await execa('zfs', ['set', `refquota=${refquota}`, dataset]);
+	}
 	share['valid users'] = validUsers.join(' ');
 	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
@@ -56,8 +59,9 @@ const updateTimeMachine = async (job, module) => {
 		throw new Error(`Time machine "${name}" has no path.`);
 	}
 
-	const dataset = await module.pathToZfsDataset(share.path);
-	if (!dataset) {
+	const path = (share.path.startsWith('/time_machines/') ? share.path : null);
+	const dataset = await module.pathToZfsDataset(path);
+	if (dataset === null) {
 		throw new Error(`No dataset found for mountpoint "${share.path}".`);
 	}
 

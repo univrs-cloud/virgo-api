@@ -54,6 +54,10 @@ class ShareModule extends BaseModule {
 	}
 
 	async pathToZfsDataset(sharePath) {
+		if (sharePath === null) {
+			return null;
+		}
+		
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint', '-j']);
 		const datasets = JSON.parse(zfsList)?.datasets || {};
 		for (const dataset of Object.values(datasets)) {
