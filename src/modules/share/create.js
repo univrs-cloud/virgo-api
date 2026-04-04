@@ -30,8 +30,7 @@ const createFolder = async (job, module) => {
 		'guest ok': 'no',
 		'create mask': '0775',
 		'directory mask': '0755',
-		'force user': 'voyager',
-		'force group': 'users',
+		'force user': 'root',
 		'valid users': validUsers.join(' ')
 	};
 	const dir = path.dirname(module.foldersConf);
