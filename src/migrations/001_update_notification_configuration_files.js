@@ -1,6 +1,6 @@
 const fs = require('fs');
 const DataService = require('../database/data_service');
-const { updateNotificationConfigurationFiles } = require('../modules/configuration/smtp_update');
+const { updateNotificationConfigurationFiles } = require('../modules/configuration/smtp');
 
 const DB_PATHS = ['/messier/.config/virgo.db', '/var/www/virgo-api/virgo.db'];
 

@@ -20,6 +20,7 @@ const onConnection = (socket, module) => {
 };
 
 module.exports = {
+	name: 'location',
 	onConnection,
 	jobs: {
 		'location:update': updateLocation

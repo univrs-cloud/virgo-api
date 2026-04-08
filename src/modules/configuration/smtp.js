@@ -99,6 +99,7 @@ const onConnection = (socket, module) => {
 };
 
 module.exports = {
+	name: 'smtp',
 	register,
 	onConnection,
 	updateNotificationConfigurationFiles,

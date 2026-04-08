@@ -3,6 +3,7 @@ const emitToSocket = (socket, module) => {
 		let configuration = module.getState('configuration') || {};
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			delete configuration.smtp;
+			delete configuration.trustedProxies;
 		}
 		socket.emit('configuration', configuration);
 	} catch (error) {
@@ -16,6 +17,7 @@ const broadcast = (module) => {
 		for (const socket of module.nsp.sockets.values()) {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
 				delete configuration.smtp;
+				delete configuration.trustedProxies;
 			}
 			socket.emit('configuration', configuration);
 		}

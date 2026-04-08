@@ -104,6 +104,6 @@ const onConnection = (socket, module) => {
 };
 
 module.exports = {
-	name: 'update',
+	name: 'system_update',
 	onConnection
 };
