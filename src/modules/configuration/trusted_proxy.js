@@ -33,10 +33,10 @@ const addTrustedProxy = async (job, module) => {
 
 const updateTrustedProxy = async (job, module) => {
 	const { config } = job.data;
-	const fromAddress = (typeof config?.fromAddress === 'string' ? config.fromAddress.trim() : '');
+	const fromAddress = (typeof config?.address === 'string' ? config.address.trim() : '');
 	const toAddress = (typeof config?.toAddress === 'string' ? config.toAddress.trim() : '');
 	if (!fromAddress || !toAddress) {
-		throw new Error(`Trusted proxy update requires non-empty string config.fromAddress and config.toAddress.`);
+		throw new Error(`Trusted proxy update requires non-empty string config.address and config.toAddress.`);
 	}
 
 	const list = await loadTrustedProxiesList();
