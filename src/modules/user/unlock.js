@@ -14,7 +14,7 @@ const unlockUser = async (job, module) => {
 	await module.updateJobProgress(job, `Unlocking Authelia user ${config.username}...`);
 	await module.toggleAutheliaUserLock(config.username, false);
 	module.eventEmitter.emit('users:updated');
-	return `${config.username} unlocked.`;
+	return `User ${config.username} unlocked.`;
 };
 
 const onConnection = (socket, module) => {
