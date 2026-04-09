@@ -1,12 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execa } = require('execa');
-const ini = require('ini');
 const FileWatcher = require('../../utils/file_watcher');
-const TimeMachine = require('../../utils/time_machine');
 
 let configurationWatcher;
-let sharesWatcher;
 
 const watchConfigurations = (module) => {
 	if (configurationWatcher) {
@@ -18,7 +15,6 @@ const watchConfigurations = (module) => {
 		.onChange(async (event, path) => {
 			try {
 				await execa('smbcontrol', ['all', 'reload-config']);
-				watchShares(module);
 				module.eventEmitter.emit('shares:updated');
 			} catch (error) {
 				console.error(error);
@@ -69,89 +65,8 @@ const watchConfigurations = (module) => {
 	}
 };
 
-const getFolderPathsFromConfig = async () => {
-	try {
-		const response = await execa('testparm', ['-s', '-l']);
-		const shares = ini.parse(response.stdout);
-		delete shares.global;
-		return Object.values(shares).filter((share) => {
-			return share.path && !Object.hasOwn(share, 'fruit:time machine');
-		}).map((share) => {
-			return share.path;
-		});
-	} catch {
-		return [];
-	}
-};
-
-const getTimeMachinePathsFromConfig = async () => {
-	try {
-		const response = await execa('testparm', ['-s', '-l']);
-		const shares = ini.parse(response.stdout);
-		delete shares.global;
-		const timeMachinePaths = Object.values(shares)
-			.filter((share) => {
-				return share.path && Object.hasOwn(share, 'fruit:time machine') && share['fruit:time machine'] === 'yes';
-			})
-			.map((share) => {
-				return share.path;
-			});
-		const machineArrays = await Promise.all(
-			timeMachinePaths.map((backupPath) => {
-				return TimeMachine.getMachines(backupPath);
-			})
-		);
-		return machineArrays.flatMap((machines) => {
-			return machines.flatMap((machine) => {
-				return [machine.snapshotHistoryPath];
-			});
-		});
-	} catch {
-		return [];
-	}
-};
-
-const watchShares = async (module) => {
-	const paths = [...await getFolderPathsFromConfig(), ...await getTimeMachinePathsFromConfig()];
-
-	if (!sharesWatcher) {
-		sharesWatcher = new FileWatcher([]);
-		sharesWatcher.onChange(async (event, path) => {
-			module.eventEmitter.emit('shares:updated');
-		});
-	}
-
-	// Add all paths (chokidar handles duplicates gracefully)
-	paths.forEach((plistPath) => {
-		try {
-			sharesWatcher.add(plistPath);
-		} catch (error) {
-			console.error(`Could not watch ${plistPath}:`, error);
-		}
-	});
-
-	
-	// Give chokidar a moment to update
-	await new Promise(resolve => setTimeout(resolve, 1000));
-	
-	// Remove paths that are no longer in the config
-	const watched = sharesWatcher.getWatched();
-	const normalizedPaths = new Set(paths.map((plistPath) => {
-		return path.normalize(plistPath);
-	}));
-	Object.keys(watched).forEach((directory) => {
-		(watched[directory] || []).forEach((filename) => {
-			const watchedPath = path.join(directory, filename);
-			if (!normalizedPaths.has(path.normalize(watchedPath))) {
-				sharesWatcher.remove(watchedPath);
-			}
-		});
-	});
-};
-
 const register = (module) => {
 	watchConfigurations(module);
-	watchShares(module);
 };
 
 module.exports = {
