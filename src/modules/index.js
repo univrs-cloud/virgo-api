@@ -12,6 +12,7 @@ module.exports = async () => {
 		require('./bookmark')(),
 		require('./share')(),
 		require('./metrics')(),
+		require('./indexer')(),
 		require('./weather')()
 	];
 

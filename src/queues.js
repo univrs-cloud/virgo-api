@@ -10,6 +10,7 @@ const MODULES = [
 	'bookmark',
 	'share',
 	'metrics',
+	'indexer',
 	'weather'
 ];
 
