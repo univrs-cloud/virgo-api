@@ -1,4 +1,5 @@
 const { execa } = require('execa');
+const camelcaseKeys = require('camelcase-keys').default;
 const BaseModule = require('../base');
 
 class IndexerModule extends BaseModule {
@@ -30,8 +31,8 @@ class IndexerModule extends BaseModule {
 
 	async #loadStats() {
 		try {
-			const { stdout } = await execa('virgo', ['stats', '--json']);
-			this.setState('stats', JSON.parse(stdout));
+			const { stdout: stats } = await execa('virgo', ['stats', '--json']);
+			this.setState('stats', camelcaseKeys(JSON.parse(stats), { deep: true }));
 		} catch (error) {
 			console.error('indexer stats failed:', error);
 		}
