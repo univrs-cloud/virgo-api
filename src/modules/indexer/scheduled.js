@@ -1,8 +1,9 @@
 const { execa } = require('execa');
 
-const index = async () => {
+const index = async (job, module) => {
 	try {
 		await execa('virgo', ['index'], { stdout: 'ignore' });
+		module.eventEmitter.emit('indexer:index:updated');
 	} catch (error) {
 		console.error('indexer failed:', error);
 	}
@@ -20,8 +21,6 @@ module.exports = {
 	name: 'scheduled',
 	register,
 	jobs: {
-		'indexer:index': async () => {
-			return await index();
-		}
+		'indexer:index': index
 	}
 };
