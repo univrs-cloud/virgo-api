@@ -2,9 +2,9 @@ const { execa } = require('execa');
 
 const index = async () => {
 	try {
-		await execa('virgo', ['index'], { stdio: 'inherit' });
+		await execa('virgo', ['index'], { stdout: 'ignore' });
 	} catch (error) {
-		console.error('virgo index failed:', error);
+		console.error('indexer failed:', error);
 	}
 	return ``;
 };
