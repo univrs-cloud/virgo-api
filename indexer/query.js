@@ -538,7 +538,7 @@ function reindex(db, opts = {}) {
 function stats(db, opts = {}) {
   const json = opts.json || false;
 
-  const s = db.prepare(`
+  const statsRow = db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM datasets)      AS datasets,
       (SELECT COUNT(*) FROM snapshots)     AS snapshots,
@@ -547,6 +547,7 @@ function stats(db, opts = {}) {
       (SELECT COUNT(*) FROM file_versions) AS versions,
       (SELECT COUNT(*) FROM changes)       AS changes,
       (SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted,
+      (SELECT value FROM meta WHERE key = 'last_run_at') AS last_run_at,
       (SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
   `).get();
 
@@ -559,17 +560,18 @@ function stats(db, opts = {}) {
     LIMIT 10
   `).all();
 
-  const result = { ...s, top_datasets: topDatasets };
+  const result = { ...statsRow, top_datasets: topDatasets };
 
   if (!json) {
     console.log('\n📊 ZFS Index Statistics\n');
-    console.log(`   DB size:        ${formatSize(s.db_bytes)}`);
-    console.log(`   Datasets:       ${s.datasets}`);
-    console.log(`   Snapshots:      ${s.snapshots} (${s.indexed} indexed)`);
-    console.log(`   Unique files:   ${s.files.toLocaleString()}`);
-    console.log(`   File versions:  ${s.versions.toLocaleString()}`);
-    console.log(`   Change events:  ${s.changes.toLocaleString()}`);
-    console.log(`   Deleted files:  ${s.deleted.toLocaleString()}`);
+    console.log(`   Last run:       ${statsRow.last_run_at ?? 'null'}`);
+    console.log(`   DB size:        ${formatSize(statsRow.db_bytes)}`);
+    console.log(`   Datasets:       ${statsRow.datasets}`);
+    console.log(`   Snapshots:      ${statsRow.snapshots} (${statsRow.indexed} indexed)`);
+    console.log(`   Unique files:   ${statsRow.files.toLocaleString()}`);
+    console.log(`   File versions:  ${statsRow.versions.toLocaleString()}`);
+    console.log(`   Change events:  ${statsRow.changes.toLocaleString()}`);
+    console.log(`   Deleted files:  ${statsRow.deleted.toLocaleString()}`);
     console.log('\n   Top datasets by file count:');
     for (const d of topDatasets) {
       console.log(`     ${d.name.padEnd(30)} ${d.file_count.toLocaleString()} files / ${d.snap_count} snapshots`);

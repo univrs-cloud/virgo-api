@@ -72,6 +72,11 @@ function openDb(path) {
       UNIQUE(file_id, snapshot_id)
     );
 
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS changes (
       id           INTEGER PRIMARY KEY,
       snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),

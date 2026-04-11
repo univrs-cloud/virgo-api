@@ -364,6 +364,14 @@ async function runIndexerPass(opts, sessionWallT0 = null, restartCount = 0) {
     disableBulkMode(db);
     inBulkMode = false;
 
+    const lastRunAt = new Date().toISOString();
+    transaction(db, () => {
+      db.prepare(`
+        INSERT INTO meta(key, value) VALUES ('last_run_at', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(lastRunAt);
+    });
+
     console.log('\n✅ Indexing complete.');
     printStats(db, perf, sessionWallT0, restartCount);
   } finally {
