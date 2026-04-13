@@ -16,12 +16,14 @@ const getDomain = () => {
 			console.error(`Traefik .env file not found: ${TRAEFIK_ENV_PATH}`);
 			return null;
 		}
+
 		const content = fs.readFileSync(TRAEFIK_ENV_PATH, 'utf8');
 		const match = content.match(/^DOMAIN=["']?([^"'\n]+)["']?$/m);
 		if (!match) {
 			console.error('DOMAIN not found in Traefik .env file');
 			return null;
 		}
+		
 		return match[1].trim();
 	} catch (error) {
 		console.error('Error reading Traefik .env file:', error.message);

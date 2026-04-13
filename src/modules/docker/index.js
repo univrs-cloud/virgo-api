@@ -106,6 +106,11 @@ class DockerModule extends BaseModule {
 	async #loadConfigured() {
 		try {
 			const configured = await DataService.getConfigured();
+			for (const entry of configured) {
+				if (entry.type === 'app') {
+					entry.dataset = `${this.appsDataset}/${entry.name}`;
+				}
+			}
 			this.setState('configured', configured);
 		} catch (error) {
 			this.setState('configured', false);

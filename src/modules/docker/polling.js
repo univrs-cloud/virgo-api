@@ -80,7 +80,7 @@ const getAppsResourceMetrics = async (module) => {
 					}
 				)
 				.filter(Boolean);
-			const dataset = Object.values(datasets).find((dataset) => { return dataset.name === `messier/apps/${app.name}`; });
+			const dataset = Object.values(datasets).find((dataset) => { return dataset.name === `${module.appsDataset}/${app.name}`; });
 			appsResourceMetrics.push({
 				name: app.name,
 				cpu: {

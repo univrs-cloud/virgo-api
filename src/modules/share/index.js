@@ -86,6 +86,7 @@ class ShareModule extends BaseModule {
 					name: name,
 					comment: value['comment'],
 					path: value['path'],
+					dataset: null,
 					validUsers: value['valid users']?.split(' '),
 					size: 0,
 					free: 0,
@@ -105,6 +106,7 @@ class ShareModule extends BaseModule {
 					if (value['path'] === mountpoint) {
 						// Path is a ZFS mountpoint, use df
 						used = parseInt(parts[2], 10) * 1024;
+						share.dataset = await this.pathToZfsDataset(value['path']);
 					} else {
 						// Path is a subdirectory, use du for actual directory size
 						const { stdout: duOutput } = await execa('du', ['-sb', '--apparent-size', value['path']]);
