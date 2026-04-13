@@ -30,38 +30,33 @@ const updateDatasetConfig = async (job, module) => {
 		throw new Error('Invalid optedIn flag.');
 	}
 
-	const name = normalizeDataset(config?.dataset);
-	if (!name) {
-		throw new Error('Invalid dataset name.');
+	const dataset = normalizeDataset(config?.dataset);
+	if (!dataset) {
+		throw new Error('Invalid dataset.');
 	}
 
 	if (config.optedIn) {
-		const ok = await zfsDatasetExists(name);
+		const ok = await zfsDatasetExists(dataset);
 		if (!ok) {
-			throw new Error(`Dataset does not exist on ZFS: ${name}`);
+			throw new Error(`Dataset ${dataset} does not exist`);
 		}
 	}
+
+	const name = (config?.name ?? config.dataset);
 	const verb = config.optedIn ? 'Adding' : 'Removing';
 	await module.updateJobProgress(job, `${verb} ${name} in indexer configuration...`);
 	const configuration = await DataService.getConfiguration();
-	let list = (configuration.indexer ?? [])
-		.map((s) => {
-			return s.trim();
-		})
-		.filter((s) => {
-			return Boolean(s);
-		});
+	let list = (configuration.indexer ?? []);
 	if (config.optedIn) {
-		if (!list.includes(name)) {
-			list = [...list, name];
+		if (!list.includes(dataset)) {
+			list.push(dataset);
 		}
 	} else {
 		list = list.filter((entry) => {
-			return entry !== name && !entry.startsWith(name + '/');
+			return entry !== dataset;
 		});
 	}
-	const ok = await DataService.setConfiguration('indexer', list);
-	if (!ok) {
+	if (!await DataService.setConfiguration('indexer', list)) {
 		throw new Error('Failed to save indexer configuration.');
 	}
 	
