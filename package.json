@@ -39,7 +39,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^5.73.4",
+		"bullmq": "^5.73.5",
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -47,7 +47,7 @@
 		"compromise": "^14.15.0",
 		"docker-compose": "^1.4.2",
 		"dockerode": "^4.0.10",
-		"dotenv": "^17.4.1",
+		"dotenv": "^17.4.2",
 		"execa": "^9.6.1",
 		"express": "^5.2.1",
 		"express-rate-limit": "^8.3.2",
