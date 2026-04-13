@@ -1,13 +1,17 @@
 const { execa } = require('execa');
 const camelcaseKeys = require('camelcase-keys').default;
 const BaseModule = require('../base');
+const DataService = require('../../database/data_service');
 
 class IndexerModule extends BaseModule {
 	constructor() {
 		super('indexer');
 
 		(async () => {
-			await this.#loadStats();
+			await Promise.all([
+				this.#loadDatasets(),
+				this.#loadStats()
+			]);
 		})();
 
 		this.eventEmitter
@@ -18,6 +22,14 @@ class IndexerModule extends BaseModule {
 						socket.emit('indexer:stats', this.getState('stats'));
 					}
 				}
+			})
+			.on('configuration:updated', async () => {
+				await this.#loadDatasets();
+				for (const socket of this.nsp.sockets.values()) {
+					if (socket.isAuthenticated && socket.isAdmin) {
+						socket.emit('indexer:datasets', this.getState('datasets'));
+					}
+				}
 			});
 	}
 
@@ -26,12 +38,25 @@ class IndexerModule extends BaseModule {
 			if (this.getState('stats')) {
 				socket.emit('indexer:stats', this.getState('stats'));
 			}
+			if (this.getState('datasets')) {
+				socket.emit('indexer:datasets', this.getState('datasets'));
+			}
+		}
+	}
+
+	async #loadDatasets() {
+		try {
+			const configuration = await DataService.getConfiguration();
+			const datasets = (configuration.indexer ?? []);
+			this.setState('datasets', datasets);
+		} catch (error) {
+			console.error('indexer datasets load failed:', error);
 		}
 	}
 
 	async #loadStats() {
 		try {
-			const { stdout: stats } = await execa('virgo', ['stats', '--json']);
+			const { stdout: stats } = await execa('virgo', ['indexer', 'stats', '--json']);
 			this.setState('stats', camelcaseKeys(JSON.parse(stats), { deep: true }));
 		} catch (error) {
 			console.error('indexer stats failed:', error);

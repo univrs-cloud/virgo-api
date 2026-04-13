@@ -44,7 +44,8 @@ class DataService {
 					longitude: '21.227'
 				},
 				smtp: null,
-				trustedProxies: []
+				trustedProxies: [],
+				indexer: []
 			};
 		}
 	}

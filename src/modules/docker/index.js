@@ -16,8 +16,10 @@ class DockerModule extends BaseModule {
 		this.#appsDir = `/${this.#appsDataset}`;
 		
 		(async () => {
-			await this.#loadConfigured();
-			await this.#loadTemplates();
+			await Promise.all([
+				this.#loadConfigured(),
+				this.#loadTemplates()
+			]);
 		})();
 
 		this.eventEmitter

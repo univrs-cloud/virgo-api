@@ -44,9 +44,11 @@ class HostModule extends BaseModule {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
 		(async () => {
-			await this.#loadNetworkIdentifier();
-			await this.#loadNetworkInterfaces();
-			await this.#loadDefaultGateway();
+			await Promise.all([
+				this.#loadNetworkIdentifier(),
+				this.#loadNetworkInterfaces(),
+				this.#loadDefaultGateway()
+			]);
 		})();
 
 		this.eventEmitter
