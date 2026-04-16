@@ -1,5 +1,6 @@
 const path = require('path');
 const camelcaseKeys = require('camelcase-keys').default;
+const config = require('../../../config');
 const docker = require('../../utils/docker_client');
 const BaseModule = require('../base');
 const DataService = require('../../database/data_service');
@@ -120,7 +121,7 @@ class DockerModule extends BaseModule {
 
 	async #loadTemplates() {
 		try {
-			const response = await fetch(`https://apps.univrs.cloud/template.json`);
+			const response = await fetch(config.apps.templatesUrl);
 			const data = await response.json();
 			this.setState('templates', data.templates);
 		} catch (error) {

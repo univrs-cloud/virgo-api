@@ -1,0 +1,22 @@
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+
+'use strict';
+
+const { Command } = require('commander');
+const pkg = require('../package.json');
+const registerIndexer = require('./indexer');
+const registerNetwork = require('./network');
+const registerApps = require('./apps');
+
+const program = new Command();
+
+program
+	.name('virgo')
+	.description('Virgo CLI')
+	.version(pkg.version);
+
+registerIndexer(program);
+registerNetwork(program);
+registerApps(program);
+
+program.parse();

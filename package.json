@@ -6,11 +6,11 @@
 	"license": "UNLICENSED",
 	"main": "index.js",
 	"scripts": {
-		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js bin/ cert/ src/ indexer/",
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js cli/ cert/ src/ indexer/",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"bin": {
-		"virgo": "./bin/virgo"
+		"virgo": "./cli/virgo"
 	},
 	"node_deb": {
 		"executable_name": "virgo",
@@ -26,7 +26,7 @@
 		},
 		"entrypoints": {
 			"daemon": "index.js",
-			"cli": "bin/virgo"
+			"cli": "cli/virgo"
 		}
 	},
 	"engines": {
