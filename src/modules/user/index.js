@@ -21,7 +21,7 @@ class UserModule extends BaseModule {
 				this.nsp.sockets.forEach((socket) => {
 					if (socket.isAuthenticated) {
 						if (!socket.isAdmin) {
-							socket.emit('users', this.getState('users')?.filter((user) => { return user.username === socket.username; }));
+							socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
 						} else {
 							socket.emit('users', this.getState('users'));
 						}
@@ -42,7 +42,7 @@ class UserModule extends BaseModule {
 		if (this.getState('users')) {
 			if (socket.isAuthenticated) {
 				if (!socket.isAdmin) {
-					socket.emit('users', this.getState('users')?.filter((user) => { return user.username === socket.username; }));
+					socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
 				} else {
 					socket.emit('users', this.getState('users'));
 				}

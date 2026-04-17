@@ -96,6 +96,10 @@ class BaseModule {
 		}
 	}
 
+	toArray(value) {
+		return Array.isArray(value) ? value : [];
+	}
+
 	#setupMiddleware() {
 		this.#nsp.use((socket, next) => {
 			const remoteUser = (isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['remote-user'] : undefined);

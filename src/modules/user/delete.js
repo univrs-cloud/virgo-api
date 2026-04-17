@@ -2,10 +2,9 @@ const fs = require('fs');
 const { execa } = require('execa');
 const yaml = require('js-yaml');
 const linuxUser = require('linux-sys-user').promise();
-
 const deleteUser = async (job, module) => {
 	const { config } = job.data;
-	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
+	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}

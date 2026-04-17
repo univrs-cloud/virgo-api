@@ -3,15 +3,14 @@ const { execa } = require('execa');
 const yaml = require('js-yaml');
 const bcrypt = require('bcryptjs');
 const linuxUser = require('linux-sys-user').promise();
-
 const createUser = async (job, module) => {
 	const { config } = job.data;
-	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
+	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (user) {
 		throw new Error(`User already exists.`);
 	}
 
-	const authenticatedUser = module.getState('users')?.find((user) => { return user.username === job.data.username; });
+	const authenticatedUser = module.toArray(module.getState('users')).find((user) => { return user.username === job.data.username; });
 	if (authenticatedUser?.uid !== 1000 && config.role === 'admin') {
 		config.role = '';
 	}

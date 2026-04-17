@@ -1,15 +1,14 @@
 const fs = require('fs');
 const { execa } = require('execa');
 const yaml = require('js-yaml');
-
 const updateUser = async (job, module) => {
 	const { config } = job.data;
-	const user = module.getState('users')?.find((user) => { return user.username === config.username; });
+	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	const authenticatedUser = module.getState('users')?.find((user) => { return user.username === job.data.username; });
+	const authenticatedUser = module.toArray(module.getState('users')).find((user) => { return user.username === job.data.username; });
 	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
 		throw new Error(`Only the owner can update his own profile.`);
 	}

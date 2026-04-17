@@ -2,12 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const stream = require('stream');
 const streamPipeline = require('util').promisify(stream.pipeline);
-const camelcaseKeys = require('camelcase-keys').default;
 const dockerCompose = require('docker-compose');
 const docker = require('../../utils/docker_client');
 const dockerPullProgressParser = require('../../utils/docker_pull_progress_parser');
 const DataService = require('../../database/data_service');
-
 const updateApp = async (job, module) => {
 	const { config } = job.data;
 	const existingApp = await DataService.getApplication(config?.name);
@@ -24,7 +22,7 @@ const updateApp = async (job, module) => {
 	const composeProject = container.labels?.comDockerComposeProject;
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
-	const template = module.getState('templates')?.find((template) => { return template.name === config.name; });
+	const template = module.toArray(module.getState('templates')).find((template) => { return template.name === config.name; });
 	if (template) {
 		try {
 			const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
@@ -67,7 +65,7 @@ const updateApp = async (job, module) => {
 
 	await module.updateJobProgress(job, `Cleaning up...`);
 	await docker.pruneImages();
-	let updates = module.getState('updates')?.filter((update) => {
+	let updates = module.toArray(module.getState('updates')).filter((update) => {
 		return !containers.some((container) => { return container.id === update.containerId; });
 	});
 	module.setState('updates', updates);
