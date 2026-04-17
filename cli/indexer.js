@@ -12,9 +12,9 @@ const register = (program) => {
 	indexerCmd
 		.command('index')
 		.description('Index ZFS datasets and snapshots (uses configured indexer paths)')
-		.action((opts) => {
+		.action((options) => {
 			const indexer = require('../indexer/index');
-			indexer.run(opts).catch((err) => {
+			indexer.run(options).catch((err) => {
 				console.error(err);
 				process.exitCode = 1;
 			});
@@ -26,11 +26,11 @@ const register = (program) => {
 		.command('reindex')
 		.description('Clear indexed data and force a full re-crawl on next run')
 		.option('--dataset <names>', 'Dataset root(s), comma-separated; reset each root and its children')
-		.action((opts) => {
+		.action((options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				query.reindex(db, opts);
+				query.reindex(db, options);
 			} finally {
 				db.close();
 			}
@@ -51,12 +51,12 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 100)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((term, opts) => {
+		.action((term, options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.search(db, term, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.search(db, term, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}
@@ -69,12 +69,12 @@ const register = (program) => {
 		.description('Full version history of a file')
 		.option('--dataset <names>', 'Limit to dataset root(s), comma-separated (each matches that dataset and children)')
 		.option('--json', 'Output as JSON')
-		.action((path, opts) => {
+		.action((path, options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.history(db, path, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.history(db, path, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}
@@ -90,12 +90,12 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 2000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((opts) => {
+		.action((options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.deleted(db, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.deleted(db, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}
@@ -111,12 +111,12 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 5000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((snapshot, opts) => {
+		.action((snapshot, options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.changes(db, snapshot, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.changes(db, snapshot, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}
@@ -130,12 +130,12 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 5000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((snapA, snapB, opts) => {
+		.action((snapA, snapB, options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.diff(db, snapA, snapB, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.diff(db, snapA, snapB, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}
@@ -147,12 +147,12 @@ const register = (program) => {
 		.command('stats')
 		.description('Index statistics')
 		.option('--json', 'Output as JSON')
-		.action((opts) => {
+		.action((options) => {
 			const query = require('../indexer/query');
 			const db = openDb();
 			try {
-				const result = query.stats(db, opts);
-				if (opts.json) console.log(JSON.stringify(result, null, 2));
+				const result = query.stats(db, options);
+				if (options.json) console.log(JSON.stringify(result, null, 2));
 			} finally {
 				db.close();
 			}

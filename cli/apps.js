@@ -7,7 +7,7 @@ const config = require('../config');
 const DataService = require('../src/database/data_service');
 const { getQueueName } = require('../src/queues');
 
-const getHostFqdn = () => {
+const getHostFQDN = () => {
 	try {
 		const { stdout, failed } = execaSync('hostname', ['-f'], {
 			reject: false,
@@ -23,13 +23,13 @@ const getHostFqdn = () => {
 	}
 };
 
-const getExploreDefaultDisplay = (field, hostFqdn) => {
+const getExploreDefaultDisplay = (field, hostfqdn) => {
 	if (field.name?.toLowerCase() === 'domain') {
 		const fromTemplate = resolveEnvDefault(field);
 		if (fromTemplate !== '') {
 			return fromTemplate;
 		}
-		return hostFqdn;
+		return hostfqdn;
 	}
 	return resolveEnvDefault(field);
 };
@@ -73,12 +73,12 @@ const formatSelectOptionsShort = (select) => {
 	return select.map((option) => { return displayEnvValue(option.value); }).join(', ');
 };
 
-const envFieldToRow = (field, hostFqdn) => {
+const envFieldToRow = (field, hostfqdn) => {
 	const row = {
 		name: field.name,
 		type: field.type,
 		label: field.label,
-		default: getExploreDefaultDisplay(field, hostFqdn)
+		default: getExploreDefaultDisplay(field, hostfqdn)
 	};
 	if (isSelectLikeField(field)) {
 		row.options = selectOptionsForJson(field);
@@ -98,25 +98,55 @@ const fetchTemplates = async () => {
 	return data.templates;
 };
 
-const getTemplateEnvVarNames = (template) => {
-	const fields = template.env || [];
-	const names = fields
-		.map((field) => { return field.name; })
-		.filter((name) => { return name != null && String(name).length > 0; });
-	return [...new Set(names)];
+const listInstalledApps = async (options) => {
+	let applications;
+	try {
+		applications = await DataService.getApplications();
+	} catch (error) {
+		console.error('Could not read installed applications:', error.message || error);
+		process.exitCode = 1;
+		return;
+	}
+
+	const sorted = sortApplications(applications);
+
+	if (options.json) {
+		console.log(JSON.stringify(sorted, null, 2));
+		return;
+	}
+
+	if (sorted.length === 0) {
+		console.log('No applications installed.');
+		return;
+	}
+
+	for (const app of sorted) {
+		const headline = app.title ? `${app.title} (${app.name})` : app.name;
+		console.log(headline);
+		if (app.category) {
+			console.log(`  category: ${app.category}`);
+		}
+		console.log('');
+	}
+
+	function sortApplications(applications) {
+		return [...applications].sort((a, b) => {
+			const titleLowerA = (a.title || a.name || '').toLowerCase();
+			const titleLowerB = (b.title || b.name || '').toLowerCase();
+			if (titleLowerA !== titleLowerB) {
+				return titleLowerA.localeCompare(titleLowerB);
+			}
+			return String(a.name || '').localeCompare(String(b.name || ''));
+		});
+	}
 };
 
-const getMissingEnvKeys = (template, env) => {
-	const required = getTemplateEnvVarNames(template);
-	return required.filter((key) => { return !Object.hasOwn(env, key); });
-};
-
-const exploreApps = async (opts) => {
+const exploreApps = async (options) => {
 	let templates;
 	try {
 		templates = await fetchTemplates();
-	} catch (err) {
-		console.error(err.message || err);
+	} catch (error) {
+		console.error(error.message || error);
 		process.exitCode = 1;
 		return;
 	}
@@ -125,18 +155,18 @@ const exploreApps = async (opts) => {
 	try {
 		const installed = await DataService.getApplications();
 		installedNames = new Set(installed.map((row) => { return row.name; }));
-	} catch (err) {
-		console.error('Could not read which applications are already installed:', err.message || err);
+	} catch (error) {
+		console.error('Could not read which applications are already installed:', error.message || error);
 		process.exitCode = 1;
 		return;
 	}
 
 	const available = templates.filter((template) => { return !installedNames.has(template.name); });
-	const hostFqdn = getHostFqdn();
+	const hostfqdn = getHostFQDN();
 
-	if (opts.json) {
+	if (options.json) {
 		const payload = available.map((template) => {
-			const env = (template.env || []).map((field) => { return envFieldToRow(field, hostFqdn); });
+			const env = (template.env || []).map((field) => { return envFieldToRow(field, hostfqdn); });
 			return {
 				name: template.name,
 				title: template.title,
@@ -163,12 +193,12 @@ const exploreApps = async (opts) => {
 			console.log('  (no env fields)');
 		} else {
 			for (const field of envFields) {
-				const row = envFieldToRow(field, hostFqdn);
-				const defStr = displayEnvValue(row.default);
+				const row = envFieldToRow(field, hostfqdn);
+				const defaultValue = displayEnvValue(row.default);
 				if (row.options) {
-					console.log(`  ${row.name}=${defStr} (options: ${formatSelectOptionsShort(field.select)})`);
+					console.log(`  ${row.name}=${defaultValue} (options: ${formatSelectOptionsShort(field.select)})`);
 				} else {
-					console.log(`  ${row.name}=${defStr}`);
+					console.log(`  ${row.name}=${defaultValue}`);
 				}
 			}
 		}
@@ -176,38 +206,12 @@ const exploreApps = async (opts) => {
 	}
 };
 
-const enqueueDockerJob = async (jobName, data, doneMessage) => {
-	const queueName = getQueueName('docker');
-	const connection = {
-		host: config.redis.host,
-		port: config.redis.port
-	};
-	const queue = new Queue(queueName, { connection });
-	try {
-		await queue.add(jobName, data);
-		console.log(doneMessage);
-	} catch (err) {
-		console.error(err);
-		process.exitCode = 1;
-	} finally {
-		await queue.close();
-	}
-};
-
-const parseEnvPair = (value) => {
-	const idx = value.indexOf('=');
-	if (idx === -1) {
-		throw new InvalidArgumentError('Expected --env KEY=value');
-	}
-	return [value.slice(0, idx), value.slice(idx + 1)];
-};
-
-const queueAppInstall = async (name, opts) => {
+const queueAppInstall = async (name, options) => {
 	const env = {};
-	if (opts.envJson) {
+	if (options.envJson) {
 		let parsed;
 		try {
-			parsed = JSON.parse(opts.envJson);
+			parsed = JSON.parse(options.envJson);
 		} catch {
 			console.error('Invalid JSON for --env-json.');
 			process.exitCode = 1;
@@ -220,20 +224,20 @@ const queueAppInstall = async (name, opts) => {
 		}
 		Object.assign(env, parsed);
 	}
-	for (const pair of opts.env || []) {
-		const [key, val] = pair;
-		env[key] = val;
+	for (const pair of options.env || []) {
+		const [key, value] = pair;
+		env[key] = value;
 	}
 
 	let templates;
 	try {
 		templates = await fetchTemplates();
-	} catch (err) {
-		console.error(err.message || err);
+	} catch (error) {
+		console.error(error.message || error);
 		process.exitCode = 1;
 		return;
 	}
-	const template = templates.find((t) => { return t.name === name; });
+	const template = templates.find((template) => { return template.name === name; });
 	if (!template) {
 		console.error(`Unknown app template "${name}". Run \`virgo apps explore\` for valid names.`);
 		process.exitCode = 1;
@@ -257,17 +261,54 @@ const queueAppInstall = async (name, opts) => {
 		},
 		`Install of "${name}" started.`
 	);
+
+	function getTemplateEnvVarNames(template) {
+		const fields = template.env || [];
+		const names = fields
+			.map((field) => { return field.name; })
+			.filter((name) => { return name != null && String(name).length > 0; });
+		return [...new Set(names)];
+	}
+
+	function getMissingEnvKeys(template, env) {
+		const required = getTemplateEnvVarNames(template);
+		return required.filter((key) => { return !Object.hasOwn(env, key); });
+	}
+
+	async function enqueueDockerJob(jobName, data, doneMessage) {
+		const queueName = getQueueName('docker');
+		const connection = {
+			host: config.redis.host,
+			port: config.redis.port
+		};
+		const queue = new Queue(queueName, { connection });
+		try {
+			await queue.add(jobName, data);
+			console.log(doneMessage);
+		} catch (error) {
+			console.error(error);
+			process.exitCode = 1;
+		} finally {
+			await queue.close();
+		}
+	}
 };
 
 const register = (program) => {
 	const envJsonHelpExample = JSON.stringify({
-		DOMAIN: getHostFqdn(),
+		DOMAIN: getHostFQDN(),
 		CERTRESOLVER: 'le'
 	});
 
 	const appsCmd = program
 		.command('apps')
 		.description('Installable applications');
+
+	appsCmd
+		.command('list')
+		.description('List installed applications')
+		.option('--json', 'Output as JSON')
+		.action(listInstalledApps);
 
 	appsCmd
 		.command('explore')
@@ -285,6 +326,14 @@ const register = (program) => {
 			return pairs;
 		}, [])
 		.action(queueAppInstall);
+
+	function parseEnvPair(value) {
+		const index = value.indexOf('=');
+		if (index === -1) {
+			throw new InvalidArgumentError('Expected --env KEY=value');
+		}
+		return [value.slice(0, index), value.slice(index + 1)];
+	}
 };
 
 module.exports = register;

@@ -15,21 +15,21 @@ const enqueueHostJob = async (jobName, data, doneMessage) => {
 	try {
 		await queue.add(jobName, data);
 		console.log(doneMessage);
-	} catch (err) {
-		console.error(err);
+	} catch (error) {
+		console.error(error);
 		process.exitCode = 1;
 	} finally {
 		await queue.close();
 	}
 };
 
-const queueHostNetworkIdentifierJob = async (opts) => {
+const queueHostNetworkIdentifierJob = async (options) => {
 	await enqueueHostJob(
 		'host:network:identifier:update',
 		{
 			config: {
-				hostname: opts.hostname,
-				domainName: opts.domain
+				hostname: options.hostname,
+				domainName: options.domain
 			},
 			username: process.env.USER || 'cli'
 		},
@@ -37,27 +37,35 @@ const queueHostNetworkIdentifierJob = async (opts) => {
 	);
 };
 
-const queueHostNetworkInterfaceJob = async (opts) => {
-	const { method } = opts;
-	const config = { method };
-	if (method === 'manual') {
-		if (opts.address === undefined || opts.prefix === undefined || opts.gateway === undefined) {
-			console.error('--method manual requires --address, --prefix, and --gateway.');
-			process.exitCode = 1;
-			return;
-		}
-		config.ipAddress = opts.address;
-		config.netmask = String(opts.prefix);
-		config.gateway = opts.gateway;
+const queueHostNetworkInterfaceJob = async (options) => {
+	const interfaceConfig = buildInterfaceConfig(options);
+	if (interfaceConfig === null) {
+		return;
 	}
 	await enqueueHostJob(
 		'host:network:interface:update',
 		{
-			config,
+			config: interfaceConfig,
 			username: process.env.USER || 'cli'
 		},
 		'Network interface update started.'
 	);
+
+	function buildInterfaceConfig(options) {
+		const { method } = options;
+		const config = { method };
+		if (method === 'manual') {
+			if (options.address === undefined || options.prefix === undefined || options.gateway === undefined) {
+				console.error('--method manual requires --address, --prefix, and --gateway.');
+				process.exitCode = 1;
+				return null;
+			}
+			config.ipAddress = options.address;
+			config.netmask = String(options.prefix);
+			config.gateway = options.gateway;
+		}
+		return config;
+	}
 };
 
 const register = (program) => {
@@ -89,15 +97,17 @@ const register = (program) => {
 				.makeOptionMandatory()
 		)
 		.option('--address <ip>', 'IPv4 address (required with --method manual)')
-		.option('--prefix <n>', 'CIDR prefix length (required with --method manual)', (value) => {
-			const n = Number.parseInt(value, 10);
-			if (Number.isNaN(n)) {
-				throw new InvalidArgumentError('Not a valid integer.');
-			}
-			return n;
-		})
+		.option('--prefix <n>', 'CIDR prefix length (required with --method manual)', parsePrefixOption)
 		.option('--gateway <ip>', 'Default gateway (required with --method manual)')
 		.action(queueHostNetworkInterfaceJob);
+
+	function parsePrefixOption(value) {
+		const n = Number.parseInt(value, 10);
+		if (Number.isNaN(n)) {
+			throw new InvalidArgumentError('Not a valid integer.');
+		}
+		return n;
+	}
 };
 
 module.exports = register;
