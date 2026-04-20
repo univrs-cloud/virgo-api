@@ -13,7 +13,10 @@ const createFolder = async (job, module) => {
 	const dataset = `${module.foldersDataset}/${slug(comment)}`;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
 	await module.updateJobProgress(job, `Creating folder ${comment}...`);
-	await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+	const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
+	if (datasetExists !== 0) {
+		await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+	}
 	let shares = {};
 	try {
 		const existingConf = fs.readFileSync(module.foldersConf, 'utf8');
@@ -49,7 +52,10 @@ const createTimeMachine = async (job, module) => {
 	const dataset = `${module.timeMachinesDataset}/${slug(comment)}`;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
 	await module.updateJobProgress(job, `Creating time machine ${comment}...`);
-	await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+	const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
+	if (datasetExists !== 0) {
+		await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+	}
 	let shares = {};
 	try {
 		const existingConf = fs.readFileSync(module.timeMachinesConf, 'utf8');
