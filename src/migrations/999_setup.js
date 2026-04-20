@@ -347,6 +347,16 @@ const setup = async () => {
 			}
 		}
 
+		// Ensure config asset directories exist
+		for (const dir of [
+			`${messierConfigDir}/assets/img/apps`,
+			`${messierConfigDir}/assets/img/bookmarks`
+		]) {
+			if (!fs.existsSync(dir)) {
+				fs.mkdirSync(dir, { recursive: true });
+			}
+		}
+
 		// Ensure share config files exist
 		const allConfPath = `${messierSharesDir}/all.conf`;
 		const shareConfFiles = [
