@@ -73,6 +73,7 @@ const installApp = async (job, module) => {
 	});
 
 	const icon = template.logo.split('/').pop();
+	await fs.promises.mkdir(module.appIconsDir, { recursive: true });
 	const responseIcon = await fetch(template.logo);
 	if (responseIcon.ok) {
 		await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.appIconsDir, icon)));
