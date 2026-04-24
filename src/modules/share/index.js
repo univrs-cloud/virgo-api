@@ -87,7 +87,7 @@ class ShareModule extends BaseModule {
 					comment: value['comment'],
 					path: value['path'],
 					dataset: null,
-					validUsers: value['valid users']?.split(' '),
+					validUsers: value['valid users']?.split(/[\s,]+/).filter(Boolean),
 					size: 0,
 					free: 0,
 					alloc: 0,
