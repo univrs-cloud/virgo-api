@@ -32,6 +32,7 @@ const updateFolder = async (job, module) => {
 	if (dataset !== null) {
 		await execa('zfs', ['set', `refquota=${refquota}`, dataset]);
 	}
+	share['guest ok'] = (validUsers.length === 0 ? 'yes' : 'no');
 	share['valid users'] = validUsers.join(' ');
 	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);

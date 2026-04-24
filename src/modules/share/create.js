@@ -47,7 +47,7 @@ const createFolder = async (job, module) => {
 		'browseable': 'yes',
 		'writable': 'yes',
 		'read only': 'no',
-		'guest ok': 'no',
+		'guest ok': (validUsers.length === 0 ? 'yes' : 'no'),
 		'create mask': '0775',
 		'directory mask': '0755',
 		'force user': 'root',
