@@ -29,7 +29,9 @@ const updateUser = async (job, module) => {
 		if (autheliaUsersConfig?.users?.[config.username]) {
 			autheliaUsersConfig.users[config.username].displayname = config.fullname;
 			autheliaUsersConfig.users[config.username].email = config.email;
-			autheliaUsersConfig.users[config.username].groups = (config.role === 'admin' ? ['admins'] : ['users']);
+			if (authenticatedUser.username !== config.username) {
+				autheliaUsersConfig.users[config.username].groups = (config.role === 'admin' ? ['admins'] : ['users']);
+			}
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 		}
