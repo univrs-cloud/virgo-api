@@ -9,14 +9,25 @@ const slug = (comment) => {
 
 const createFolder = async (job, module) => {
 	const { config } = job.data;
-	const { comment, validUsers = [], refquota: refquotaRaw } = config;
-	const dataset = `${module.foldersDataset}/${slug(comment)}`;
-	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
+	const { comment, validUsers = [], refquota: refquotaRaw, path: customPath } = config;
 	await module.updateJobProgress(job, `Creating folder ${comment}...`);
-	const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
-	if (datasetExists !== 0) {
-		await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+
+	let sharePath;
+	if (customPath) {
+		if (!fs.existsSync(customPath)) {
+			throw new Error(`Path "${customPath}" does not exist.`);
+		}
+		sharePath = customPath;
+	} else {
+		const dataset = `${module.foldersDataset}/${slug(comment)}`;
+		const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
+		const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
+		if (datasetExists !== 0) {
+			await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
+		}
+		sharePath = `/messier/folders/${slug(comment)}`;
 	}
+
 	let shares = {};
 	try {
 		const existingConf = fs.readFileSync(module.foldersConf, 'utf8');
@@ -24,8 +35,14 @@ const createFolder = async (job, module) => {
 	} catch {
 		// missing or unreadable: treat as empty and write new file
 	}
+	if (customPath) {
+		const existingKey = Object.keys(shares).find((key) => { return shares[key].path === customPath; });
+		if (existingKey && existingKey !== slug(comment)) {
+			delete shares[existingKey];
+		}
+	}
 	shares[`${slug(comment)}`] = {
-		path: `/messier/folders/${slug(comment)}`,
+		path: sharePath,
 		comment,
 		'browseable': 'yes',
 		'writable': 'yes',
