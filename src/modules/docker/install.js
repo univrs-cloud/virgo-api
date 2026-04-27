@@ -88,20 +88,7 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
 	module.eventEmitter.emit('configured:updated');
-	if (template.name === 'pcp') {
-		module.eventEmitter.emit('metrics:enabled');
-	}
 	return `${template.title} installed.`;
-};
-
-const register = (module) => {
-	module.eventEmitter.on('app:install:pcp', async ({ username }) => {
-		const config = {
-			name: 'pcp',
-			env: []
-		};
-		await module.addJob('app:install', { config, username });
-	});
 };
 
 const onConnection = (socket, module) => {
@@ -116,7 +103,6 @@ const onConnection = (socket, module) => {
 
 module.exports = {
 	name: 'install',
-	register,
 	onConnection,
 	jobs: {
 		'app:install': installApp

@@ -44,9 +44,6 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
-		if (config.name === 'pcp') {
-			module.eventEmitter.emit('metrics:disabled');
-		}
 	}
 	return `${existingApp.title} app ${actionVerbs.pastTense}.`;
 };
@@ -71,12 +68,6 @@ const performServiceAction = async (job, module) => {
 	return `${serviceName} service ${actionVerbs.pastTense}.`;
 };
 
-const register = (module) => {
-	module.eventEmitter.on('app:uninstall:pcp', async ({ username }) => {
-		await module.addJob('app:performAction', { config: { action: 'uninstall', name: 'pcp' }, username });
-	});
-};
-
 const onConnection = (socket, module) => {
 	socket.on('app:performAction', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
@@ -96,7 +87,6 @@ const onConnection = (socket, module) => {
 
 module.exports = {
 	name: 'perform_action',
-	register,
 	onConnection,
 	jobs: {
 		'app:performAction': performAppAction,

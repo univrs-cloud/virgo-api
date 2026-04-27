@@ -11,7 +11,6 @@ module.exports = async () => {
 		require('./docker')(),
 		require('./bookmark')(),
 		require('./share')(),
-		require('./metrics')(),
 		require('./indexer')(),
 		require('./weather')()
 	];

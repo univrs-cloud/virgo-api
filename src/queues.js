@@ -9,7 +9,6 @@ const MODULES = [
 	'docker',
 	'bookmark',
 	'share',
-	'metrics',
 	'indexer',
 	'weather'
 ];
