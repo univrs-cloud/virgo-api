@@ -41,6 +41,7 @@ const createFolder = async (job, module) => {
 			delete shares[existingKey];
 		}
 	}
+	const nextcloudPath = isNextcloudCustomPath(customPath);
 	shares[`${slug(comment)}`] = {
 		path: sharePath,
 		comment,
@@ -50,7 +51,8 @@ const createFolder = async (job, module) => {
 		'guest ok': (validUsers.length === 0 ? 'yes' : 'no'),
 		'create mask': '0775',
 		'directory mask': '0755',
-		'force user': 'root',
+		'force user': (nextcloudPath ? 'voyager' : 'root'),
+		...(nextcloudPath ? { 'force group': 'users' } : {}),
 		'valid users': validUsers.join(' ')
 	};
 	const dir = path.dirname(module.foldersConf);
@@ -61,6 +63,11 @@ const createFolder = async (job, module) => {
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
 	return `Folder ${comment} created.`;
+
+	function isNextcloudCustomPath(pathToCheck) {
+		const NEXTCLOUD_DATA_PATH_PREFIX = '/messier/apps/nextcloud/data/';
+		return typeof pathToCheck === 'string' && pathToCheck.startsWith(NEXTCLOUD_DATA_PATH_PREFIX);
+	}
 };
 
 const createTimeMachine = async (job, module) => {
