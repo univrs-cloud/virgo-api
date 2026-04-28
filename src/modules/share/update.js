@@ -69,6 +69,11 @@ const updateTimeMachine = async (job, module) => {
 	await module.updateJobProgress(job, `Updating time machine ${name}...`);
 	await execa('zfs', ['set', `refquota=${refquota}`, dataset]);
 	share['valid users'] = validUsers.join(' ');
+	if (Number.isInteger(refquotaRaw)) {
+		share['fruit:time machine max size'] = refquota;
+	} else {
+		delete share['fruit:time machine max size'];
+	}
 	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');

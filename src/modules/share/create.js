@@ -98,8 +98,18 @@ const createTimeMachine = async (job, module) => {
 		'directory mask': '0755',
 		'force user': 'root',
 		'valid users': validUsers.join(' '),
-		'enable time machine': 'yes',
-		'fruit:time machine': 'yes'
+		'vfs objects': 'acl_xattr fruit streams_xattr',
+		'fruit:time machine': 'yes',
+		'fruit:aapl': 'yes',
+		'fruit:model': 'TimeCapsule',
+		'fruit:resource': 'xattr',
+		'fruit:metadata': 'stream',
+		'fruit:posix_rename': 'yes',
+		'fruit:veto_appledouble': 'no',
+		'fruit:nfs_aces': 'no',
+		'fruit:wipe_intentionally_left_blank_rfork': 'yes',
+		'fruit:delete_empty_adfiles': 'yes',
+		...(Number.isInteger(refquotaRaw) ? { 'fruit:time machine max size': refquota } : {})
 	};
 	const dir = path.dirname(module.timeMachinesConf);
 	if (!fs.existsSync(dir)) {
