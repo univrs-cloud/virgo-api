@@ -1,12 +1,15 @@
 const fs = require('fs').promises;
 const path = require('path');
-const plist = require('plist');
 
 class TimeMachine {
 	#backupPath;
+	#plistParserPromise;
 
 	constructor(backupPath) {
 		this.#backupPath = backupPath;
+		this.#plistParserPromise = import('plist').then((plistModule) => {
+			return plistModule.parse;
+		});
 	}
 
 	static async getMachines(backupPath) {
@@ -66,7 +69,8 @@ class TimeMachine {
 	async #readPlist(filepath) {
 		try {
 			const content = await fs.readFile(filepath, 'utf8');
-			return plist.parse(content);
+			const parse = await this.#plistParserPromise;
+			return parse(content);
 		} catch {
 			return null;
 		}
