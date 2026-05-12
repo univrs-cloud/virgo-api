@@ -73,7 +73,7 @@ class DockerModule extends BaseModule {
 	 * @returns {Promise<Array>} - Array of container objects (empty if none found)
 	 */
 	async findContainersByAppName(appName) {
-		const containers = module.getState('containers');
+		const containers = this.getState('containers');
 		// Match by compose project label (exact match)
 		// This ensures we match the exact project name and avoid false matches
 		// e.g., "nextcloud" won't match containers from "nextcloud-hpb" project
