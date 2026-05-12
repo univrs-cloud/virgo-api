@@ -211,6 +211,13 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		getSizeAtSnapshot: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? AND snapshot_id = ? LIMIT 1`),
 		getSizeByPathAtSnapshot: db.prepare(`SELECT fv.size FROM file_versions fv JOIN files f ON f.id = fv.file_id WHERE f.dataset_id = ? AND f.path = ? AND fv.snapshot_id = ? LIMIT 1`),
 		markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
+		updateFileRename: db.prepare(`
+			UPDATE files SET path = ?, inode = ?, type = ?, last_seen_snap_id = ?, deleted_at_snap_id = NULL
+			WHERE id = ? AND dataset_id = ?
+		`),
+		deleteChangesByFileId: db.prepare(`DELETE FROM changes WHERE file_id = ?`),
+		deleteVersionsByFileId: db.prepare(`DELETE FROM file_versions WHERE file_id = ?`),
+		deleteFileById: db.prepare(`DELETE FROM files WHERE id = ?`),
 		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`),
 		bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
 		deleteChangesBySnapshot: db.prepare(`DELETE FROM changes WHERE snapshot_id = ?`),
@@ -649,6 +656,51 @@ function resolveRelPath(path, mountpoint) {
 	return mountpoint && path.startsWith(mountpoint) ? path.slice(mountpoint.length) || '/' : path;
 }
 
+/**
+ * Apply a ZFS rename to the files table without creating a "deleted" tombstone.
+ * Previously we marked the old path deleted and inserted a new row, which inflated
+ * deleted-file counts and split version history across two file_ids.
+ *
+ * @returns {{ fileId: number | null, oldSize: number | null }}
+ */
+function applyFileRename(db, stmt, perf, datasetId, relOldPath, relNewPath, st, snapId) {
+	const type = typeFromStat(st);
+	const sz = sizeFromStat(st);
+	const mtime = Math.floor(st.mtimeMs / 1000);
+	const ctime = Math.floor(st.ctimeMs / 1000);
+	const mode = modeStr(st);
+
+	const oldFile = stmt.getFileByPath.get(datasetId, relOldPath);
+	perf.sqlSelects++;
+	if (!oldFile) {
+		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
+		perf.sqlUpserts++;
+		if (fileRow) {
+			stmt.insertVersion.run(fileRow.id, snapId, sz, mtime, ctime, st.nlink, mode);
+			perf.sqlInserts++;
+		}
+		return { fileId: fileRow?.id ?? null, oldSize: null };
+	}
+
+	const oldSizeRow = stmt.getLatestSize.get(oldFile.id);
+	perf.sqlSelects++;
+	const oldSize = oldSizeRow?.size ?? null;
+
+	const victim = stmt.getFileByPath.get(datasetId, relNewPath);
+	perf.sqlSelects++;
+	if (victim && victim.id !== oldFile.id) {
+		stmt.deleteChangesByFileId.run(victim.id);
+		stmt.deleteVersionsByFileId.run(victim.id);
+		stmt.deleteFileById.run(victim.id);
+	}
+
+	stmt.updateFileRename.run(relNewPath, st.ino, type, snapId, oldFile.id, datasetId);
+	perf.sqlUpdates++;
+	stmt.insertVersion.run(oldFile.id, snapId, sz, mtime, ctime, st.nlink, mode);
+	perf.sqlInserts++;
+	return { fileId: oldFile.id, oldSize };
+}
+
 function typeFromStat(st) {
 	return st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : 'other';
 }
@@ -726,16 +778,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				const relNewPath = resolveRelPath(c.newPath, mountpoint);
 				const st = statMap.get(i);
 				if (st) {
-					const oldFile = stmt.getFileByPath.get(datasetId, relPath);
-					perf.sqlSelects++;
-					if (oldFile) { stmt.markDeleted.run(snap.id, oldFile.id); perf.sqlUpdates++; }
-					const type = typeFromStat(st);
-					const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
-					perf.sqlUpserts++;
-					if (newFile) {
-						stmt.insertVersion.run(newFile.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
-					}
+					applyFileRename(db, stmt, perf, datasetId, relPath, relNewPath, st, snap.id);
 				}
 			}
 		}
@@ -801,22 +844,9 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 			} else if (c.changeType === 'renamed') {
 				if (st) {
 					newSize = sizeFromStat(st);
-					const oldFile = stmt.getFileByPath.get(datasetId, relPath);
-					perf.sqlSelects++;
-					if (oldFile) {
-						fileId = oldFile.id;
-						oldSize = stmt.getLatestSize.get(oldFile.id)?.size ?? null;
-						perf.sqlSelects++;
-						stmt.markDeleted.run(snap.id, oldFile.id);
-						perf.sqlUpdates++;
-					}
-					const type = typeFromStat(st);
-					const newFile = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snap.id, snap.id);
-					perf.sqlUpserts++;
-					if (newFile) {
-						stmt.insertVersion.run(newFile.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
-					}
+					const { fileId: rid, oldSize: rold } = applyFileRename(db, stmt, perf, datasetId, relPath, relNewPath, st, snap.id);
+					fileId = rid;
+					oldSize = rold;
 				}
 			}
 
