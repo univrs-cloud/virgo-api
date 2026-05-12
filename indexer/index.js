@@ -166,7 +166,7 @@ async function run(_opts = {}) {
 				console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
 			}
 			try {
-				await runIndexerPass(includeDatasets, sessionWallT0, attempt);
+				await runIndexerPass(includeDatasets, sessionWallT0, attempt, lockPath);
 				return;
 			} catch (e) {
 				if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
@@ -184,7 +184,7 @@ async function run(_opts = {}) {
 	}
 }
 
-async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCount = 0) {
+async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCount = 0, lockPath = null) {
 	const pool = includeDatasets[0].split('/')[0];
 
 	const db = openDb();
@@ -255,6 +255,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			AND first_seen_snap_id IS NULL
 			AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
 		`),
+		setMeta: db.prepare(`
+			INSERT INTO meta(key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		`),
 	};
 
 	let inBulkMode = false;
@@ -276,6 +280,9 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			db.close();
 		} catch {
 			/* ignore */
+		}
+		if (lockPath) {
+			releaseLock(lockPath);
 		}
 		process.exit(sig === 'SIGTERM' ? 143 : 130);
 	};
@@ -353,6 +360,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 		enableBulkMode(db);
 		inBulkMode = true;
+
+		transaction(db, () => {
+			stmt.setMeta.run('last_activity_at', new Date().toISOString());
+		});
 
 		for (const d of filteredDatasets) {
 			const dsId = datasetIds[d.name];
@@ -456,6 +467,9 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 				if (snapIdx % 10 === 0) {
 					checkpoint(db);
+					transaction(db, () => {
+						stmt.setMeta.run('last_activity_at', new Date().toISOString());
+					});
 				}
 			}
 

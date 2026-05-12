@@ -640,6 +640,7 @@ function stats(db, opts = {}) {
 			(SELECT COUNT(*) FROM changes)       AS changes,
 			(SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted,
 			(SELECT value FROM meta WHERE key = 'last_run_at') AS last_run_at,
+			(SELECT value FROM meta WHERE key = 'last_activity_at') AS last_activity_at,
 			(SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
 	`).get();
 
@@ -656,7 +657,8 @@ function stats(db, opts = {}) {
 
 	if (!json) {
 		console.log('\n📊 ZFS Index Statistics\n');
-		console.log(`Last run: ${statsRow.last_run_at ?? 'null'}`);
+		console.log(`Last run (completed): ${statsRow.last_run_at ?? 'null'}`);
+		console.log(`Last activity: ${statsRow.last_activity_at ?? 'null'}`);
 		console.log(`DB size: ${formatSize(statsRow.db_bytes)}`);
 		console.log(`Datasets: ${statsRow.datasets}`);
 		console.log(`Snapshots: ${statsRow.snapshots} (${statsRow.indexed} indexed)`);
