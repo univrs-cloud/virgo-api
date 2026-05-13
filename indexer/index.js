@@ -695,6 +695,31 @@ function resolveRelPath(path, mountpoint) {
 }
 
 /**
+ * Patch the in-batch `fileByPath` map so it reflects DB mutations made by
+ * `applyFileRename`. The bulk lookup is taken once at batch start; if we
+ * don't sync it after each rename, later changes in the same batch can hit
+ * stale entries — e.g. a `victim` deleted by an earlier rename whose path
+ * is now referenced again, leading to FK constraint failures on
+ * `insertVersion(stale_id, ...)`.
+ *
+ * Semantics:
+ *   - victim deleted  → drop map[relNewPath] (the row it pointed to is gone)
+ *   - oldFile moved   → drop map[relOldPath], set map[relNewPath] = oldFile
+ *   - no oldFile      → set map[relNewPath] = the newly upserted row
+ */
+function syncMapForRename(fileByPath, relOldPath, relNewPath, oldFile, victim, resultFileId, newSize) {
+	if (victim && (!oldFile || victim.id !== oldFile.id)) {
+		fileByPath.delete(relNewPath);
+	}
+	if (oldFile) {
+		fileByPath.delete(relOldPath);
+		fileByPath.set(relNewPath, { ...oldFile, latestSize: newSize ?? oldFile.latestSize ?? null });
+	} else if (resultFileId) {
+		fileByPath.set(relNewPath, { id: resultFileId, latestSize: newSize ?? null });
+	}
+}
+
+/**
  * Apply a ZFS rename to the files table without creating a "deleted" tombstone.
  * Previously we marked the old path deleted and inserted a new row, which inflated
  * deleted-file counts and split version history across two file_ids.
@@ -866,8 +891,10 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
 					perf.sqlUpserts++;
 					if (fileRow) {
-						stmt.insertVersion.run(fileRow.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+						const newSize = sizeFromStat(st);
+						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
+						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
 					}
 				}
 			} else if (c.changeType === 'removed') {
@@ -878,16 +905,20 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				if (st) {
 					const fileRow = fileByPath.get(relPath);
 					if (fileRow) {
-						stmt.insertVersion.run(fileRow.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+						const newSize = sizeFromStat(st);
+						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
+						fileRow.latestSize = newSize;
 					}
 				}
 			} else if (c.changeType === 'renamed') {
 				const st = statMap.get(i);
 				if (st) {
+					const relNewPath = relNewPaths[i];
 					const oldFile = fileByPath.get(relPath) ?? null;
-					const victim = fileByPath.get(relNewPaths[i]) ?? null;
-					applyFileRename(stmt, perf, datasetId, relPath, relNewPaths[i], st, snap.id, oldFile, victim);
+					const victim = fileByPath.get(relNewPath) ?? null;
+					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
+					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, sizeFromStat(st));
 				}
 			}
 		}
@@ -928,6 +959,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 						newSize = sizeFromStat(st);
 						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
+						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
 					}
 				}
 			} else if (c.changeType === 'removed') {
@@ -947,6 +979,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 						newSize = sizeFromStat(st);
 						stmt.insertVersion.run(fileId, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
+						fileRow.latestSize = newSize;
 					}
 				}
 			} else if (c.changeType === 'renamed') {
@@ -957,6 +990,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
 					fileId = rid;
 					oldSize = rold;
+					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, newSize);
 				}
 			}
 
