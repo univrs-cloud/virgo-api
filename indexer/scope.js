@@ -24,11 +24,18 @@
  *                                       The rest of appdata (avatars, password
  *                                       backups, etc.) is kept.
  *
+ *    - `config/www/nextcloud/apps`    — Nextcloud's installed app bundles. PHP
+ *                                       source updated on every app upgrade,
+ *                                       not user content, not searchable.
+ *
  * Both lists are hardcoded. The user-facing toggle stays "enable/disable
  * indexing for this dataset" — no per-path config.
  */
 const NOISE_DIR_NAMES = new Set(['db', 'redis']);
-const NOISE_DIR_GLOBS = ['data/appdata_*/preview'];
+const NOISE_DIR_GLOBS = [
+	'data/appdata_*/preview',
+	'config/www/nextcloud/apps',
+];
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
