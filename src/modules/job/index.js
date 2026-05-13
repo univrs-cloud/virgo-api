@@ -5,7 +5,13 @@ const { QUEUE_NAMES } = require('../../queues');
 const EXCLUDED_FROM_MONITORING = ['job-jobs', 'weather-jobs'];
 
 class JobModule extends BaseModule {
-	#queues = QUEUE_NAMES.filter((name) => !EXCLUDED_FROM_MONITORING.includes(name));
+	#queues = QUEUE_NAMES.filter((name) => {
+		if (name.endsWith('-scheduled-jobs')) {
+			return false;
+		}
+		
+		return !EXCLUDED_FROM_MONITORING.includes(name);
+	});
 
 	constructor() {
 		super('job');

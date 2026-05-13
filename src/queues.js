@@ -15,7 +15,10 @@ const MODULES = [
 
 const getQueueName = (moduleName) => `${moduleName}-jobs`;
 
-const QUEUE_NAMES = MODULES.map(getQueueName);
+/** Cron / repeatable jobs only (`addJobSchedule`). Regular `addJob` stays on `getQueueName`. */
+const getScheduledQueueName = (moduleName) => `${moduleName}-scheduled-jobs`;
+
+const QUEUE_NAMES = MODULES.flatMap((module) => [getQueueName(module), getScheduledQueueName(module)]);
 
 let hasCleanedUp = false;
 
@@ -50,5 +53,6 @@ module.exports = {
 	MODULES,
 	QUEUE_NAMES,
 	getQueueName,
+	getScheduledQueueName,
 	cleanupQueues
 };

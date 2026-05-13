@@ -6,7 +6,7 @@ const eventEmitter = require('../utils/event_emitter');
 const { getIO } = require('../socket');
 const { isFromTrustedProxy } = require('../utils/trusted_proxy');
 const nlp = require('../utils/nlp');
-const { getQueueName } = require('../queues');
+const { getQueueName, getScheduledQueueName } = require('../queues');
 
 class BaseModule {
 	#name;
@@ -16,6 +16,8 @@ class BaseModule {
 	#state = {};
 	#queue;
 	#worker;
+	#scheduledQueue;
+	#scheduledWorker;
 	#plugins = [];
 
 	constructor(name) {
@@ -71,7 +73,7 @@ class BaseModule {
 
 	async addJobSchedule(name, pattern) {
 		try {
-			await this.#queue.upsertJobScheduler(
+			await this.#scheduledQueue.upsertJobScheduler(
 				name,
 				pattern,
 				{
@@ -143,18 +145,36 @@ class BaseModule {
 		throw new Error(`[${this.#name}] Unhandled job: ${job.name}`);
 	}
 
+	#wireWorkerEvents(worker) {
+		worker.on('completed', async (job, result) => {
+			if (job) {
+				await this.updateJobProgress(job, result);
+			}
+		});
+		worker.on('failed', async (job) => {
+			if (job) {
+				await this.updateJobProgress(job, ``);
+			}
+		});
+		worker.on('error', (error) => {
+			console.error(error);
+		});
+	}
+
 	#setupQueues() {
 		const connection = {
 			host: config.redis.host,
 			port: config.redis.port
 		};
+		const defaultOpts = {
+			removeOnComplete: 100,
+			removeOnFail: 100
+		};
+
 		const queueName = getQueueName(this.#name);
 		this.#queue = new Queue(queueName, {
 			connection,
-			defaultJobOptions: {
-				removeOnComplete: 100,
-				removeOnFail: 100
-			}
+			defaultJobOptions: defaultOpts
 		});
 		this.#worker = new Worker(
 			queueName,
@@ -163,19 +183,21 @@ class BaseModule {
 			},
 			{ connection }
 		);
-		this.#worker.on('completed', async (job, result) => {
-			if (job) {
-				await this.updateJobProgress(job, result);
-			}
+		this.#wireWorkerEvents(this.#worker);
+
+		const scheduledName = getScheduledQueueName(this.#name);
+		this.#scheduledQueue = new Queue(scheduledName, {
+			connection,
+			defaultJobOptions: defaultOpts
 		});
-		this.#worker.on('failed', async (job, error) => {
-			if (job) {
-				await this.updateJobProgress(job, ``);
-			}
-		});
-		this.#worker.on('error', (error) => {
-			console.error(error);
-		});
+		this.#scheduledWorker = new Worker(
+			scheduledName,
+			async (job) => {
+				return await this.#processJob(job);
+			},
+			{ connection }
+		);
+		this.#wireWorkerEvents(this.#scheduledWorker);
 	}
 
 	#loadPlugins() {
