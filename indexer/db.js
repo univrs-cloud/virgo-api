@@ -2,23 +2,22 @@
 
 const { DatabaseSync } = require('node:sqlite');
 const { existsSync } = require('fs');
-const { dirname } = require('path');
+const { dirname, join } = require('path');
 
-const INDEX_DB_PATH = '/messier/.config/index.db';
+const INDEX_DB_DIR = '/messier/.config';
+const INDEX_DB_NAME = 'index.db';
+const INDEX_DB_PATH = join(INDEX_DB_DIR, INDEX_DB_NAME);
 
 function openDb() {
-	const path = INDEX_DB_PATH;
-
-	const parent = dirname(path);
-	const root = dirname(parent);
+	const root = dirname(INDEX_DB_DIR);
 	if (!existsSync(root)) {
 		throw new Error(`Fatal: ${root} does not exist. Is the ZFS pool mounted?`);
 	}
-	if (!existsSync(parent)) {
-		throw new Error(`Fatal: ${parent} does not exist. Create it first: mkdir -p ${parent}`);
+	if (!existsSync(INDEX_DB_DIR)) {
+		throw new Error(`Fatal: ${INDEX_DB_DIR} does not exist. Create it first: mkdir -p ${INDEX_DB_DIR}`);
 	}
 
-	const db = new DatabaseSync(path);
+	const db = new DatabaseSync(INDEX_DB_PATH);
 
 	db.exec(`
 		PRAGMA journal_mode = WAL;
@@ -217,4 +216,4 @@ function disableBulkMode(db) {
 	checkpoint(db);
 }
 
-module.exports = { INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };
+module.exports = { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };

@@ -2,21 +2,25 @@
 
 const { execaSync, execa } = require('execa');
 const { createReadStream, promises: fsp, readdirSync, statSync, unlinkSync } = require('fs');
-const { tmpdir } = require('os');
 const { join } = require('path');
 const readline = require('readline');
 const { noiseGrepPattern } = require('./scope');
+const { INDEX_DB_DIR } = require('./db');
 
 // ─── Temp file lifecycle ────────────────────────────────────────────────────
 //
-// `diffSnapshots` spools `zfs diff` stdout to a temp file under os.tmpdir().
+// `diffSnapshots` spools `zfs diff` stdout to a temp file in the same
+// directory as the index database (so it lives on the ZFS pool with plenty
+// of room — a single diff can easily be 100+ MB and we don't want to risk
+// filling /tmp / tmpfs).
+//
 // We keep two safety nets in case the process exits before the generator's
 // `finally` runs:
 //
 //   1. Track every active temp path and unlink on the `exit` event. This
 //      covers normal completion, uncaught exceptions, and signal handlers
 //      that call process.exit().
-//   2. Sweep tmpdir() at indexer startup (`cleanupStaleTempFiles`) and
+//   2. Sweep the spool dir at indexer startup (`cleanupStaleTempFiles`) and
 //      delete any file matching our pattern whose owning PID is no longer
 //      alive. This catches SIGKILL / OOM / power loss / hard crashes where
 //      no JS exit hook gets a chance to run.
@@ -112,10 +116,9 @@ async function withSpoolProgress(promise, tmpPath, label) {
 }
 
 function cleanupStaleTempFiles() {
-	const dir = tmpdir();
 	let entries;
 	try {
-		entries = readdirSync(dir);
+		entries = readdirSync(INDEX_DB_DIR);
 	} catch {
 		return 0;
 	}
@@ -133,7 +136,7 @@ function cleanupStaleTempFiles() {
 			continue;
 		}
 		try {
-			unlinkSync(join(dir, name));
+			unlinkSync(join(INDEX_DB_DIR, name));
 			removed++;
 		} catch {
 			/* ignore */
@@ -235,7 +238,7 @@ function unescapeZfsPath(str) {
  */
 async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	installExitHandlers();
-	const tmpPath = join(tmpdir(), `${TEMP_PREFIX}${process.pid}-${++tempSeq}.tsv`);
+	const tmpPath = join(INDEX_DB_DIR, `${TEMP_PREFIX}${process.pid}-${++tempSeq}.tsv`);
 	activeTempFiles.add(tmpPath);
 
 	try {
