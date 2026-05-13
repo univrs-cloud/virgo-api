@@ -1,6 +1,7 @@
 'use strict';
 
 const { opendir, stat } = require('fs/promises');
+const { isNoisePath } = require('./scope');
 
 const BATCH_SIZE = 4096;
 const STAT_CONCURRENCY = 64;
@@ -85,6 +86,10 @@ async function walkSnapshot(snapshotPath, onBatch) {
 				const relPath = fullPath.startsWith(snapshotPath)
 					? fullPath.slice(snapshotPath.length) || '/'
 					: fullPath;
+
+				if (entry.isDirectory() && isNoisePath(relPath)) {
+					continue;
+				}
 
 				pending.push({
 					fullPath,

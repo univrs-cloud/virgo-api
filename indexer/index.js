@@ -2,7 +2,7 @@
 
 const DataService = require('../src/database/data_service');
 const { INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } = require('./db');
-const { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure } = require('./zfs');
+const { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles } = require('./zfs');
 const { walkSnapshot } = require('./walker');
 const { formatSize, formatDuration, acquireLock, releaseLock } = require('./utils');
 const { execaSync } = require('execa');
@@ -119,6 +119,11 @@ function normalizeIndexerDatasets(configuration) {
 }
 
 async function run(_opts = {}) {
+	const staleTemps = cleanupStaleTempFiles();
+	if (staleTemps > 0) {
+		console.log(`🧹 Cleaned up ${staleTemps} stale zfs-diff temp file(s) from previous run(s).`);
+	}
+
 	const configuration = await DataService.getConfiguration();
 	const includeDatasets = normalizeIndexerDatasets(configuration);
 
@@ -210,6 +215,25 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		getLatestSize: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? ORDER BY snapshot_id DESC LIMIT 1`),
 		getSizeAtSnapshot: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? AND snapshot_id = ? LIMIT 1`),
 		getSizeByPathAtSnapshot: db.prepare(`SELECT fv.size FROM file_versions fv JOIN files f ON f.id = fv.file_id WHERE f.dataset_id = ? AND f.path = ? AND fv.snapshot_id = ? LIMIT 1`),
+		// Bulk fetch (id, path, latest size) for every path in a batch via
+		// json_each so we don't do 4096 individual selects per flush. Used by
+		// the incremental and unified incremental+diff hot paths.
+		bulkLookupFiles: db.prepare(`
+			SELECT f.path, f.id,
+				(SELECT size FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1) AS latest_size
+			FROM json_each(?1) j
+			INNER JOIN files f ON f.path = j.value AND f.dataset_id = ?2
+		`),
+		// Same as bulkLookupFiles but additionally returns the size at a
+		// specific snapshot. Used by the standalone diff path where both
+		// snapshots are already indexed.
+		bulkLookupFilesWithSnap: db.prepare(`
+			SELECT f.path, f.id,
+				(SELECT size FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1) AS latest_size,
+				(SELECT size FROM file_versions WHERE file_id = f.id AND snapshot_id = ?3 LIMIT 1) AS size_at_snap
+			FROM json_each(?1) j
+			INNER JOIN files f ON f.path = j.value AND f.dataset_id = ?2
+		`),
 		markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
 		updateFileRename: db.prepare(`
 			UPDATE files SET path = ?, inode = ?, type = ?, last_seen_snap_id = ?, deleted_at_snap_id = NULL
@@ -609,7 +633,7 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 	let changeCount = 0;
 	let batch = [];
 
-	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
+	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
 		batch.push(c);
 		if (batch.length >= INCR_BATCH_SIZE) {
 			const n = batch.length;
@@ -641,7 +665,7 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 	let changeCount = 0;
 	let batch = [];
 
-	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name)) {
+	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
 		batch.push(c);
 		if (batch.length >= INCR_BATCH_SIZE) {
 			const n = batch.length;
@@ -675,17 +699,24 @@ function resolveRelPath(path, mountpoint) {
  * Previously we marked the old path deleted and inserted a new row, which inflated
  * deleted-file counts and split version history across two file_ids.
  *
+ * `oldFile` and `victim` should come from the batch's prefetched bulk lookup
+ * map (see flushUnifiedBatch / flushIncrementalBatch). Pass undefined if the
+ * caller doesn't know yet and we'll fall back to a direct select.
+ *
  * @returns {{ fileId: number | null, oldSize: number | null }}
  */
-function applyFileRename(db, stmt, perf, datasetId, relOldPath, relNewPath, st, snapId) {
+function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim) {
 	const type = typeFromStat(st);
 	const sz = sizeFromStat(st);
 	const mtime = Math.floor(st.mtimeMs / 1000);
 	const ctime = Math.floor(st.ctimeMs / 1000);
 	const mode = modeStr(st);
 
-	const oldFile = stmt.getFileByPath.get(datasetId, relOldPath);
-	perf.sqlSelects++;
+	if (oldFile === undefined) {
+		oldFile = stmt.getFileByPath.get(datasetId, relOldPath) ?? null;
+		perf.sqlSelects++;
+	}
+
 	if (!oldFile) {
 		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
 		perf.sqlUpserts++;
@@ -696,12 +727,12 @@ function applyFileRename(db, stmt, perf, datasetId, relOldPath, relNewPath, st, 
 		return { fileId: fileRow?.id ?? null, oldSize: null };
 	}
 
-	const oldSizeRow = stmt.getLatestSize.get(oldFile.id);
-	perf.sqlSelects++;
-	const oldSize = oldSizeRow?.size ?? null;
+	const oldSize = oldFile.latestSize ?? null;
 
-	const victim = stmt.getFileByPath.get(datasetId, relNewPath);
-	perf.sqlSelects++;
+	if (victim === undefined) {
+		victim = stmt.getFileByPath.get(datasetId, relNewPath) ?? null;
+		perf.sqlSelects++;
+	}
 	if (victim && victim.id !== oldFile.id) {
 		stmt.deleteChangesByFileId.run(victim.id);
 		stmt.deleteVersionsByFileId.run(victim.id);
@@ -749,6 +780,68 @@ async function statBatch(batch, mountpoint, snapPath) {
 	return map;
 }
 
+/**
+ * Resolve all (rel old, rel new) paths for a batch up front and return them
+ * along with the set of paths that need a DB lookup. We need to look up:
+ *  - the existing row for removed/modified/renamed sources (oldSize, fileId)
+ *  - the victim row at the rename target (so we can vacuum it cleanly)
+ */
+function resolveBatchPaths(batch, mountpoint) {
+	const relPaths = new Array(batch.length);
+	const relNewPaths = new Array(batch.length);
+	const lookup = new Set();
+	for (let i = 0; i < batch.length; i++) {
+		const c = batch[i];
+		const relPath = resolveRelPath(c.path, mountpoint);
+		relPaths[i] = relPath;
+		if (c.changeType !== 'added') {
+			lookup.add(relPath);
+		}
+		if (c.changeType === 'renamed') {
+			const relNewPath = resolveRelPath(c.newPath, mountpoint);
+			relNewPaths[i] = relNewPath;
+			lookup.add(relNewPath);
+		} else {
+			relNewPaths[i] = null;
+		}
+	}
+	return { relPaths, relNewPaths, lookup };
+}
+
+function bulkLoadFileMap(stmt, perf, datasetId, paths) {
+	if (!paths.size) {
+		return new Map();
+	}
+	const t = Date.now();
+	const rows = stmt.bulkLookupFiles.all(JSON.stringify([...paths]), datasetId);
+	perf.sqlSelects += rows.length;
+	perf.sqlMs += Date.now() - t;
+	const map = new Map();
+	for (const r of rows) {
+		map.set(r.path, { id: r.id, latestSize: r.latest_size ?? null });
+	}
+	return map;
+}
+
+function bulkLoadFileMapWithSnap(stmt, perf, datasetId, paths, snapId) {
+	if (!paths.size) {
+		return new Map();
+	}
+	const t = Date.now();
+	const rows = stmt.bulkLookupFilesWithSnap.all(JSON.stringify([...paths]), datasetId, snapId);
+	perf.sqlSelects += rows.length;
+	perf.sqlMs += Date.now() - t;
+	const map = new Map();
+	for (const r of rows) {
+		map.set(r.path, {
+			id: r.id,
+			latestSize: r.latest_size ?? null,
+			sizeAtSnap: r.size_at_snap ?? null,
+		});
+	}
+	return map;
+}
+
 // ─── Batch flush: incremental only ─────────────────────────────────────────
 
 async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
@@ -756,12 +849,15 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 	const statMap = await statBatch(batch, mountpoint, snapPath);
 	perf.statMs += Date.now() - t0;
 
+	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
+	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
+
 	const t = Date.now();
 	transaction(db, () => {
 		perf.sqlTxns++;
 		for (let i = 0; i < batch.length; i++) {
 			const c = batch[i];
-			const relPath = resolveRelPath(c.path, mountpoint);
+			const relPath = relPaths[i];
 
 			if (c.changeType === 'added') {
 				const st = statMap.get(i);
@@ -775,24 +871,23 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					}
 				}
 			} else if (c.changeType === 'removed') {
-				const fileRow = stmt.getFileByPath.get(datasetId, relPath);
-				perf.sqlSelects++;
+				const fileRow = fileByPath.get(relPath);
 				if (fileRow) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
 			} else if (c.changeType === 'modified') {
 				const st = statMap.get(i);
 				if (st) {
-					const fileRow = stmt.getFileByPath.get(datasetId, relPath);
-					perf.sqlSelects++;
+					const fileRow = fileByPath.get(relPath);
 					if (fileRow) {
 						stmt.insertVersion.run(fileRow.id, snap.id, sizeFromStat(st), Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
 					}
 				}
 			} else if (c.changeType === 'renamed') {
-				const relNewPath = resolveRelPath(c.newPath, mountpoint);
 				const st = statMap.get(i);
 				if (st) {
-					applyFileRename(db, stmt, perf, datasetId, relPath, relNewPath, st, snap.id);
+					const oldFile = fileByPath.get(relPath) ?? null;
+					const victim = fileByPath.get(relNewPaths[i]) ?? null;
+					applyFileRename(stmt, perf, datasetId, relPath, relNewPaths[i], st, snap.id, oldFile, victim);
 				}
 			}
 		}
@@ -807,13 +902,16 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 	const statMap = await statBatch(batch, mountpoint, snapPath);
 	perf.statMs += Date.now() - t0;
 
+	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
+	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
+
 	const t = Date.now();
 	transaction(db, () => {
 		perf.sqlTxns++;
 		for (let i = 0; i < batch.length; i++) {
 			const c = batch[i];
-			const relPath = resolveRelPath(c.path, mountpoint);
-			const relNewPath = c.changeType === 'renamed' ? resolveRelPath(c.newPath, mountpoint) : null;
+			const relPath = relPaths[i];
+			const relNewPath = relNewPaths[i];
 			const st = statMap.get(i) ?? null;
 
 			let fileId = null;
@@ -833,69 +931,36 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					}
 				}
 			} else if (c.changeType === 'removed') {
-				const fileRow = stmt.getFileByPath.get(datasetId, relPath);
-				perf.sqlSelects++;
+				const fileRow = fileByPath.get(relPath);
 				if (fileRow) {
 					fileId = fileRow.id;
-					oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
-					perf.sqlSelects++;
-					stmt.markDeleted.run(snap.id, fileRow.id);
+					oldSize = fileRow.latestSize;
+					stmt.markDeleted.run(snap.id, fileId);
 					perf.sqlUpdates++;
 				}
 			} else if (c.changeType === 'modified') {
 				if (st) {
-					const fileRow = stmt.getFileByPath.get(datasetId, relPath);
-					perf.sqlSelects++;
+					const fileRow = fileByPath.get(relPath);
 					if (fileRow) {
 						fileId = fileRow.id;
-						oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
-						perf.sqlSelects++;
+						oldSize = fileRow.latestSize;
 						newSize = sizeFromStat(st);
-						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+						stmt.insertVersion.run(fileId, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
 						perf.sqlInserts++;
 					}
 				}
 			} else if (c.changeType === 'renamed') {
 				if (st) {
 					newSize = sizeFromStat(st);
-					const { fileId: rid, oldSize: rold } = applyFileRename(db, stmt, perf, datasetId, relPath, relNewPath, st, snap.id);
+					const oldFile = fileByPath.get(relPath) ?? null;
+					const victim = fileByPath.get(relNewPath) ?? null;
+					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
 					fileId = rid;
 					oldSize = rold;
 				}
 			}
 
-			if (fileId === null || fileId === undefined) {
-				const row = stmt.getFileByPath.get(datasetId, relPath);
-				fileId = row?.id ?? null;
-				perf.sqlSelects++;
-			}
-
-			if (c.changeType === 'added' && fileId && (newSize === null || newSize === undefined)) {
-				newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
-				perf.sqlSelects++;
-				if (newSize === null || newSize === undefined) {
-					newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relPath, snap.id)?.size ?? null;
-					perf.sqlSelects++;
-				}
-			} else if (c.changeType === 'removed' && fileId && (oldSize === null || oldSize === undefined)) {
-				oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
-				perf.sqlSelects++;
-			} else if ((c.changeType === 'modified' || c.changeType === 'renamed') && fileId) {
-				if (oldSize === null || oldSize === undefined) {
-					oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
-					perf.sqlSelects++;
-				}
-				if (c.changeType === 'modified' && (newSize === null || newSize === undefined)) {
-					newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
-					perf.sqlSelects++;
-				}
-				if (c.changeType === 'renamed' && (newSize === null || newSize === undefined) && relNewPath !== null && relNewPath !== undefined) {
-					newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relNewPath, snap.id)?.size ?? null;
-					perf.sqlSelects++;
-				}
-			}
-
-			const delta = ((newSize !== null && newSize !== undefined) || (oldSize !== null && oldSize !== undefined)) ? (newSize ?? 0) - (oldSize ?? 0) : null;
+			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
 			stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, relNewPath, oldSize, newSize, delta);
 			perf.sqlInserts++;
 			perf.diffChanges++;
@@ -910,7 +975,7 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 	const changes = [];
 	let changeCount = 0;
 	const t0 = Date.now();
-	for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name)) {
+	for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
 		changes.push(change);
 		if (changes.length >= INCR_BATCH_SIZE) {
 			const chunk = changes.splice(0, INCR_BATCH_SIZE);
@@ -931,34 +996,50 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 }
 
 function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
+	const relPaths = new Array(changes.length);
+	const relNewPaths = new Array(changes.length);
+	const lookup = new Set();
+	for (let i = 0; i < changes.length; i++) {
+		const c = changes[i];
+		const relPath = resolveRelPath(c.path, mountpoint);
+		relPaths[i] = relPath;
+		lookup.add(relPath);
+		if (c.changeType === 'renamed' && c.newPath) {
+			const relNewPath = resolveRelPath(c.newPath, mountpoint);
+			relNewPaths[i] = relNewPath;
+			lookup.add(relNewPath);
+		} else {
+			relNewPaths[i] = null;
+		}
+	}
+
+	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
+
 	const t = Date.now();
 	transaction(db, () => {
 		perf.sqlTxns++;
-		for (const c of changes) {
-			const relPath = resolveRelPath(c.path, mountpoint);
-			const relNewPath = c.newPath ? resolveRelPath(c.newPath, mountpoint) : null;
+		for (let i = 0; i < changes.length; i++) {
+			const c = changes[i];
+			const relPath = relPaths[i];
+			const relNewPath = relNewPaths[i];
 
-			const fileRow = stmt.getFileByPath.get(datasetId, relPath);
-			let fileId = fileRow?.id ?? null;
-			perf.sqlSelects++;
+			const fileRow = fileByPath.get(relPath) ?? null;
+			const fileId = fileRow?.id ?? null;
 
-			let oldSize = null, newSize = null;
+			let oldSize = null;
+			let newSize = null;
 			if (c.changeType === 'removed') {
-				if (fileId) { oldSize = stmt.getLatestSize.get(fileId)?.size ?? null; perf.sqlSelects++; }
+				oldSize = fileRow?.latestSize ?? null;
 			} else if (c.changeType === 'added') {
-				if (fileId) { newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null; perf.sqlSelects++; }
-				if (newSize === null || newSize === undefined) { newSize = stmt.getSizeByPathAtSnapshot.get(datasetId, relPath, snap.id)?.size ?? null; perf.sqlSelects++; }
+				newSize = fileRow?.sizeAtSnap ?? null;
 			} else {
-				if (fileId) {
-					oldSize = stmt.getLatestSize.get(fileId)?.size ?? null;
-					newSize = stmt.getSizeAtSnapshot.get(fileId, snap.id)?.size ?? null;
-					perf.sqlSelects += 2;
-				}
+				oldSize = fileRow?.latestSize ?? null;
+				newSize = fileRow?.sizeAtSnap ?? null;
 			}
 
 			if (c.changeType === 'removed' && fileId) { stmt.markDeleted.run(snap.id, fileId); perf.sqlUpdates++; }
 
-			const delta = ((newSize !== null && newSize !== undefined) || (oldSize !== null && oldSize !== undefined)) ? (newSize ?? 0) - (oldSize ?? 0) : null;
+			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
 			stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, c.changeType === 'renamed' ? relNewPath : null, oldSize, newSize, delta);
 			perf.sqlInserts++;
 			perf.diffChanges++;
