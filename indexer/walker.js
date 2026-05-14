@@ -6,13 +6,52 @@ const { isNoisePath } = require('./scope');
 const BATCH_SIZE = 4096;
 const STAT_CONCURRENCY = 64;
 
+// If a flush's stat() failure rate goes wholesale (>=50% of >=32 entries), it
+// means the snapshot mount has gone away mid-crawl. Abort instead of silently
+// dropping batches of files.
+const STAT_FAILURE_ABORT_RATIO = 0.5;
+const STAT_FAILURE_MIN_SAMPLE = 32;
+
+function makeMountError(snapshotPath, detail) {
+	const e = new Error(`Snapshot mount unreadable for ${snapshotPath}: ${detail}`);
+	e.code = 'SNAPSHOT_STAT_FAILED';
+	return e;
+}
+
+/**
+ * Prime the snapshot's automount before we hit it with a parallel `opendir`
+ * salvo. One stat, 250 ms pause, one retry. Identical logic to the
+ * incremental-path primer; deliberately not de-duplicated to keep the
+ * walker self-contained (the indexer's primer lives in index.js where it
+ * has access to `safeStatAsync`).
+ */
+async function primeMount(snapshotPath) {
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await stat(snapshotPath);
+			return;
+		} catch {
+			if (attempt === 0) {
+				await new Promise(r => setTimeout(r, 250));
+			}
+		}
+	}
+	throw makeMountError(snapshotPath, 'root stat() failed twice; .zfs automount likely not ready.');
+}
+
 /**
  * Depth-first crawl of a snapshot mount. Runs entirely on the main thread so we
  * avoid worker <-> main IPC and lock-free ring races that were wedging crawls on Pi.
  *
  * Stats are performed asynchronously in batches to avoid blocking the event loop.
+ *
+ * Returns `{ total, statFailures, skippedDirs }` so the caller can surface
+ * silent-drop counts in the run summary. Throws `SNAPSHOT_STAT_FAILED` if the
+ * mount becomes unreadable wholesale (either at start or mid-crawl).
  */
 async function walkSnapshot(snapshotPath, onBatch) {
+	await primeMount(snapshotPath);
+
 	const dirs = [snapshotPath];
 	let pending = [];
 	let total = 0;
@@ -21,10 +60,12 @@ async function walkSnapshot(snapshotPath, onBatch) {
 
 	async function statBatch(entries) {
 		const results = new Array(entries.length);
+		let localFailures = 0;
 		for (let i = 0; i < entries.length; i += STAT_CONCURRENCY) {
 			const slice = entries.slice(i, i + STAT_CONCURRENCY);
 			const stats = await Promise.all(slice.map(e =>
 				stat(e.fullPath).catch(() => {
+					localFailures++;
 					statFailures++;
 					return null;
 				})
@@ -33,7 +74,7 @@ async function walkSnapshot(snapshotPath, onBatch) {
 				results[i + j] = stats[j];
 			}
 		}
-		return results;
+		return { results, localFailures };
 	}
 
 	async function flush() {
@@ -42,11 +83,17 @@ async function walkSnapshot(snapshotPath, onBatch) {
 		}
 		const chunk = pending.splice(0, pending.length);
 
-		const stats = await statBatch(chunk);
+		const { results, localFailures } = await statBatch(chunk);
+		if (chunk.length >= STAT_FAILURE_MIN_SAMPLE && localFailures / chunk.length >= STAT_FAILURE_ABORT_RATIO) {
+			throw makeMountError(
+				snapshotPath,
+				`${localFailures}/${chunk.length} stat() calls failed mid-crawl (${(localFailures / chunk.length * 100).toFixed(0)}%). Mount likely went away.`
+			);
+		}
 		const batch = [];
 		for (let i = 0; i < chunk.length; i++) {
 			const e = chunk[i];
-			const st = stats[i];
+			const st = results[i];
 			if (!st) {
 				continue;
 			}
@@ -103,13 +150,22 @@ async function walkSnapshot(snapshotPath, onBatch) {
 					childDirs.push(fullPath);
 				}
 
-				if (pending.length >= BATCH_SIZE) await flush();
+				if (pending.length >= BATCH_SIZE) {
+					await flush();
+				}
 			}
 			for (let i = childDirs.length - 1; i >= 0; i--) {
 				dirs.push(childDirs[i]);
 			}
-		} catch {
-			skippedDirs++;
+		} catch (err) {
+			// Permission denied / file disappeared mid-iteration are normal-ish.
+			// EIO / ENXIO / ENOENT at the snapshot root would have been caught
+			// by primeMount already; here we only swallow per-directory failures.
+			if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOENT' || err.code === 'ESTALE') {
+				skippedDirs++;
+			} else {
+				throw err;
+			}
 		}
 	}
 
@@ -122,7 +178,7 @@ async function walkSnapshot(snapshotPath, onBatch) {
 		console.warn(`    ⚠  ${statFailures} file${statFailures === 1 ? '' : 's'} skipped (stat failed)`);
 	}
 
-	return total;
+	return { total, statFailures, skippedDirs };
 }
 
 module.exports = { walkSnapshot };

@@ -26,21 +26,94 @@ async function safeStatAsync(path) {
 	}
 }
 
+/**
+ * Stat each entry's `fullPath`. Returns an array of stat results (null on
+ * failure) and a count of failures, so callers can decide whether to abort
+ * the whole snapshot (wholesale stat failure usually means the ZFS snapshot
+ * automount didn't take and EVERY path will fail).
+ */
 async function batchStat(entries, concurrency = 64) {
 	const results = new Array(entries.length);
+	let failures = 0;
 	for (let i = 0; i < entries.length; i += concurrency) {
 		const slice = entries.slice(i, i + concurrency);
 		const stats = await Promise.all(slice.map(e => safeStatAsync(e.fullPath)));
 		for (let j = 0; j < slice.length; j++) {
-			results[i + j] = stats[j];
+			const s = stats[j];
+			results[i + j] = s;
+			if (!s) {
+				failures++;
+			}
 		}
 	}
-	return results;
+	return { results, failures };
 }
 
 function restartIndexerFromBeginning(message) {
 	const e = new Error(message);
 	e.code = 'INDEXER_RESTART_FROM_BEGINNING';
+	throw e;
+}
+
+/**
+ * A snapshot mount that should be readable isn't. Almost always the ZFS
+ * `.zfs/snapshot/<name>` automount didn't take. Treated like a zfs-diff
+ * failure by the snapshot loop: cleanup partial work + restart from the
+ * beginning so retention/automount races sort themselves out.
+ */
+function isSnapshotStatFailure(e) {
+	return Boolean(e && e.code === 'SNAPSHOT_STAT_FAILED');
+}
+
+function makeSnapshotStatError(snap, snapPath, failures, total) {
+	const ratio = total ? (failures / total) : 1;
+	const msg = total
+		? `Snapshot mount unreadable for ${snap.full_name}: ${failures}/${total} stat() calls failed (${(ratio * 100).toFixed(0)}%). Path=${snapPath}.`
+		: `Snapshot mount unreadable for ${snap.full_name}. Path=${snapPath}.`;
+	const e = new Error(msg);
+	e.code = 'SNAPSHOT_STAT_FAILED';
+	return e;
+}
+
+/**
+ * Single error-handling path for all snapshot processing.
+ *
+ *   - Known recoverable failures (zfs diff died, snapshot mount unreadable):
+ *     log the cause, cleanup partial rows for the snapshot, ask the run loop
+ *     to restart from the beginning so retention/automount races settle.
+ *   - Anything else (FK violation, JS exception, etc.): still cleanup the
+ *     partial snapshot so we don't leave orphan rows behind, then rethrow.
+ *     The outer process exits with a non-zero code; on the next run we'll
+ *     re-attempt the failed snapshot cleanly.
+ */
+function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
+	const recoverable = isZfsDiffFailure(e) || isSnapshotStatFailure(e);
+	const transition = prevSnap ? `${prevSnap.name} → ${snap.name}` : snap.name;
+	if (isZfsDiffFailure(e)) {
+		console.warn(`  ⚠  zfs diff failed (${transition}): ${e.message}`);
+	} else if (isSnapshotStatFailure(e)) {
+		console.warn(`  ⚠  ${e.message}`);
+	} else {
+		console.warn(`  ⚠  Unexpected error processing ${transition}: ${e.message}`);
+	}
+	if (perf && Array.isArray(perf.failedSnapshots)) {
+		perf.failedSnapshots.push({
+			name: snap.full_name ?? snap.name,
+			reason: e.code ?? 'UNEXPECTED',
+			message: e.message,
+		});
+	}
+	console.log('  🧹 Cleaning up partial index/diff rows for this snapshot…');
+	try {
+		cleanupPartialDiffWork(db, stmt, snap.id, datasetId, mode);
+	} catch (cleanupErr) {
+		console.warn(`  ⚠  Cleanup also failed: ${cleanupErr.message}`);
+	}
+	if (recoverable) {
+		restartIndexerFromBeginning(
+			`${e.code} on ${snap.name}; restarting from beginning so retention/deleted snapshots are re-discovered.`
+		);
+	}
 	throw e;
 }
 
@@ -199,6 +272,8 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		diffsDone: 0, filesCrawled: 0, crawlMs: 0, diffMs: 0,
 		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
 		diffChanges: 0, statMs: 0,
+		statFailures: 0, orphanedChanges: 0,
+		failedSnapshots: [],
 	};
 
 	// ── Prepared statements ──
@@ -416,15 +491,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 						try {
 							await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
 						} catch (e) {
-							if (!isZfsDiffFailure(e)) {
-								throw e;
-							}
-							console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
-							console.log('  🧹 Cleaning up partial index/diff rows for this snapshot…');
-							cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'incremental');
-							restartIndexerFromBeginning(
-								`zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
-							);
+							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
 						}
 						perf.crawlMs += Date.now() - t;
 						perf.snapsIncremental++;
@@ -435,24 +502,20 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 						try {
 							await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
 						} catch (e) {
-							if (!isZfsDiffFailure(e)) {
-								throw e;
-							}
-							console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
-							console.log('  🧹 Cleaning up partial index rows for this snapshot…');
-							cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'incremental');
-							restartIndexerFromBeginning(
-								`zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
-							);
+							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
 						}
 						perf.crawlMs += Date.now() - t;
 						perf.snapsIncremental++;
 					} else {
 						const t = Date.now();
-						const count = await doCrawl(db, stmt, perf, snap.id, dsId, snapPath, snap.full_name);
+						try {
+							const count = await doCrawl(db, stmt, perf, snap.id, dsId, snapPath, snap.full_name);
+							perf.filesCrawled += count;
+						} catch (e) {
+							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
+						}
 						perf.crawlMs += Date.now() - t;
 						perf.snapsCrawled++;
-						perf.filesCrawled += count;
 					}
 
 					stmt.markIndexed.run(Date.now() / 1000 | 0, snap.id);
@@ -470,15 +533,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 						try {
 							await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
 						} catch (e) {
-							if (!isZfsDiffFailure(e)) {
-								throw e;
-							}
-							console.warn(`  ⚠  zfs diff failed (${prevSnap.name} → ${snap.name}): ${e.message}`);
-							console.log('  🧹 Cleaning up partial change rows for this snapshot…');
-							cleanupPartialDiffWork(db, stmt, snap.id, dsId, 'changes_only');
-							restartIndexerFromBeginning(
-								`zfs diff failed; restarting from beginning so retention/deleted snapshots are re-discovered.`
-							);
+							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'changes_only');
 						}
 						perf.diffMs += Date.now() - t;
 						perf.diffsDone++;
@@ -510,10 +565,11 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 		const lastRunAt = new Date().toISOString();
 		transaction(db, () => {
-			db.prepare(`
-				INSERT INTO meta(key, value) VALUES ('last_run_at', ?)
-				ON CONFLICT(key) DO UPDATE SET value = excluded.value
-			`).run(lastRunAt);
+			stmt.setMeta.run('last_run_at', lastRunAt);
+			stmt.setMeta.run('last_run_orphan_changes', String(perf.orphanedChanges));
+			stmt.setMeta.run('last_run_stat_failures', String(perf.statFailures));
+			stmt.setMeta.run('last_run_restart_count', String(restartCount));
+			stmt.setMeta.run('last_run_failed_snapshots', JSON.stringify(perf.failedSnapshots));
 		});
 
 		console.log('\n✅ Indexing complete.');
@@ -555,7 +611,7 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 	let count = 0;
 	const t0 = Date.now();
 
-	await walkSnapshot(snapPath, (batch) => {
+	const result = await walkSnapshot(snapPath, (batch) => {
 		if (batch === null) {
 			return;
 		}
@@ -577,10 +633,16 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 		logBatchProgress('entries', batch.length, count, t0);
 	});
 
+	perf.statFailures += result.statFailures;
+	perf.crawlSkippedDirs = (perf.crawlSkippedDirs ?? 0) + result.skippedDirs;
+
 	if (count && process.stdout.isTTY) {
 		endProgressLine();
 	}
 	console.log(`    Done: ${count.toLocaleString()} entries in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
+	if (result.statFailures > 0 || result.skippedDirs > 0) {
+		console.log(`    ⚠  ${result.statFailures.toLocaleString()} stat failure(s), ${result.skippedDirs.toLocaleString()} dir(s) skipped during crawl.`);
+	}
 	return count;
 }
 
@@ -588,6 +650,15 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 
 const INCR_BATCH_SIZE = 4096;
 const STAT_CONCURRENCY = 64;
+
+// If more than this fraction of stat() calls in a batch return null (and the
+// sample is at least STAT_FAILURE_MIN_SAMPLE entries), treat it as a wholesale
+// snapshot-mount failure and abort the snapshot. The threshold is high because
+// some real changes are legitimately ENOENT on the snapshot mount (file was
+// deleted between zfs diff and our stat) — but losing >50% of a non-trivial
+// batch is unambiguously a mount problem, not normal churn.
+const STAT_FAILURE_ABORT_RATIO = 0.5;
+const STAT_FAILURE_MIN_SAMPLE = 32;
 
 function sizeFromStat(st) {
 	return st.isDirectory() ? 0 : st.size;
@@ -624,11 +695,39 @@ function endProgressLine() {
 	}
 }
 
+/**
+ * Touch the snapshot's automount root before we start a batch loop.
+ *
+ * ZFS auto-mounts snapshots lazily on first access to
+ * `<dataset>/.zfs/snapshot/<name>`. Without priming, our first big parallel
+ * `stat()` salvo can race the kernel and every call returns ENOENT,
+ * silently producing orphan change rows for the whole snapshot.
+ *
+ * Strategy: one stat, one short sleep, one retry. If it's still unreadable,
+ * abort the snapshot via `SNAPSHOT_STAT_FAILED` so the snapshot loop catches
+ * it, runs `cleanupPartialDiffWork`, and we restart from the beginning.
+ */
+async function primeSnapshotMount(snap, snapPath) {
+	let st = await safeStatAsync(snapPath);
+	if (st) {
+		return;
+	}
+	await new Promise(r => setTimeout(r, 250));
+	st = await safeStatAsync(snapPath);
+	if (st) {
+		return;
+	}
+	throw makeSnapshotStatError(snap, snapPath, 1, 1);
+}
+
 // ─── Incremental (standalone, no changes table) ────────────────────────────
 
 async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
 	console.log(`  ⚡ Incremental ${snap.name} (from ${prevSnap.name})...`);
+	await primeSnapshotMount(snap, snapPath);
 	const t0 = Date.now();
+	const orphans0 = perf.orphanedChanges;
+	const statFails0 = perf.statFailures;
 
 	let changeCount = 0;
 	let batch = [];
@@ -654,13 +753,17 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 		endProgressLine();
 	}
 	console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
+	reportSnapshotAnomalies(perf, orphans0, statFails0);
 }
 
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
 
 async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
 	console.log(`  ⚡ Incremental+diff ${snap.name} (from ${prevSnap.name})...`);
+	await primeSnapshotMount(snap, snapPath);
 	const t0 = Date.now();
+	const orphans0 = perf.orphanedChanges;
+	const statFails0 = perf.statFailures;
 
 	let changeCount = 0;
 	let batch = [];
@@ -686,6 +789,18 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 		endProgressLine();
 	}
 	console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
+	reportSnapshotAnomalies(perf, orphans0, statFails0);
+}
+
+function reportSnapshotAnomalies(perf, orphans0, statFails0) {
+	const orphans = perf.orphanedChanges - orphans0;
+	const statFails = perf.statFailures - statFails0;
+	if (orphans > 0) {
+		console.log(`    ⚠  ${orphans.toLocaleString()} change event(s) skipped (no matching file row) — usually a path-normalisation or earlier-snapshot failure.`);
+	}
+	if (statFails > 0) {
+		console.log(`    ⚠  ${statFails.toLocaleString()} stat() failure(s) on snapshot mount — file may have been removed between zfs-diff and stat.`);
+	}
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
@@ -797,12 +912,12 @@ async function statBatch(batch, mountpoint, snapPath) {
 		entries.push({ idx: i, fullPath: targetPath });
 	}
 
-	const stats = await batchStat(entries, STAT_CONCURRENCY);
+	const { results, failures } = await batchStat(entries, STAT_CONCURRENCY);
 	const map = new Map();
 	for (let j = 0; j < entries.length; j++) {
-		map.set(entries[j].idx, stats[j]);
+		map.set(entries[j].idx, results[j]);
 	}
-	return map;
+	return { map, statTotal: entries.length, statFailures: failures };
 }
 
 /**
@@ -871,8 +986,12 @@ function bulkLoadFileMapWithSnap(stmt, perf, datasetId, paths, snapId) {
 
 async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
 	const t0 = Date.now();
-	const statMap = await statBatch(batch, mountpoint, snapPath);
+	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
 	perf.statMs += Date.now() - t0;
+	perf.statFailures += statFailures;
+	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
+		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
+	}
 
 	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
 	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
@@ -930,8 +1049,12 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 
 async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
 	const t0 = Date.now();
-	const statMap = await statBatch(batch, mountpoint, snapPath);
+	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
 	perf.statMs += Date.now() - t0;
+	perf.statFailures += statFailures;
+	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
+		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
+	}
 
 	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
 	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
@@ -992,6 +1115,11 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					oldSize = rold;
 					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, newSize);
 				}
+			}
+
+			if (fileId === null) {
+				perf.orphanedChanges++;
+				continue;
 			}
 
 			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
@@ -1073,6 +1201,11 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
 			if (c.changeType === 'removed' && fileId) { stmt.markDeleted.run(snap.id, fileId); perf.sqlUpdates++; }
 
+			if (fileId === null) {
+				perf.orphanedChanges++;
+				continue;
+			}
+
 			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
 			stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, c.changeType === 'renamed' ? relNewPath : null, oldSize, newSize, delta);
 			perf.sqlInserts++;
@@ -1084,10 +1217,29 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
 // ─── Stats ──────────────────────────────────────────────────────────────────
 
+/**
+ * Returns a `{ added, modified, renamed, removed, unknown }` counter object
+ * pulled from `changes.change_type`. Missing types are filled with 0 so the
+ * shape is stable across runs (handy for diffing or JSON consumers).
+ */
+function changeTypeBreakdown(db) {
+	const counts = { added: 0, modified: 0, renamed: 0, removed: 0, unknown: 0 };
+	const rows = db.prepare('SELECT change_type, COUNT(*) AS n FROM changes GROUP BY change_type').all();
+	for (const r of rows) {
+		if (Object.prototype.hasOwnProperty.call(counts, r.change_type)) {
+			counts[r.change_type] = r.n;
+		} else {
+			counts.unknown += r.n;
+		}
+	}
+	return counts;
+}
+
 function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	const totalMs =
 		(sessionWallT0 !== null && sessionWallT0 !== undefined) ? Date.now() - sessionWallT0 : Date.now() - perf.t0;
 	const stats = db.prepare(`SELECT (SELECT COUNT(*) FROM datasets) AS datasets, (SELECT COUNT(*) FROM snapshots) AS snapshots, (SELECT COUNT(*) FROM files) AS files, (SELECT COUNT(*) FROM file_versions) AS versions, (SELECT COUNT(*) FROM changes) AS changes, (SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted`).get();
+	const changeBreakdown = changeTypeBreakdown(db);
 
 	const pgSz = Object.values(db.prepare('SELECT * FROM pragma_page_size()').get())[0];
 	const pgCount = Object.values(db.prepare('SELECT * FROM pragma_page_count()').get())[0];
@@ -1101,7 +1253,29 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	console.log(`Unique files: ${stats.files.toLocaleString()}`);
 	console.log(`File versions: ${stats.versions.toLocaleString()}`);
 	console.log(`Change events: ${stats.changes.toLocaleString()}`);
+	console.log(`  added:    ${changeBreakdown.added.toLocaleString()}`);
+	console.log(`  modified: ${changeBreakdown.modified.toLocaleString()}`);
+	console.log(`  renamed:  ${changeBreakdown.renamed.toLocaleString()}`);
+	console.log(`  removed:  ${changeBreakdown.removed.toLocaleString()}`);
+	if (changeBreakdown.unknown > 0) {
+		console.log(`  unknown:  ${changeBreakdown.unknown.toLocaleString()}`);
+	}
 	console.log(`Deleted files: ${stats.deleted.toLocaleString()}`);
+
+	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0;
+	if (anyFailures) {
+		console.log('\n⚠  Failures (this run):');
+		console.log(`Orphan changes skipped: ${perf.orphanedChanges.toLocaleString()}`);
+		console.log(`Stat failures:          ${perf.statFailures.toLocaleString()}`);
+		console.log(`Restarts:               ${restartCount}`);
+		console.log(`Failed snapshots:       ${perf.failedSnapshots.length}`);
+		for (const f of perf.failedSnapshots.slice(0, 5)) {
+			console.log(`  • ${f.name} (${f.reason})`);
+		}
+		if (perf.failedSnapshots.length > 5) {
+			console.log(`  …and ${perf.failedSnapshots.length - 5} more`);
+		}
+	}
 
 	console.log('\n💾 SQLite:');
 	console.log(`DB size: ${formatSize(pgSz * pgCount)}`);
@@ -1148,4 +1322,4 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	}
 }
 
-module.exports = { run };
+module.exports = { run, changeTypeBreakdown };

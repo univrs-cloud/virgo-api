@@ -2,6 +2,7 @@
 
 const { transaction } = require('./db');
 const { formatSize } = require('./utils');
+const { changeTypeBreakdown } = require('./index');
 
 // ─── Dataset scope (opts.dataset / opts.datasets) ───────────────────────────
 // Each root matches that ZFS dataset name or any child (messier/apps → messier/apps/foo).
@@ -641,6 +642,10 @@ function stats(db, opts = {}) {
 			(SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted,
 			(SELECT value FROM meta WHERE key = 'last_run_at') AS last_run_at,
 			(SELECT value FROM meta WHERE key = 'last_activity_at') AS last_activity_at,
+			(SELECT value FROM meta WHERE key = 'last_run_orphan_changes') AS last_run_orphan_changes,
+			(SELECT value FROM meta WHERE key = 'last_run_stat_failures') AS last_run_stat_failures,
+			(SELECT value FROM meta WHERE key = 'last_run_restart_count') AS last_run_restart_count,
+			(SELECT value FROM meta WHERE key = 'last_run_failed_snapshots') AS last_run_failed_snapshots,
 			(SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
 	`).get();
 
@@ -653,7 +658,26 @@ function stats(db, opts = {}) {
 		LIMIT 10
 	`).all();
 
-	const result = { ...statsRow, top_datasets: topDatasets };
+	const changeTypes = changeTypeBreakdown(db);
+
+	const lastRun = {
+		orphan_changes: Number(statsRow.last_run_orphan_changes ?? 0),
+		stat_failures:  Number(statsRow.last_run_stat_failures  ?? 0),
+		restart_count:  Number(statsRow.last_run_restart_count  ?? 0),
+		failed_snapshots: parseFailedSnapshots(statsRow.last_run_failed_snapshots),
+	};
+
+	const result = {
+		...statsRow,
+		change_types: changeTypes,
+		last_run: lastRun,
+		top_datasets: topDatasets,
+	};
+	// Don't leak the raw JSON strings — only the parsed `last_run` object.
+	delete result.last_run_orphan_changes;
+	delete result.last_run_stat_failures;
+	delete result.last_run_restart_count;
+	delete result.last_run_failed_snapshots;
 
 	if (!json) {
 		console.log('\n📊 ZFS Index Statistics\n');
@@ -665,7 +689,30 @@ function stats(db, opts = {}) {
 		console.log(`Unique files: ${statsRow.files.toLocaleString()}`);
 		console.log(`File versions: ${statsRow.versions.toLocaleString()}`);
 		console.log(`Change events: ${statsRow.changes.toLocaleString()}`);
+		console.log(`  added:    ${changeTypes.added.toLocaleString()}`);
+		console.log(`  modified: ${changeTypes.modified.toLocaleString()}`);
+		console.log(`  renamed:  ${changeTypes.renamed.toLocaleString()}`);
+		console.log(`  removed:  ${changeTypes.removed.toLocaleString()}`);
+		if (changeTypes.unknown > 0) {
+			console.log(`  unknown:  ${changeTypes.unknown.toLocaleString()}`);
+		}
 		console.log(`Deleted files: ${statsRow.deleted.toLocaleString()}`);
+
+		const anyFailures = lastRun.orphan_changes > 0 || lastRun.stat_failures > 0 || lastRun.failed_snapshots.length > 0 || lastRun.restart_count > 0;
+		if (anyFailures) {
+			console.log('\n⚠  Last run failures:');
+			console.log(`  Orphan changes skipped: ${lastRun.orphan_changes.toLocaleString()}`);
+			console.log(`  Stat failures:          ${lastRun.stat_failures.toLocaleString()}`);
+			console.log(`  Restarts:               ${lastRun.restart_count}`);
+			console.log(`  Failed snapshots:       ${lastRun.failed_snapshots.length}`);
+			for (const f of lastRun.failed_snapshots.slice(0, 5)) {
+				console.log(`    • ${f.name} (${f.reason})`);
+			}
+			if (lastRun.failed_snapshots.length > 5) {
+				console.log(`    …and ${lastRun.failed_snapshots.length - 5} more`);
+			}
+		}
+
 		console.log('\nTop datasets by file count:');
 		for (const d of topDatasets) {
 			console.log(`     ${d.name.padEnd(30)} ${d.file_count.toLocaleString()} files / ${d.snap_count} snapshots`);
@@ -673,6 +720,18 @@ function stats(db, opts = {}) {
 	}
 
 	return result;
+}
+
+function parseFailedSnapshots(raw) {
+	if (!raw) {
+		return [];
+	}
+	try {
+		const v = JSON.parse(raw);
+		return Array.isArray(v) ? v : [];
+	} catch {
+		return [];
+	}
 }
 
 module.exports = {
