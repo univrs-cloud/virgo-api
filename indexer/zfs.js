@@ -209,14 +209,61 @@ function discoverAll({ pool = null, dataset = null } = {}) {
 }
 
 /**
- * Unescape octal sequences produced by `zfs diff -FHt`.
- * e.g. \040 → space, \011 → tab
+ * Unescape octal byte sequences produced by `zfs diff -FHt` (OpenZFS ≥ 2.4).
+ *
+ * Two things to know:
+ *
+ *  1. Modern OpenZFS uses **4-digit** octal escapes (`\0NNN`), not the 3-digit
+ *     `\NNN` form. The leading `0` is part of the escape — `\0040` = byte 32
+ *     (space). We only target this format; older 3-digit ZFS isn't supported.
+ *
+ *  2. Each escape represents one *byte*, not one Unicode code point. A
+ *     filename like `Plângere` (UTF-8 bytes `P l C3 A2 n g e r e`) appears in
+ *     the diff as `Pl\0303\0242ngere`. A naive
+ *     `String.fromCharCode(parseInt(oct,8))` produces the JS string
+ *     `Pl\u00C3\u00A2ngere`, and Node's `fs` APIs re-encode that as UTF-8 → 4
+ *     bytes (`C3 83 C2 A2`), which does *not* match the real on-disk filename
+ *     → `ENOENT`. The walker indexes the same file correctly via
+ *     `dirent.name`, so we also miss the `fileByPath` lookup → orphan change
+ *     rows.
+ *
+ * Strategy: accumulate raw bytes (literal ASCII + decoded `\0NNN` escapes)
+ * into a buffer, then UTF-8 decode the buffer once at the end.
  */
 function unescapeZfsPath(str) {
 	if (!str || !str.includes('\\')) {
 		return str;
 	}
-	return str.replace(/\\([0-7]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+	const len = str.length;
+	const bytes = Buffer.allocUnsafe(len);
+	let bi = 0;
+	for (let i = 0; i < len; i++) {
+		const code = str.charCodeAt(i);
+		if (code === 0x5c /* \ */ && i + 4 < len) {
+			const a = str.charCodeAt(i + 1);
+			const b = str.charCodeAt(i + 2);
+			const c = str.charCodeAt(i + 3);
+			const d = str.charCodeAt(i + 4);
+			if (a === 0x30 && b >= 0x30 && b <= 0x37 && c >= 0x30 && c <= 0x37 && d >= 0x30 && d <= 0x37) {
+				bytes[bi++] = ((b - 0x30) << 6) | ((c - 0x30) << 3) | (d - 0x30);
+				i += 4;
+				continue;
+			}
+		}
+		if (code < 0x80) {
+			bytes[bi++] = code;
+		} else {
+			// Should not occur in zfs-diff output (all non-ASCII bytes are
+			// escaped) but be tolerant: re-encode the codepoint as UTF-8.
+			const enc = Buffer.from(str[i], 'utf8');
+			if (bi + enc.length > bytes.length) {
+				// Extremely unlikely (would require ≥2× expansion). Fallback path.
+				return Buffer.concat([bytes.slice(0, bi), enc, Buffer.from(str.slice(i + 1), 'utf8')]).toString('utf8');
+			}
+			for (let k = 0; k < enc.length; k++) bytes[bi++] = enc[k];
+		}
+	}
+	return bytes.slice(0, bi).toString('utf8');
 }
 
 /**

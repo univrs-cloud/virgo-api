@@ -273,6 +273,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
 		diffChanges: 0, statMs: 0,
 		statFailures: 0, orphanedChanges: 0,
+		orphanSamples: [],
 		failedSnapshots: [],
 	};
 
@@ -792,15 +793,40 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 	reportSnapshotAnomalies(perf, orphans0, statFails0);
 }
 
+// Up to this many orphan paths get captured per snapshot for diagnostic
+// printing. We don't keep them globally — each `reportSnapshotAnomalies` call
+// resets the array so we get fresh samples per snapshot.
+const ORPHAN_SAMPLE_LIMIT = 5;
+
+function sampleOrphan(perf, changeType, relPath, relNewPath, statFailed, source) {
+	if (!perf.orphanSamples || perf.orphanSamples.length >= ORPHAN_SAMPLE_LIMIT) {
+		return;
+	}
+	perf.orphanSamples.push({
+		type: changeType,
+		path: relNewPath ? `${relPath} → ${relNewPath}` : relPath,
+		cause: statFailed ? 'stat-failed' : 'no-file-row',
+		source,
+	});
+}
+
 function reportSnapshotAnomalies(perf, orphans0, statFails0) {
 	const orphans = perf.orphanedChanges - orphans0;
 	const statFails = perf.statFailures - statFails0;
 	if (orphans > 0) {
 		console.log(`    ⚠  ${orphans.toLocaleString()} change event(s) skipped (no matching file row) — usually a path-normalisation or earlier-snapshot failure.`);
+		for (const s of perf.orphanSamples) {
+			console.log(`        · [${s.type}/${s.cause}] ${s.path}`);
+		}
+		if (orphans > perf.orphanSamples.length) {
+			console.log(`        · …and ${(orphans - perf.orphanSamples.length).toLocaleString()} more`);
+		}
 	}
 	if (statFails > 0) {
 		console.log(`    ⚠  ${statFails.toLocaleString()} stat() failure(s) on snapshot mount — file may have been removed between zfs-diff and stat.`);
 	}
+	// Reset the per-snapshot orphan sample buffer for the next snapshot.
+	perf.orphanSamples = [];
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
@@ -1119,6 +1145,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 			if (fileId === null) {
 				perf.orphanedChanges++;
+				sampleOrphan(perf, c.changeType, relPath, relNewPath, st === null, 'unified');
 				continue;
 			}
 
@@ -1203,6 +1230,7 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
 			if (fileId === null) {
 				perf.orphanedChanges++;
+				sampleOrphan(perf, c.changeType, relPath, relNewPath, false, 'changes');
 				continue;
 			}
 
