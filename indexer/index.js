@@ -79,12 +79,16 @@ function makeSnapshotStatError(snap, snapPath, failures, total) {
  * Single error-handling path for all snapshot processing.
  *
  *   - Known recoverable failures (zfs diff died, snapshot mount unreadable):
- *     log the cause, cleanup partial rows for the snapshot, ask the run loop
- *     to restart from the beginning so retention/automount races settle.
- *   - Anything else (FK violation, JS exception, etc.): still cleanup the
- *     partial snapshot so we don't leave orphan rows behind, then rethrow.
- *     The outer process exits with a non-zero code; on the next run we'll
- *     re-attempt the failed snapshot cleanly.
+ *     log + cleanup partial rows + throw INDEXER_RESTART_FROM_BEGINNING so the
+ *     outer run loop retries the whole pass (lets retention/automount races
+ *     settle on their own).
+ *   - Anything else (FK violation, unexpected JS error, etc.): log + cleanup
+ *     partial rows + throw SNAPSHOT_SKIPPED so the snapshot loop catches it
+ *     and moves on to the next snapshot. The snapshot stays `indexed_at = NULL`
+ *     so the next run will re-attempt it cleanly. We never lose the entire run
+ *     to a single bad snapshot.
+ *
+ * @returns {never}
  */
 function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
 	const recoverable = isZfsDiffFailure(e) || isSnapshotStatFailure(e);
@@ -95,6 +99,9 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 		console.warn(`  ⚠  ${e.message}`);
 	} else {
 		console.warn(`  ⚠  Unexpected error processing ${transition}: ${e.message}`);
+		if (e.stack) {
+			console.warn(e.stack);
+		}
 	}
 	if (perf && Array.isArray(perf.failedSnapshots)) {
 		perf.failedSnapshots.push({
@@ -114,7 +121,10 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 			`${e.code} on ${snap.name}; restarting from beginning so retention/deleted snapshots are re-discovered.`
 		);
 	}
-	throw e;
+	const skip = new Error(`Skipping snapshot ${snap.full_name ?? snap.name}: ${e.message}`);
+	skip.code = 'SNAPSHOT_SKIPPED';
+	skip.cause = e;
+	throw skip;
 }
 
 function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
@@ -175,6 +185,32 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 			stmt.deleteSnapshotsForDataset.run(id);
 			stmt.deleteDatasetById.run(id);
 		});
+	}
+}
+
+function persistLastRunMeta(db, stmt, perf, restartCount) {
+	transaction(db, () => {
+		stmt.setMeta.run('last_run_at', new Date().toISOString());
+		stmt.setMeta.run('last_run_orphan_changes', String(perf.orphanedChanges));
+		stmt.setMeta.run('last_run_stat_failures', String(perf.statFailures));
+		stmt.setMeta.run('last_run_restart_count', String(restartCount));
+		stmt.setMeta.run('last_run_failed_snapshots', JSON.stringify(perf.failedSnapshots));
+	});
+}
+
+function finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, message) {
+	persistLastRunMeta(db, stmt, perf, restartCount);
+	console.log(message);
+	printStats(db, perf, sessionWallT0, restartCount);
+}
+
+async function processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, datasetId, mode, work) {
+	const t0 = Date.now();
+	try {
+		const result = await work();
+		return { ms: Date.now() - t0, result };
+	} catch (e) {
+		handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode);
 	}
 }
 
@@ -404,6 +440,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 		if (!filteredDatasets.length) {
 			console.log('No datasets matched the filter.');
+			finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, '\n✅ Indexing complete (no datasets to process).');
 			return;
 		}
 
@@ -475,81 +512,79 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			let prevSnap = null;
 			let snapIdx = 0;
 			for (const snap of dsSnaps) {
-				const snapPath = snapshotMountPath(d.mountpoint, snap.name);
+				try {
+					const snapPath = snapshotMountPath(d.mountpoint, snap.name);
 
-				const needIndex = !snap.indexed_at;
-				const needDiff = prevSnap && !snap.diff_done;
-				const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
+					const needIndex = !snap.indexed_at;
+					const needDiff = prevSnap && !snap.diff_done;
+					const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
 
-				if (needIndex) {
-					if (!snapPath) {
-						prevSnap = snap;
-						continue;
-					}
-
-					if (canIncremental && needDiff) {
-						const t = Date.now();
-						try {
-							await doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
-						} catch (e) {
-							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
+					if (needIndex) {
+						if (!snapPath) {
+							prevSnap = snap;
+							continue;
 						}
-						perf.crawlMs += Date.now() - t;
-						perf.snapsIncremental++;
-						perf.diffsDone++;
-						stmt.markDiffDone.run(snap.id);
-					} else if (canIncremental) {
-						const t = Date.now();
-						try {
-							await doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath);
-						} catch (e) {
-							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
-						}
-						perf.crawlMs += Date.now() - t;
-						perf.snapsIncremental++;
-					} else {
-						const t = Date.now();
-						try {
-							const count = await doCrawl(db, stmt, perf, snap.id, dsId, snapPath, snap.full_name);
+
+						if (canIncremental && needDiff) {
+							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+								doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
+							);
+							perf.crawlMs += ms;
+							perf.snapsIncremental++;
+							perf.diffsDone++;
+							stmt.markDiffDone.run(snap.id);
+						} else if (canIncremental) {
+							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+								doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
+							);
+							perf.crawlMs += ms;
+							perf.snapsIncremental++;
+						} else {
+							const { ms, result: count } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+								doCrawl(db, stmt, perf, snap.id, dsId, snapPath, snap.full_name)
+							);
 							perf.filesCrawled += count;
-						} catch (e) {
-							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'incremental');
+							perf.crawlMs += ms;
+							perf.snapsCrawled++;
 						}
-						perf.crawlMs += Date.now() - t;
-						perf.snapsCrawled++;
+
+						stmt.markIndexed.run(Date.now() / 1000 | 0, snap.id);
+						snap.indexed_at = 1;
+						umountSnapshot(snapPath);
+					} else {
+						perf.snapsSkipped++;
+						console.log(`  ✓  ${snap.name} already indexed`);
 					}
 
-					stmt.markIndexed.run(Date.now() / 1000 | 0, snap.id);
-					snap.indexed_at = 1;
-					umountSnapshot(snapPath);
-				} else {
-					perf.snapsSkipped++;
-					console.log(`  ✓  ${snap.name} already indexed`);
-				}
-
-				if (needDiff && !canIncremental) {
-					if (prevSnap) {
-						console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
-						const t = Date.now();
-						try {
-							await doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint);
-						} catch (e) {
-							handleSnapshotError(db, stmt, perf, e, snap, prevSnap, dsId, 'changes_only');
+					if (needDiff && !canIncremental) {
+						if (prevSnap) {
+							console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
+							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'changes_only', () =>
+								doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint)
+							);
+							perf.diffMs += ms;
+							perf.diffsDone++;
+							stmt.markDiffDone.run(snap.id);
 						}
-						perf.diffMs += Date.now() - t;
-						perf.diffsDone++;
-						stmt.markDiffDone.run(snap.id);
 					}
-				}
 
-				prevSnap = snap;
-				snapIdx++;
+					prevSnap = snap;
+					snapIdx++;
 
-				if (snapIdx % 10 === 0) {
-					checkpoint(db);
-					transaction(db, () => {
-						stmt.setMeta.run('last_activity_at', new Date().toISOString());
-					});
+					if (snapIdx % 10 === 0) {
+						checkpoint(db);
+						transaction(db, () => {
+							stmt.setMeta.run('last_activity_at', new Date().toISOString());
+						});
+					}
+				} catch (e) {
+					if (e.code !== 'SNAPSHOT_SKIPPED') {
+						// INDEXER_RESTART_FROM_BEGINNING and genuine bugs propagate out.
+						throw e;
+					}
+					// Leave `prevSnap` pointing at the last *successful* snapshot so
+					// the next iteration's incremental/diff has clean data to work
+					// against. Snapshot stays unindexed → retried on next run.
 				}
 			}
 
@@ -564,20 +599,20 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		disableBulkMode(db);
 		inBulkMode = false;
 
-		const lastRunAt = new Date().toISOString();
-		transaction(db, () => {
-			stmt.setMeta.run('last_run_at', lastRunAt);
-			stmt.setMeta.run('last_run_orphan_changes', String(perf.orphanedChanges));
-			stmt.setMeta.run('last_run_stat_failures', String(perf.statFailures));
-			stmt.setMeta.run('last_run_restart_count', String(restartCount));
-			stmt.setMeta.run('last_run_failed_snapshots', JSON.stringify(perf.failedSnapshots));
-		});
-
-		console.log('\n✅ Indexing complete.');
-		printStats(db, perf, sessionWallT0, restartCount);
+		finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, '\n✅ Indexing complete.');
 	} finally {
 		process.removeListener('SIGTERM', onSignal);
 		process.removeListener('SIGINT', onSignal);
+		// Make sure FTS triggers etc. are restored even if the run crashed
+		// before the explicit disableBulkMode above.
+		if (inBulkMode) {
+			try {
+				disableBulkMode(db);
+				inBulkMode = false;
+			} catch (e) {
+				console.warn(`  ⚠  disableBulkMode failed during cleanup: ${e.message}`);
+			}
+		}
 		try {
 			db.exec('PRAGMA optimize');
 		} catch {
@@ -665,6 +700,30 @@ function sizeFromStat(st) {
 	return st.isDirectory() ? 0 : st.size;
 }
 
+function insertVersionFromStat(stmt, perf, fileId, snapId, st) {
+	const size = sizeFromStat(st);
+	stmt.insertVersion.run(fileId, snapId, size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
+	perf.sqlInserts++;
+	return size;
+}
+
+function assertBatchStatHealthy(snap, snapPath, statFailures, statTotal) {
+	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
+		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
+	}
+}
+
+async function prepareIncrementalFlushContext(batch, snap, snapPath, mountpoint, perf, datasetId, stmt) {
+	const t0 = Date.now();
+	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
+	perf.statMs += Date.now() - t0;
+	perf.statFailures += statFailures;
+	assertBatchStatHealthy(snap, snapPath, statFailures, statTotal);
+	const paths = resolveBatchPaths(batch, mountpoint);
+	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, paths.lookup);
+	return { statMap, ...paths, fileByPath };
+}
+
 let _progressAnimTick = 0;
 
 function indeterminateBar(width, tick) {
@@ -723,13 +782,32 @@ async function primeSnapshotMount(snap, snapPath) {
 
 // ─── Incremental (standalone, no changes table) ────────────────────────────
 
-async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
-	console.log(`  ⚡ Incremental ${snap.name} (from ${prevSnap.name})...`);
-	await primeSnapshotMount(snap, snapPath);
+/**
+ * Stream zfs diff output in batches. Shared by incremental, unified, and
+ * changes-only diff paths.
+ */
+async function runDiffStream({
+	prevSnap,
+	snap,
+	mountpoint,
+	perf,
+	flushBatch,
+	logLabel = null,
+	primeMount = false,
+	snapPath = null,
+	reportAnomalies = false,
+	logDone = false,
+}) {
+	if (logLabel) {
+		console.log(logLabel);
+	}
+	if (primeMount) {
+		await primeSnapshotMount(snap, snapPath);
+	}
+
 	const t0 = Date.now();
 	const orphans0 = perf.orphanedChanges;
 	const statFails0 = perf.statFailures;
-
 	let changeCount = 0;
 	let batch = [];
 
@@ -737,7 +815,7 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 		batch.push(c);
 		if (batch.length >= INCR_BATCH_SIZE) {
 			const n = batch.length;
-			await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+			await flushBatch(batch);
 			changeCount += n;
 			batch = [];
 			logBatchProgress('changes', n, changeCount, t0);
@@ -745,7 +823,7 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 	}
 	if (batch.length) {
 		const n = batch.length;
-		await flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
+		await flushBatch(batch);
 		changeCount += n;
 		logBatchProgress('changes', n, changeCount, t0);
 	}
@@ -753,44 +831,44 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 	if (changeCount && process.stdout.isTTY) {
 		endProgressLine();
 	}
-	console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
-	reportSnapshotAnomalies(perf, orphans0, statFails0);
+	if (logDone) {
+		console.log(`    Done: ${changeCount} changes in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
+	}
+	if (reportAnomalies) {
+		reportSnapshotAnomalies(perf, orphans0, statFails0);
+	}
+}
+
+async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
+	await runDiffStream({
+		prevSnap,
+		snap,
+		mountpoint,
+		snapPath,
+		perf,
+		flushBatch: (batch) => flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath),
+		logLabel: `  ⚡ Incremental ${snap.name} (from ${prevSnap.name})...`,
+		primeMount: true,
+		reportAnomalies: true,
+		logDone: true,
+	});
 }
 
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
 
 async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
-	console.log(`  ⚡ Incremental+diff ${snap.name} (from ${prevSnap.name})...`);
-	await primeSnapshotMount(snap, snapPath);
-	const t0 = Date.now();
-	const orphans0 = perf.orphanedChanges;
-	const statFails0 = perf.statFailures;
-
-	let changeCount = 0;
-	let batch = [];
-
-	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
-		batch.push(c);
-		if (batch.length >= INCR_BATCH_SIZE) {
-			const n = batch.length;
-			await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-			changeCount += n;
-			batch = [];
-			logBatchProgress('changes', n, changeCount, t0);
-		}
-	}
-	if (batch.length) {
-		const n = batch.length;
-		await flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath);
-		changeCount += n;
-		logBatchProgress('changes', n, changeCount, t0);
-	}
-
-	if (changeCount && process.stdout.isTTY) {
-		endProgressLine();
-	}
-	console.log(`    Done: ${changeCount} changes in ${((Date.now()-t0)/1000).toFixed(1)}s\n`);
-	reportSnapshotAnomalies(perf, orphans0, statFails0);
+	await runDiffStream({
+		prevSnap,
+		snap,
+		mountpoint,
+		snapPath,
+		perf,
+		flushBatch: (batch) => flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath),
+		logLabel: `  ⚡ Incremental+diff ${snap.name} (from ${prevSnap.name})...`,
+		primeMount: true,
+		reportAnomalies: true,
+		logDone: true,
+	});
 }
 
 // Up to this many orphan paths get captured per snapshot for diagnostic
@@ -873,10 +951,6 @@ function syncMapForRename(fileByPath, relOldPath, relNewPath, oldFile, victim, r
  */
 function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim) {
 	const type = typeFromStat(st);
-	const sz = sizeFromStat(st);
-	const mtime = Math.floor(st.mtimeMs / 1000);
-	const ctime = Math.floor(st.ctimeMs / 1000);
-	const mode = modeStr(st);
 
 	if (oldFile === undefined) {
 		oldFile = stmt.getFileByPath.get(datasetId, relOldPath) ?? null;
@@ -887,8 +961,7 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
 		perf.sqlUpserts++;
 		if (fileRow) {
-			stmt.insertVersion.run(fileRow.id, snapId, sz, mtime, ctime, st.nlink, mode);
-			perf.sqlInserts++;
+			insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
 		}
 		return { fileId: fileRow?.id ?? null, oldSize: null };
 	}
@@ -907,8 +980,7 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 
 	stmt.updateFileRename.run(relNewPath, st.ino, type, snapId, oldFile.id, datasetId);
 	perf.sqlUpdates++;
-	stmt.insertVersion.run(oldFile.id, snapId, sz, mtime, ctime, st.nlink, mode);
-	perf.sqlInserts++;
+	insertVersionFromStat(stmt, perf, oldFile.id, snapId, st);
 	return { fileId: oldFile.id, oldSize };
 }
 
@@ -952,7 +1024,7 @@ async function statBatch(batch, mountpoint, snapPath) {
  *  - the existing row for removed/modified/renamed sources (oldSize, fileId)
  *  - the victim row at the rename target (so we can vacuum it cleanly)
  */
-function resolveBatchPaths(batch, mountpoint) {
+function resolveBatchPaths(batch, mountpoint, { lookupAllSources = false } = {}) {
 	const relPaths = new Array(batch.length);
 	const relNewPaths = new Array(batch.length);
 	const lookup = new Set();
@@ -960,7 +1032,7 @@ function resolveBatchPaths(batch, mountpoint) {
 		const c = batch[i];
 		const relPath = resolveRelPath(c.path, mountpoint);
 		relPaths[i] = relPath;
-		if (c.changeType !== 'added') {
+		if (lookupAllSources || c.changeType !== 'added') {
 			lookup.add(relPath);
 		}
 		if (c.changeType === 'renamed') {
@@ -1011,16 +1083,9 @@ function bulkLoadFileMapWithSnap(stmt, perf, datasetId, paths, snapId) {
 // ─── Batch flush: incremental only ─────────────────────────────────────────
 
 async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const t0 = Date.now();
-	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
-	perf.statMs += Date.now() - t0;
-	perf.statFailures += statFailures;
-	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
-		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
-	}
-
-	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
-	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
+	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
+		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
+	);
 
 	const t = Date.now();
 	transaction(db, () => {
@@ -1036,9 +1101,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
 					perf.sqlUpserts++;
 					if (fileRow) {
-						const newSize = sizeFromStat(st);
-						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
+						const newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
 					}
 				}
@@ -1050,10 +1113,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				if (st) {
 					const fileRow = fileByPath.get(relPath);
 					if (fileRow) {
-						const newSize = sizeFromStat(st);
-						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
-						fileRow.latestSize = newSize;
+						fileRow.latestSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 					}
 				}
 			} else if (c.changeType === 'renamed') {
@@ -1074,16 +1134,9 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 // ─── Batch flush: unified incremental + diff ────────────────────────────────
 
 async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const t0 = Date.now();
-	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
-	perf.statMs += Date.now() - t0;
-	perf.statFailures += statFailures;
-	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
-		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
-	}
-
-	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(batch, mountpoint);
-	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, lookup);
+	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
+		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
+	);
 
 	const t = Date.now();
 	transaction(db, () => {
@@ -1105,9 +1158,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					perf.sqlUpserts++;
 					if (fileRow) {
 						fileId = fileRow.id;
-						newSize = sizeFromStat(st);
-						stmt.insertVersion.run(fileRow.id, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
+						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
 					}
 				}
@@ -1125,9 +1176,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					if (fileRow) {
 						fileId = fileRow.id;
 						oldSize = fileRow.latestSize;
-						newSize = sizeFromStat(st);
-						stmt.insertVersion.run(fileId, snap.id, newSize, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-						perf.sqlInserts++;
+						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 						fileRow.latestSize = newSize;
 					}
 				}
@@ -1161,47 +1210,19 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
 async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
-	const changes = [];
-	let changeCount = 0;
-	const t0 = Date.now();
-	for await (const change of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
-		changes.push(change);
-		if (changes.length >= INCR_BATCH_SIZE) {
-			const chunk = changes.splice(0, INCR_BATCH_SIZE);
-			flushChanges(db, stmt, perf, chunk, snap, datasetId, mountpoint);
-			changeCount += chunk.length;
-			logBatchProgress('changes', chunk.length, changeCount, t0);
-		}
-	}
-	if (changes.length) {
-		const n = changes.length;
-		flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint);
-		changeCount += n;
-		logBatchProgress('changes', n, changeCount, t0);
-	}
-	if (changeCount && process.stdout.isTTY) {
-		endProgressLine();
-	}
+	await runDiffStream({
+		prevSnap,
+		snap,
+		mountpoint,
+		perf,
+		flushBatch: (batch) => {
+			flushChanges(db, stmt, perf, batch, snap, datasetId, mountpoint);
+		},
+	});
 }
 
 function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
-	const relPaths = new Array(changes.length);
-	const relNewPaths = new Array(changes.length);
-	const lookup = new Set();
-	for (let i = 0; i < changes.length; i++) {
-		const c = changes[i];
-		const relPath = resolveRelPath(c.path, mountpoint);
-		relPaths[i] = relPath;
-		lookup.add(relPath);
-		if (c.changeType === 'renamed' && c.newPath) {
-			const relNewPath = resolveRelPath(c.newPath, mountpoint);
-			relNewPaths[i] = relNewPath;
-			lookup.add(relNewPath);
-		} else {
-			relNewPaths[i] = null;
-		}
-	}
-
+	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(changes, mountpoint, { lookupAllSources: true });
 	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
 
 	const t = Date.now();
