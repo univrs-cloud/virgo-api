@@ -21,9 +21,9 @@ const deleteFolder = async (job, module) => {
 		throw new Error(`Folder "${share.comment}" has no path.`);
 	}
 
-	const path = (share.path.startsWith('/messier/folders/') ? share.path : null);
-	const dataset = await module.pathToZfsDataset(path);
-	if (dataset === null && path !== null) {
+	const customPath = (share.path.startsWith('/messier/folders/') ? null : share.path);
+	const dataset = (customPath === null ? await module.pathToZfsDataset(share.path) : null);
+	if (dataset === null && customPath === null) {
 		throw new Error(`Cannot derive dataset from path "${share.path}".`);
 	}
 	
@@ -34,6 +34,12 @@ const deleteFolder = async (job, module) => {
 	delete shares[name];
 	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
+	if (customPath !== null) {
+		await module.addJob('share:projectspace:remove', {
+			sharePath: customPath,
+			comment: share.comment
+		});
+	}
 	module.eventEmitter.emit('shares:updated');
 	return `Folder ${share.comment} deleted.`;
 };

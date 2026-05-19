@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { execa } = require('execa');
 const ini = require('ini');
 const BaseModule = require('../base');
@@ -79,6 +80,25 @@ class ShareModule extends BaseModule {
 		return `${bytes}`;
 	}
 
+	generateProjectspace(sharePath) {
+		const id = crypto.createHash('sha1').update(sharePath).digest().readUInt32BE(0);
+		return (id === 0 ? 1 : id);
+	}
+
+	async getPathProjectspace(sharePath) {
+		try {
+			const { stdout: projectOutput } = await execa('zfs', ['project', '-d', sharePath]);
+			const match = projectOutput.match(/^\s*(\d+)\s/);
+			if (match) {
+				const id = parseInt(match[1], 10);
+				return (id > 0 ? id : null);
+			}
+		} catch (error) {
+			// path may not exist or filesystem doesn't support project ids
+		}
+		return null;
+	}
+
 	#refreshDu(sharePath) {
 		if (this.#duInflight.has(sharePath)) {
 			return this.#duInflight.get(sharePath);
@@ -97,6 +117,21 @@ class ShareModule extends BaseModule {
 		})();
 		this.#duInflight.set(sharePath, promise);
 		return promise;
+	}
+
+	async #getProjectspaceUsage(datasetName) {
+		try {
+			const { stdout: projectspaceOutput } = await execa('zfs', ['projectspace', '-Hp', '-o', 'name,used', datasetName]);
+			const usage = new Map();
+			for (const line of projectspaceOutput.split('\n').filter(Boolean)) {
+				const [id, used] = line.split('\t');
+				usage.set(parseInt(id, 10), parseInt(used, 10));
+			}
+			return usage;
+		} catch (error) {
+			console.error(`Error reading projectspace for ${datasetName}:`, error);
+			return new Map();
+		}
 	}
 
 	async #getZfsDatasets() {
@@ -124,6 +159,32 @@ class ShareModule extends BaseModule {
 			const datasets = await this.#getZfsDatasets();
 			const datasetByMountpoint = new Map(datasets.map((dataset) => { return [dataset.mountpoint, dataset]; }));
 
+			const findParentDataset = (sharePath) => {
+				return datasets
+					.filter((dataset) => { return dataset.mountpoint && sharePath.startsWith(dataset.mountpoint.replace(/\/?$/, '/')); })
+					.sort((a, b) => { return b.mountpoint.length - a.mountpoint.length; })[0];
+			};
+
+			const customPaths = Object.values(shares)
+				.map((value) => { return value['path']; })
+				.filter((sharePath) => { return sharePath && !datasetByMountpoint.has(sharePath); });
+			const projectspaceByPath = new Map();
+			await Promise.all(customPaths.map(async (sharePath) => {
+				const projectspace = await this.getPathProjectspace(sharePath);
+				if (projectspace !== null) {
+					projectspaceByPath.set(sharePath, projectspace);
+				}
+			}));
+			const projectspaceDatasets = new Set();
+			for (const sharePath of projectspaceByPath.keys()) {
+				const parent = findParentDataset(sharePath);
+				if (parent) projectspaceDatasets.add(parent.name);
+			}
+			const projectspaceUsageByDataset = new Map();
+			await Promise.all([...projectspaceDatasets].map(async (datasetName) => {
+				projectspaceUsageByDataset.set(datasetName, await this.#getProjectspaceUsage(datasetName));
+			}));
+
 			let promises = Object.entries(shares).map(async ([name, value]) => {
 				let share = {
 					name: name,
@@ -146,18 +207,24 @@ class ShareModule extends BaseModule {
 						share.size = dataset.refquota ?? ((dataset.used ?? 0) + (dataset.available ?? 0));
 						share.free = Math.max(share.size - share.alloc, 0);
 					} else if (value['path']) {
-						const parent = datasets
-							.filter((dataset) => { return dataset.mountpoint && value['path'].startsWith(dataset.mountpoint.replace(/\/?$/, '/')); })
-							.sort((a, b) => { return b.mountpoint.length - a.mountpoint.length; })[0];
-						const cached = this.#duCache.get(value['path']);
-						share.alloc = cached?.alloc ?? 0;
+						const parent = findParentDataset(value['path']);
+						const projectspace = projectspaceByPath.get(value['path']) ?? null;
+						const projectspaceUsed = (projectspace !== null && parent)
+							? projectspaceUsageByDataset.get(parent.name)?.get(projectspace)
+							: undefined;
+						if (projectspaceUsed !== undefined) {
+							share.alloc = projectspaceUsed;
+						} else {
+							const cached = this.#duCache.get(value['path']);
+							share.alloc = cached?.alloc ?? 0;
+							const stale = !cached || (Date.now() - cached.updatedAt) > this.#duMinRefreshMs;
+							if (stale) {
+								this.#refreshDu(value['path']);
+							}
+						}
 						if (parent) {
 							share.size = parent.refquota ?? ((parent.used ?? 0) + (parent.available ?? 0));
 							share.free = parent.available ?? Math.max(share.size - share.alloc, 0);
-						}
-						const stale = !cached || (Date.now() - cached.updatedAt) > this.#duMinRefreshMs;
-						if (stale) {
-							this.#refreshDu(value['path']);
 						}
 					}
 					share.cap = (share.size > 0 ? share.alloc / share.size * 100 : 0);

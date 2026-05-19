@@ -61,6 +61,9 @@ const createFolder = async (job, module) => {
 	}
 	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
+	if (customPath) {
+		await module.addJob('share:projectspace:apply', { sharePath, comment });
+	}
 	module.eventEmitter.emit('shares:updated');
 	return `Folder ${comment} created.`;
 
