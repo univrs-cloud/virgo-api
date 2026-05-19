@@ -195,6 +195,8 @@ function persistLastRunMeta(db, stmt, perf, restartCount) {
 		stmt.setMeta.run('last_run_stat_failures', String(perf.statFailures));
 		stmt.setMeta.run('last_run_restart_count', String(restartCount));
 		stmt.setMeta.run('last_run_failed_snapshots', JSON.stringify(perf.failedSnapshots));
+		stmt.setMeta.run('last_run_orphan_samples', JSON.stringify(perf.orphanSamplesAll ?? []));
+		stmt.setMeta.run('last_run_backfilled_files', String(perf.backfilledFiles ?? 0));
 	});
 }
 
@@ -309,7 +311,16 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
 		diffChanges: 0, statMs: 0,
 		statFailures: 0, orphanedChanges: 0,
+		// Count of `files` rows created on the fly because `zfs diff` reported a
+		// change for a path we hadn't indexed yet. A small steady number is fine
+		// (logs/caches appearing post-baseline); a sudden spike hints at gaps in
+		// the walker output.
+		backfilledFiles: 0,
+		// Per-snapshot samples reset by reportSnapshotAnomalies; per-run samples
+		// accumulate across the entire pass and get persisted to meta so the
+		// dashboard + CLI summary can show actual offending paths after a run.
 		orphanSamples: [],
+		orphanSamplesAll: [],
 		failedSnapshots: [],
 	};
 
@@ -707,6 +718,30 @@ function insertVersionFromStat(stmt, perf, fileId, snapId, st) {
 	return size;
 }
 
+/**
+ * Create (or refresh) a `files` row from a successful stat result. Used when
+ * `zfs diff` reports a change for a path we don't have indexed yet — usually a
+ * file that didn't exist in the earliest indexed snapshot, or whose `added`
+ * event got lost in a previous run's partial failure. Self-healing: once the
+ * row is here, subsequent events on the same path land normally.
+ *
+ * Increments `perf.backfilledFiles` so the run summary can flag how often
+ * this happens (a steady non-zero rate hints at a deeper indexing gap).
+ *
+ * Returns the inserted file row, plus the new size for caller's bookkeeping.
+ */
+function upsertFileFromStat(stmt, perf, datasetId, relPath, st, snapId) {
+	const type = typeFromStat(st);
+	const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snapId, snapId);
+	perf.sqlUpserts++;
+	if (!fileRow) {
+		return { fileRow: null, newSize: null };
+	}
+	const newSize = insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
+	perf.backfilledFiles = (perf.backfilledFiles ?? 0) + 1;
+	return { fileRow, newSize };
+}
+
 function assertBatchStatHealthy(snap, snapPath, statFailures, statTotal) {
 	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
 		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
@@ -871,21 +906,26 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 	});
 }
 
-// Up to this many orphan paths get captured per snapshot for diagnostic
-// printing. We don't keep them globally — each `reportSnapshotAnomalies` call
-// resets the array so we get fresh samples per snapshot.
+// Per-snapshot cap (the inline ⚠ line shows a handful so the user has context
+// without flooding the log). Per-run cap is larger because we persist that set
+// to meta and surface it in the dashboard / CLI summary.
 const ORPHAN_SAMPLE_LIMIT = 5;
+const ORPHAN_SAMPLE_RUN_LIMIT = 50;
 
-function sampleOrphan(perf, changeType, relPath, relNewPath, statFailed, source) {
-	if (!perf.orphanSamples || perf.orphanSamples.length >= ORPHAN_SAMPLE_LIMIT) {
-		return;
-	}
-	perf.orphanSamples.push({
+function sampleOrphan(perf, snap, changeType, relPath, relNewPath, statFailed, source) {
+	const entry = {
+		snapshot: snap?.full_name ?? snap?.name ?? null,
 		type: changeType,
 		path: relNewPath ? `${relPath} → ${relNewPath}` : relPath,
 		cause: statFailed ? 'stat-failed' : 'no-file-row',
 		source,
-	});
+	};
+	if (perf.orphanSamples && perf.orphanSamples.length < ORPHAN_SAMPLE_LIMIT) {
+		perf.orphanSamples.push(entry);
+	}
+	if (perf.orphanSamplesAll && perf.orphanSamplesAll.length < ORPHAN_SAMPLE_RUN_LIMIT) {
+		perf.orphanSamplesAll.push(entry);
+	}
 }
 
 function reportSnapshotAnomalies(perf, orphans0, statFails0) {
@@ -1111,8 +1151,14 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 			} else if (c.changeType === 'modified') {
 				const st = statMap.get(i);
 				if (st) {
-					const fileRow = fileByPath.get(relPath);
-					if (fileRow) {
+					let fileRow = fileByPath.get(relPath);
+					if (!fileRow) {
+						const r = upsertFileFromStat(stmt, perf, datasetId, relPath, st, snap.id);
+						if (r.fileRow) {
+							fileRow = { id: r.fileRow.id, latestSize: r.newSize };
+							fileByPath.set(relPath, fileRow);
+						}
+					} else {
 						fileRow.latestSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 					}
 				}
@@ -1172,8 +1218,17 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 				}
 			} else if (c.changeType === 'modified') {
 				if (st) {
-					const fileRow = fileByPath.get(relPath);
-					if (fileRow) {
+					let fileRow = fileByPath.get(relPath);
+					if (!fileRow) {
+						const r = upsertFileFromStat(stmt, perf, datasetId, relPath, st, snap.id);
+						if (r.fileRow) {
+							fileRow = { id: r.fileRow.id, latestSize: r.newSize };
+							fileByPath.set(relPath, fileRow);
+							fileId = fileRow.id;
+							oldSize = null; // we just created the row; no prior version to diff against
+							newSize = r.newSize;
+						}
+					} else {
 						fileId = fileRow.id;
 						oldSize = fileRow.latestSize;
 						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
@@ -1194,7 +1249,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 			if (fileId === null) {
 				perf.orphanedChanges++;
-				sampleOrphan(perf, c.changeType, relPath, relNewPath, st === null, 'unified');
+				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, st === null, 'unified');
 				continue;
 			}
 
@@ -1251,7 +1306,7 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 
 			if (fileId === null) {
 				perf.orphanedChanges++;
-				sampleOrphan(perf, c.changeType, relPath, relNewPath, false, 'changes');
+				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, false, 'changes');
 				continue;
 			}
 
@@ -1311,6 +1366,11 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	}
 	console.log(`Deleted files: ${stats.deleted.toLocaleString()}`);
 
+	const backfilled = perf.backfilledFiles ?? 0;
+	if (backfilled > 0) {
+		console.log(`\n♻  Self-repaired this run: ${backfilled.toLocaleString()} file row(s) backfilled (paths zfs-diff reported but we had no row for; usually files born after the baseline crawl).`);
+	}
+
 	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0;
 	if (anyFailures) {
 		console.log('\n⚠  Failures (this run):');
@@ -1323,6 +1383,17 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 		}
 		if (perf.failedSnapshots.length > 5) {
 			console.log(`  …and ${perf.failedSnapshots.length - 5} more`);
+		}
+		const samples = perf.orphanSamplesAll ?? [];
+		if (samples.length > 0) {
+			console.log('Orphan samples:');
+			for (const s of samples.slice(0, 10)) {
+				const snap = s.snapshot ? ` @${s.snapshot}` : '';
+				console.log(`  · [${s.type}/${s.cause}]${snap} ${s.path}`);
+			}
+			if (perf.orphanedChanges > samples.length) {
+				console.log(`  …and ${(perf.orphanedChanges - samples.length).toLocaleString()} more (not sampled)`);
+			}
 		}
 	}
 

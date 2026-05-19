@@ -646,6 +646,8 @@ function stats(db, opts = {}) {
 			(SELECT value FROM meta WHERE key = 'last_run_stat_failures') AS last_run_stat_failures,
 			(SELECT value FROM meta WHERE key = 'last_run_restart_count') AS last_run_restart_count,
 			(SELECT value FROM meta WHERE key = 'last_run_failed_snapshots') AS last_run_failed_snapshots,
+			(SELECT value FROM meta WHERE key = 'last_run_orphan_samples') AS last_run_orphan_samples,
+			(SELECT value FROM meta WHERE key = 'last_run_backfilled_files') AS last_run_backfilled_files,
 			(SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
 	`).get();
 
@@ -661,10 +663,12 @@ function stats(db, opts = {}) {
 	const changeTypes = changeTypeBreakdown(db);
 
 	const lastRun = {
-		orphan_changes: Number(statsRow.last_run_orphan_changes ?? 0),
-		stat_failures:  Number(statsRow.last_run_stat_failures  ?? 0),
-		restart_count:  Number(statsRow.last_run_restart_count  ?? 0),
+		orphan_changes:   Number(statsRow.last_run_orphan_changes   ?? 0),
+		stat_failures:    Number(statsRow.last_run_stat_failures    ?? 0),
+		restart_count:    Number(statsRow.last_run_restart_count    ?? 0),
+		backfilled_files: Number(statsRow.last_run_backfilled_files ?? 0),
 		failed_snapshots: parseFailedSnapshots(statsRow.last_run_failed_snapshots),
+		orphan_samples:   parseJsonArray(statsRow.last_run_orphan_samples),
 	};
 
 	const result = {
@@ -678,6 +682,8 @@ function stats(db, opts = {}) {
 	delete result.last_run_stat_failures;
 	delete result.last_run_restart_count;
 	delete result.last_run_failed_snapshots;
+	delete result.last_run_orphan_samples;
+	delete result.last_run_backfilled_files;
 
 	if (!json) {
 		console.log('\n📊 ZFS Index Statistics\n');
@@ -698,6 +704,10 @@ function stats(db, opts = {}) {
 		}
 		console.log(`Deleted files: ${statsRow.deleted.toLocaleString()}`);
 
+		if (lastRun.backfilled_files > 0) {
+			console.log(`\n♻  Last run self-repair: ${lastRun.backfilled_files.toLocaleString()} file row(s) backfilled`);
+		}
+
 		const anyFailures = lastRun.orphan_changes > 0 || lastRun.stat_failures > 0 || lastRun.failed_snapshots.length > 0 || lastRun.restart_count > 0;
 		if (anyFailures) {
 			console.log('\n⚠  Last run failures:');
@@ -711,6 +721,16 @@ function stats(db, opts = {}) {
 			if (lastRun.failed_snapshots.length > 5) {
 				console.log(`    …and ${lastRun.failed_snapshots.length - 5} more`);
 			}
+			if (lastRun.orphan_samples.length > 0) {
+				console.log('  Orphan samples:');
+				for (const s of lastRun.orphan_samples.slice(0, 10)) {
+					const snap = s.snapshot ? ` @${s.snapshot}` : '';
+					console.log(`    · [${s.type}/${s.cause}]${snap} ${s.path}`);
+				}
+				if (lastRun.orphan_changes > lastRun.orphan_samples.length) {
+					console.log(`    …and ${(lastRun.orphan_changes - lastRun.orphan_samples.length).toLocaleString()} more (not sampled)`);
+				}
+			}
 		}
 
 		console.log('\nTop datasets by file count:');
@@ -723,6 +743,10 @@ function stats(db, opts = {}) {
 }
 
 function parseFailedSnapshots(raw) {
+	return parseJsonArray(raw);
+}
+
+function parseJsonArray(raw) {
 	if (!raw) {
 		return [];
 	}
