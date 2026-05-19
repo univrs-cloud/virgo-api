@@ -50,19 +50,25 @@ const update = async (socket, module) => {
 	});
 
 	try {
+		// Passed to bash -c directly (no shell: true) so /bin/sh never sees bash-only syntax.
+		const updateScript = [
+			`echo $$ > ${module.updatePidFile}`,
+			'UPDATE_EXIT=1',
+			`trap 'echo "$UPDATE_EXIT" > ${module.updateExitStatusFile}' EXIT`,
+			'set -o pipefail',
+			`apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}`,
+			'UPDATE_EXIT=$?',
+		].join('\n');
 		await execa('systemd-run', [
 			'--unit=system-update',
-			'--description="System update"',
+			'--description=System update',
 			'--wait',
 			'--collect',
 			'--setenv=DEBIAN_FRONTEND=noninteractive',
 			'bash',
 			'-c',
-			// Use newlines instead of semicolons to avoid systemd "Ignoring unknown escape sequences" for \;
-			`"echo $$ > ${module.updatePidFile}
-apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}
-echo $? > ${module.updateExitStatusFile}"`
-		], { shell: true });
+			updateScript,
+		]);
 	} catch (error) {
 		console.error(error.message);
 	}
@@ -78,7 +84,7 @@ const completeUpdate = (socket, module) => {
 	fs.closeSync(fs.openSync(module.updatePidFile, 'w'));
 	fs.closeSync(fs.openSync(module.updateFile, 'w'));
 	module.updatePid = null;
-	module.setState('update', undefined);
+	module.setState('update', null);
 	module.nsp.emit('host:update', module.getState('update'));
 };
 

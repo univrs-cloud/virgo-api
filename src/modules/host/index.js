@@ -14,12 +14,13 @@ class HostModule extends BaseModule {
 	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updateFile = '/var/www/virgo-api/update.log';
 	#updatePid = null;
-	#checkUpdateIntervalId = null;
+	#updateCompletionPromise = null;
 
 	constructor() {
 		super('host');
 
 		this.#loadSetupCompleted();
+		this.checkUpdate();
 		this.setState('system', {
 			api: {
 				version: version
@@ -98,14 +99,6 @@ class HostModule extends BaseModule {
 		this.#updatePid = value;
 	}
 
-	get checkUpdateIntervalId() {
-		return this.#checkUpdateIntervalId;
-	}
-
-	set checkUpdateIntervalId(value) {
-		this.#checkUpdateIntervalId = value;
-	}
-
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin?.startPolling(this);
@@ -113,7 +106,6 @@ class HostModule extends BaseModule {
 		if (this.getState('setupCompleted') !== undefined) {
 			socket.emit('host:setupCompleted', this.getState('setupCompleted'));
 		}
-		this.checkUpdate();
 		if (this.getState('update') !== undefined) {
 			socket.emit('host:update', this.getState('update'));
 		}
@@ -154,78 +146,84 @@ class HostModule extends BaseModule {
 			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
 			this.updatePid = (updatePid === '' ? null : parseInt(updatePid));
 		} catch (error) {}
-		
+
 		if (this.updatePid === null) {
 			this.setState('update', null);
 			this.nsp.emit('host:update', this.getState('update'));
 			return;
 		}
-		
-		if (this.checkUpdateIntervalId !== null) {
+
+		const updateState = this.getState('update');
+		if (updateState?.state === 'succeeded' || updateState?.state === 'failed') {
 			return;
 		}
 
-		let updateLogsWatcher;
+		if (this.#updateCompletionPromise) {
+			return;
+		}
+
 		const watcherPlugin = this.getPlugin('watcher');
+		let updateLogsWatcher;
 		if (watcherPlugin) {
 			updateLogsWatcher = await watcherPlugin.watchUpdateLog(this);
 		}
-	
-		this.checkUpdateIntervalId = setInterval(async () => {
-			if (await this.isUpdateInProgress()) {
-				return;
-			}
-	
-			// Wait for exit code file to be written (handle race condition)
-			let exitCodeContent = '';
-			let retries = 10; // Wait up to 10 seconds for the file to be written
-			while (retries > 0 && exitCodeContent === '') {
-				try {
-					exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
-					if (exitCodeContent === '') {
-						// File exists but is empty, wait a bit and retry
-						await new Promise(resolve => setTimeout(resolve, 1000));
-						retries--;
-						continue;
-					}
-				} catch (error) {
-					// File doesn't exist yet, wait and retry
-					await new Promise(resolve => setTimeout(resolve, 1000));
+
+		this.#updateCompletionPromise = this.#waitForUpdateCompletion(updateLogsWatcher)
+			.finally(() => {
+				this.#updateCompletionPromise = null;
+			});
+	}
+
+	async #waitForUpdateCompletion(updateLogsWatcher) {
+		while (await this.isUpdateInProgress()) {
+			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
+		}
+
+		let exitCodeContent = '';
+		let retries = 10;
+		while (retries > 0 && exitCodeContent === '') {
+			try {
+				exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+				if (exitCodeContent === '') {
+					await new Promise((resolve) => { return setTimeout(resolve, 1000); });
 					retries--;
 					continue;
 				}
-				break;
+			} catch (error) {
+				await new Promise((resolve) => { return setTimeout(resolve, 1000); });
+				retries--;
+				continue;
 			}
+			break;
+		}
 
-			clearInterval(this.checkUpdateIntervalId);
-			this.checkUpdateIntervalId = null;
-			await updateLogsWatcher?.stop();
-			
-			let isRebootRequired = false;
-			try {
-				await fs.promises.access(this.#rebootRequiredFile);
-				isRebootRequired = true;
-			} catch (error) {}
+		await updateLogsWatcher?.stop();
 
-			let exitCode = 0;
-			if (exitCodeContent !== '') {
-				exitCode = parseInt(exitCodeContent);
-				if (isNaN(exitCode)) {
-					console.error(`Failed to parse exit code from file content: "${exitCodeContent}"`);
-					exitCode = 1; // Treat unparseable content as failure
-				}
-				console.log(`Update completed - exit code file content: "${exitCodeContent}", parsed: ${exitCode}`);
-			} else {
-				console.error(`Exit code file is empty or missing after retries`);
-				exitCode = 1; // Treat missing/empty file as failure
+		let isRebootRequired = false;
+		try {
+			await fs.promises.access(this.#rebootRequiredFile);
+			isRebootRequired = true;
+		} catch (error) {}
+
+		let exitCode = 0;
+		if (exitCodeContent !== '') {
+			exitCode = parseInt(exitCodeContent);
+			if (isNaN(exitCode)) {
+				console.error(`Failed to parse exit code from file content: "${exitCodeContent}"`);
+				exitCode = 1;
 			}
-			const state = (exitCode === 0 ? 'succeeded' : 'failed');
-			console.log(`Setting update state to: ${state} (exitCode: ${exitCode})`);
-			this.setState('update', { ...this.getState('update'), isRebootRequired, state });
-			this.nsp.emit('host:update', this.getState('update'));
+			console.log(`Update completed - exit code file content: "${exitCodeContent}", parsed: ${exitCode}`);
+		} else {
+			console.error('Exit code file is empty or missing after retries');
+			exitCode = 1;
+		}
 
-			this.generateUpdates();
-		}, 1000);
+		const state = (exitCode === 0 ? 'succeeded' : 'failed');
+		console.log(`Setting update state to: ${state} (exitCode: ${exitCode})`);
+		this.setState('update', { ...this.getState('update'), isRebootRequired, state });
+		this.nsp.emit('host:update', this.getState('update'));
+
+		this.generateUpdates();
 	}
 
 	async generateUpdates() {
