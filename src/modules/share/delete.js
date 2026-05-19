@@ -5,34 +5,31 @@ const { execa } = require('execa');
 const deleteFolder = async (job, module) => {
 	const { config } = job.data;
 	const { name } = config;
+	const shareConfigFile = await module.findFolderShareConfigFile(name);
+	if (shareConfigFile === null) {
+		throw new Error(`Folder "${name}" not found in config.`);
+	}
 	let shares = {};
 	try {
-		shares = ini.parse(fs.readFileSync(module.foldersConf, 'utf8'));
+		shares = ini.parse(fs.readFileSync(shareConfigFile, 'utf8'));
 	} catch (error) {
 		throw new Error(`Cannot read config: ${error.message}`);
 	}
-	
 	const share = shares[name];
-	if (!share) {
-		throw new Error(`Folder "${name}" not found in config.`);
+	if (!share?.path) {
+		throw new Error(`Folder "${share?.comment || name}" has no path.`);
 	}
 
-	if (!share.path) {
-		throw new Error(`Folder "${share.comment}" has no path.`);
-	}
+	const dataset = await module.pathToZfsDataset(share.path);
+	const customPath = (dataset === null ? share.path : null);
+	const isVirgoManagedDataset = (dataset !== null && dataset.startsWith(`${module.foldersDataset}/`));
 
-	const customPath = (share.path.startsWith('/messier/folders/') ? null : share.path);
-	const dataset = (customPath === null ? await module.pathToZfsDataset(share.path) : null);
-	if (dataset === null && customPath === null) {
-		throw new Error(`Cannot derive dataset from path "${share.path}".`);
-	}
-	
 	await module.updateJobProgress(job, `Deleting folder ${share.comment}...`);
-	if (dataset !== null) {
+	if (isVirgoManagedDataset) {
 		await execa('zfs', ['destroy', '-r', dataset]);
 	}
 	delete shares[name];
-	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
+	fs.writeFileSync(shareConfigFile, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	if (customPath !== null) {
 		await module.addJob('share:projectspace:remove', {

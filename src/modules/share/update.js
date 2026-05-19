@@ -6,27 +6,23 @@ const updateFolder = async (job, module) => {
 	const { config } = job.data;
 	const { name, validUsers = [], refquota: refquotaRaw } = config;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
+	const shareConfigFile = await module.findFolderShareConfigFile(name);
+	if (shareConfigFile === null) {
+		throw new Error(`Folder "${name}" not found in config.`);
+	}
 	let shares = {};
 	try {
-		shares = ini.parse(fs.readFileSync(module.foldersConf, 'utf8'));
+		shares = ini.parse(fs.readFileSync(shareConfigFile, 'utf8'));
 	} catch (error) {
 		throw new Error(`Cannot read config: ${error.message}`);
 	}
-
 	const share = shares[name];
-	if (!share) {
-		throw new Error(`Folder "${name}" not found in config.`);
-	}
-
-	if (!share.path) {
+	if (!share?.path) {
 		throw new Error(`Folder "${name}" has no path.`);
 	}
 
-	const customPath = (share.path.startsWith('/messier/folders/') ? null : share.path);
-	const dataset = (customPath === null ? await module.pathToZfsDataset(share.path) : null);
-	if (dataset === null && customPath === null) {
-		throw new Error(`No dataset found for mountpoint "${share.path}".`);
-	}
+	const dataset = await module.pathToZfsDataset(share.path);
+	const customPath = (dataset === null ? share.path : null);
 
 	await module.updateJobProgress(job, `Updating folder ${name}...`);
 	if (dataset !== null) {
@@ -34,7 +30,7 @@ const updateFolder = async (job, module) => {
 	}
 	share['guest ok'] = (validUsers.length === 0 ? 'yes' : 'no');
 	share['valid users'] = validUsers.join(' ');
-	fs.writeFileSync(module.foldersConf, ini.stringify(shares), 'utf8');
+	fs.writeFileSync(shareConfigFile, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	if (customPath !== null) {
 		await module.addJob('share:projectspace:apply', {

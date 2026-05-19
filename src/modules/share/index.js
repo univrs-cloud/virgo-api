@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { execa } = require('execa');
 const ini = require('ini');
 const BaseModule = require('../base');
@@ -13,10 +15,6 @@ class ShareModule extends BaseModule {
 	#timeMachinesConf = '/messier/.shares/time_machines.conf';
 	#foldersDataset = 'messier/folders';
 	#timeMachinesDataset = 'messier/time_machines';
-	#duCache = new Map();
-	#duInflight = new Map();
-	#duMinRefreshMs = 5 * 60 * 1000;
-
 	constructor() {
 		super('share');
 
@@ -55,6 +53,35 @@ class ShareModule extends BaseModule {
 		if (this.getState('shares')) {
 			socket.emit('shares', this.getState('shares'));
 		}
+	}
+
+	async findFolderShareConfigFile(name) {
+		const dir = path.dirname(this.foldersConf);
+		const timeMachinesConfName = path.basename(this.timeMachinesConf);
+		let entries;
+		try {
+			entries = await fs.promises.readdir(dir, { withFileTypes: true });
+		} catch {
+			return null;
+		}
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith('.conf')) {
+				continue;
+			}
+			if (entry.name === timeMachinesConfName) {
+				continue;
+			}
+			const filepath = path.join(dir, entry.name);
+			try {
+				const shares = ini.parse(await fs.promises.readFile(filepath, 'utf8'));
+				if (shares[name]) {
+					return filepath;
+				}
+			} catch {
+				// skip unreadable files
+			}
+		}
+		return null;
 	}
 
 	async pathToZfsDataset(sharePath) {
@@ -97,26 +124,6 @@ class ShareModule extends BaseModule {
 			// path may not exist or filesystem doesn't support project ids
 		}
 		return null;
-	}
-
-	#refreshDu(sharePath) {
-		if (this.#duInflight.has(sharePath)) {
-			return this.#duInflight.get(sharePath);
-		}
-		const promise = (async () => {
-			try {
-				const { stdout: duOutput } = await execa('du', ['-sb', '--apparent-size', sharePath]);
-				const alloc = parseInt(duOutput.split(/\s+/)[0], 10);
-				this.#duCache.set(sharePath, { alloc, updatedAt: Date.now() });
-				this.eventEmitter.emit('shares:updated');
-			} catch (error) {
-				console.error(`Error computing du for ${sharePath}:`, error);
-			} finally {
-				this.#duInflight.delete(sharePath);
-			}
-		})();
-		this.#duInflight.set(sharePath, promise);
-		return promise;
 	}
 
 	async #getProjectspaceUsage(datasetName) {
@@ -209,19 +216,8 @@ class ShareModule extends BaseModule {
 					} else if (value['path']) {
 						const parent = findParentDataset(value['path']);
 						const projectspace = projectspaceByPath.get(value['path']) ?? null;
-						const projectspaceUsed = (projectspace !== null && parent)
-							? projectspaceUsageByDataset.get(parent.name)?.get(projectspace)
-							: undefined;
-						if (projectspaceUsed !== undefined) {
-							share.alloc = projectspaceUsed;
-						} else {
-							const cached = this.#duCache.get(value['path']);
-							share.alloc = cached?.alloc ?? 0;
-							const stale = !cached || (Date.now() - cached.updatedAt) > this.#duMinRefreshMs;
-							if (stale) {
-								this.#refreshDu(value['path']);
-							}
-						}
+						const projectspaceUsed = (projectspace !== null && parent ? projectspaceUsageByDataset.get(parent.name)?.get(projectspace) : undefined);
+						share.alloc = projectspaceUsed ?? 0;
 						if (parent) {
 							share.size = parent.refquota ?? ((parent.used ?? 0) + (parent.available ?? 0));
 							share.free = parent.available ?? Math.max(share.size - share.alloc, 0);

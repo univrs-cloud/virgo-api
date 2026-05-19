@@ -56,9 +56,15 @@ const getNextcloudPaths = () => {
 	return paths;
 };
 
+const getDownloadsPath = () => {
+	const DOWNLOADS = '/downloads';
+	return (fs.existsSync(DOWNLOADS) ? [DOWNLOADS] : []);
+};
+
 const getCustomPaths = () => {
 	return [
-		...getNextcloudPaths()
+		...getNextcloudPaths(),
+		...getDownloadsPath()
 	];
 };
 
