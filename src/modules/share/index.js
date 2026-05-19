@@ -12,6 +12,9 @@ class ShareModule extends BaseModule {
 	#timeMachinesConf = '/messier/.shares/time_machines.conf';
 	#foldersDataset = 'messier/folders';
 	#timeMachinesDataset = 'messier/time_machines';
+	#duCache = new Map();
+	#duInflight = new Map();
+	#duMinRefreshMs = 5 * 60 * 1000;
 
 	constructor() {
 		super('share');
@@ -67,7 +70,7 @@ class ShareModule extends BaseModule {
 		}
 		return null;
 	}
-	
+
 	refquotaToZfsString(bytes) {
 		if (bytes >= 1024 ** 4) return `${Math.floor(bytes / 1024 ** 4)}T`;
 		if (bytes >= 1024 ** 3) return `${Math.floor(bytes / 1024 ** 3)}G`;
@@ -76,11 +79,51 @@ class ShareModule extends BaseModule {
 		return `${bytes}`;
 	}
 
+	#refreshDu(sharePath) {
+		if (this.#duInflight.has(sharePath)) {
+			return this.#duInflight.get(sharePath);
+		}
+		const promise = (async () => {
+			try {
+				const { stdout: duOutput } = await execa('du', ['-sb', '--apparent-size', sharePath]);
+				const alloc = parseInt(duOutput.split(/\s+/)[0], 10);
+				this.#duCache.set(sharePath, { alloc, updatedAt: Date.now() });
+				this.eventEmitter.emit('shares:updated');
+			} catch (error) {
+				console.error(`Error computing du for ${sharePath}:`, error);
+			} finally {
+				this.#duInflight.delete(sharePath);
+			}
+		})();
+		this.#duInflight.set(sharePath, promise);
+		return promise;
+	}
+
+	async #getZfsDatasets() {
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint,used,available,referenced,refquota', '-j', '--json-int']);
+		const datasets = JSON.parse(zfsList)?.datasets || {};
+		return Object.values(datasets).map((dataset) => {
+			const props = dataset.properties || {};
+			return {
+				name: dataset.name,
+				mountpoint: props.mountpoint?.value,
+				used: props.used?.value ?? null,
+				available: props.available?.value ?? null,
+				referenced: props.referenced?.value ?? null,
+				refquota: props.refquota?.value || null
+			};
+		});
+	}
+
 	async #loadShares() {
 		try {
 			const response = await execa('testparm', ['-s', '-l']);
 			const shares = ini.parse(response.stdout);
 			delete shares.global;
+
+			const datasets = await this.#getZfsDatasets();
+			const datasetByMountpoint = new Map(datasets.map((dataset) => { return [dataset.mountpoint, dataset]; }));
+
 			let promises = Object.entries(shares).map(async ([name, value]) => {
 				let share = {
 					name: name,
@@ -96,27 +139,28 @@ class ShareModule extends BaseModule {
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
 				try {
-					const { stdout: dfOutput } = await execa('df', ['-Pk', value['path']]);
-					const parts = dfOutput.split('\n')[1].split(/\s+/);
-					const size = parseInt(parts[1], 10) * 1024;
-					const free = parseInt(parts[3], 10) * 1024;
-					const mountpoint = parts[5];
-					
-					let used;
-					if (value['path'] === mountpoint) {
-						// Path is a ZFS mountpoint, use df
-						used = parseInt(parts[2], 10) * 1024;
-						share.dataset = await this.pathToZfsDataset(value['path']);
-					} else {
-						// Path is a subdirectory, use du for actual directory size
-						const { stdout: duOutput } = await execa('du', ['-sb', '--apparent-size', value['path']]);
-						used = parseInt(duOutput.split(/\s+/)[0], 10);
+					const dataset = datasetByMountpoint.get(value['path']);
+					if (dataset) {
+						share.dataset = dataset.name;
+						share.alloc = dataset.referenced ?? 0;
+						share.size = dataset.refquota ?? ((dataset.used ?? 0) + (dataset.available ?? 0));
+						share.free = Math.max(share.size - share.alloc, 0);
+					} else if (value['path']) {
+						const parent = datasets
+							.filter((dataset) => { return dataset.mountpoint && value['path'].startsWith(dataset.mountpoint.replace(/\/?$/, '/')); })
+							.sort((a, b) => { return b.mountpoint.length - a.mountpoint.length; })[0];
+						const cached = this.#duCache.get(value['path']);
+						share.alloc = cached?.alloc ?? 0;
+						if (parent) {
+							share.size = parent.refquota ?? ((parent.used ?? 0) + (parent.available ?? 0));
+							share.free = parent.available ?? Math.max(share.size - share.alloc, 0);
+						}
+						const stale = !cached || (Date.now() - cached.updatedAt) > this.#duMinRefreshMs;
+						if (stale) {
+							this.#refreshDu(value['path']);
+						}
 					}
-					
-					share.size = size;
-					share.free = free;
-					share.alloc = used;
-					share.cap = (size > 0 ? used / size * 100 : 0);
+					share.cap = (share.size > 0 ? share.alloc / share.size * 100 : 0);
 				} catch (error) {
 					console.error(`Error checking disk space for ${name}:`, error);
 				}
