@@ -34,9 +34,11 @@ const update = async (socket, module) => {
 		return;
 	}
 
-	if (module.updatePid !== null) {
+	if (await module.isUpdateInProgress()) {
 		return;
 	}
+
+	module.resetUpdateTracking();
 
 	let updateLogsWatcher;
 	const watcherPlugin = module.getPlugin('watcher');
@@ -52,7 +54,7 @@ const update = async (socket, module) => {
 	try {
 		// Passed to bash -c directly (no shell: true) so /bin/sh never sees bash-only syntax.
 		const updateScript = [
-			`echo $$ > ${module.updatePidFile}`,
+			`echo $BASHPID > ${module.updatePidFile}`,
 			'UPDATE_EXIT=1',
 			`trap 'echo "$UPDATE_EXIT" > ${module.updateExitStatusFile}' EXIT`,
 			'set -o pipefail',
@@ -79,11 +81,11 @@ const completeUpdate = (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
-	
-	fs.closeSync(fs.openSync(module.updateExitStatusFile, 'w'));
-	fs.closeSync(fs.openSync(module.updatePidFile, 'w'));
-	fs.closeSync(fs.openSync(module.updateFile, 'w'));
-	module.updatePid = null;
+
+	module.resetUpdateTracking();
+	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile]) {
+		fs.closeSync(fs.openSync(file, 'w'));
+	}
 	module.setState('update', null);
 	module.nsp.emit('host:update', module.getState('update'));
 };

@@ -15,6 +15,7 @@ class HostModule extends BaseModule {
 	#updateFile = '/var/www/virgo-api/update.log';
 	#updatePid = null;
 	#updateCompletionPromise = null;
+	#updateCompletionGeneration = 0;
 
 	constructor() {
 		super('host');
@@ -99,6 +100,29 @@ class HostModule extends BaseModule {
 		this.#updatePid = value;
 	}
 
+	resetUpdateTracking() {
+		this.#updateCompletionGeneration++;
+		this.#updateCompletionPromise = null;
+		this.updatePid = null;
+	}
+
+	async syncUpdatePidFromFile() {
+		this.updatePid = await this.#readPidFromFile();
+	}
+
+	async #readPidFromFile() {
+		try {
+			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (updatePid === '') {
+				return null;
+			}
+			const parsedPid = parseInt(updatePid, 10);
+			return Number.isFinite(parsedPid) ? parsedPid : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin?.startPolling(this);
@@ -142,62 +166,99 @@ class HostModule extends BaseModule {
 	}
 
 	async checkUpdate() {
-		try {
-			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
-			this.updatePid = (updatePid === '' ? null : parseInt(updatePid));
-		} catch (error) {}
+		await this.syncUpdatePidFromFile();
+		const exitOnDisk = await this.#readUpdateExitCode();
+		const updateState = this.getState('update');
 
-		if (this.updatePid === null) {
+		if (await this.isUpdateInProgress()) {
+			this.#startUpdateCompletionTracking();
+			return;
+		}
+
+		// Update finished (or API restarted before UI acknowledged): exit file is set until completeUpdate clears it.
+		if (exitOnDisk !== null) {
+			this.#startUpdateCompletionTracking();
+			return;
+		}
+
+		// No exit on disk — either idle (files missing/empty) or process exited without writing an exit code.
+		if (updateState?.state === 'running') {
+			this.#startUpdateCompletionTracking();
+			return;
+		}
+
+		// Idle: pid/exit/log files missing or empty after the user acknowledged completion.
+		if (updateState !== undefined && updateState !== null) {
 			this.setState('update', null);
 			this.nsp.emit('host:update', this.getState('update'));
-			return;
 		}
+	}
 
-		const updateState = this.getState('update');
-		if (updateState?.state === 'succeeded' || updateState?.state === 'failed') {
-			return;
-		}
-
+	#startUpdateCompletionTracking() {
 		if (this.#updateCompletionPromise) {
 			return;
 		}
 
+		const generation = this.#updateCompletionGeneration;
 		const watcherPlugin = this.getPlugin('watcher');
-		let updateLogsWatcher;
+		let updateLogsWatcherPromise = Promise.resolve(null);
 		if (watcherPlugin) {
-			updateLogsWatcher = await watcherPlugin.watchUpdateLog(this);
+			updateLogsWatcherPromise = watcherPlugin.watchUpdateLog(this);
 		}
 
-		this.#updateCompletionPromise = this.#waitForUpdateCompletion(updateLogsWatcher)
+		this.#updateCompletionPromise = updateLogsWatcherPromise
+			.then((updateLogsWatcher) => {
+				return this.#waitForUpdateCompletion(updateLogsWatcher, generation);
+			})
 			.finally(() => {
 				this.#updateCompletionPromise = null;
 			});
 	}
 
-	async #waitForUpdateCompletion(updateLogsWatcher) {
+	async #readUpdateExitCode() {
+		try {
+			const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (exitCodeContent === '') {
+				return null;
+			}
+			const exitCode = parseInt(exitCodeContent, 10);
+			return Number.isFinite(exitCode) ? exitCode : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
+	async #waitForUpdateExitCode() {
+		let exitCode = await this.#readUpdateExitCode();
+		if (exitCode !== null) {
+			return exitCode;
+		}
+
+		let retries = 10;
+		while (retries > 0) {
+			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
+			exitCode = await this.#readUpdateExitCode();
+			if (exitCode !== null) {
+				return exitCode;
+			}
+			retries--;
+		}
+
+		return null;
+	}
+
+	async #waitForUpdateCompletion(updateLogsWatcher, generation) {
 		while (await this.isUpdateInProgress()) {
 			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
 		}
 
-		let exitCodeContent = '';
-		let retries = 10;
-		while (retries > 0 && exitCodeContent === '') {
-			try {
-				exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
-				if (exitCodeContent === '') {
-					await new Promise((resolve) => { return setTimeout(resolve, 1000); });
-					retries--;
-					continue;
-				}
-			} catch (error) {
-				await new Promise((resolve) => { return setTimeout(resolve, 1000); });
-				retries--;
-				continue;
-			}
-			break;
-		}
+		const exitCode = await this.#waitForUpdateExitCode();
 
 		await updateLogsWatcher?.stop();
+
+		if (generation !== this.#updateCompletionGeneration) {
+			return;
+		}
 
 		let isRebootRequired = false;
 		try {
@@ -205,21 +266,15 @@ class HostModule extends BaseModule {
 			isRebootRequired = true;
 		} catch (error) {}
 
-		let exitCode = 0;
-		if (exitCodeContent !== '') {
-			exitCode = parseInt(exitCodeContent);
-			if (isNaN(exitCode)) {
-				console.error(`Failed to parse exit code from file content: "${exitCodeContent}"`);
-				exitCode = 1;
-			}
-			console.log(`Update completed - exit code file content: "${exitCodeContent}", parsed: ${exitCode}`);
+		if (exitCode === null) {
+			console.error('Exit code file is empty or missing after update finished');
 		} else {
-			console.error('Exit code file is empty or missing after retries');
-			exitCode = 1;
+			console.log(`Update completed - exit code: ${exitCode}`);
 		}
 
-		const state = (exitCode === 0 ? 'succeeded' : 'failed');
-		console.log(`Setting update state to: ${state} (exitCode: ${exitCode})`);
+		const resolvedExitCode = (exitCode === null ? 1 : exitCode);
+		const state = (resolvedExitCode === 0 ? 'succeeded' : 'failed');
+		console.log(`Setting update state to: ${state} (exitCode: ${resolvedExitCode})`);
 		this.setState('update', { ...this.getState('update'), isRebootRequired, state });
 		this.nsp.emit('host:update', this.getState('update'));
 
@@ -256,6 +311,8 @@ class HostModule extends BaseModule {
 
 	async isUpdateInProgress() {
 		try {
+			await this.syncUpdatePidFromFile();
+
 			if (this.updatePid !== null) {
 				try {
 					process.kill(this.updatePid, 0);
