@@ -77,14 +77,14 @@ const update = async (socket, module) => {
 	await module.checkUpdate();
 };
 
-const completeUpdate = (socket, module) => {
+const completeUpdate = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
 		return;
 	}
 
 	module.resetUpdateTracking();
 	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile]) {
-		fs.closeSync(fs.openSync(file, 'w'));
+		await fs.promises.writeFile(file, '');
 	}
 	module.setState('update', null);
 	module.nsp.emit('host:update', module.getState('update'));
@@ -106,8 +106,8 @@ const onConnection = (socket, module) => {
 	socket.on('host:update', () => { 
 		update(socket, module); 
 	});
-	socket.on('host:update:complete', () => { 
-		completeUpdate(socket, module); 
+	socket.on('host:update:complete', async () => { 
+		await completeUpdate(socket, module); 
 	});
 };
 

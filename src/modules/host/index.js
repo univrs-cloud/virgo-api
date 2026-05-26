@@ -252,6 +252,9 @@ class HostModule extends BaseModule {
 			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
 		}
 
+		await fs.promises.writeFile(this.updatePidFile, '', 'utf8');
+		this.updatePid = null;
+
 		const exitCode = await this.#waitForUpdateExitCode();
 
 		await updateLogsWatcher?.stop();
