@@ -49,12 +49,13 @@ const watchUpdateLog = async (module) => {
 		await touch(module.updateFile);
 	}
 
-	if (module.getState('update') === undefined) {
+	if (module.getState('update') === undefined && await module.hasActiveUpdateOnDisk()) {
 		module.setState('update', {
 			steps: [],
 			state: 'running'
 		});
 		await readFile();
+		module.emitUpdateState();
 	}
 
 	updateLogsWatcher = new FileWatcher(module.updateFile);
@@ -78,7 +79,7 @@ const watchUpdateLog = async (module) => {
 				return;
 			}
 			module.setState('update', { ...update, steps: data.split('\n'), state: 'running' });
-			module.nsp.emit('host:update', module.getState('update'));
+			module.emitUpdateState();
 		}
 	}
 };

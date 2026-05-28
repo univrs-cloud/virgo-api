@@ -50,6 +50,7 @@ const update = async (socket, module) => {
 		steps: [],
 		state: 'running'
 	});
+	module.emitUpdateState();
 
 	try {
 		// Passed to bash -c directly (no shell: true) so /bin/sh never sees bash-only syntax.
@@ -87,7 +88,7 @@ const completeUpdate = async (socket, module) => {
 		await fs.promises.writeFile(file, '');
 	}
 	module.setState('update', null);
-	module.nsp.emit('host:update', module.getState('update'));
+	module.emitUpdateState();
 };
 
 const onConnection = (socket, module) => {
@@ -103,8 +104,8 @@ const onConnection = (socket, module) => {
 	socket.on('host:updates:check', () => { 
 		checkUpdates(socket, module); 
 	});
-	socket.on('host:update', () => { 
-		update(socket, module); 
+	socket.on('host:update', () => {
+		update(socket, module);
 	});
 	socket.on('host:update:complete', async () => { 
 		await completeUpdate(socket, module); 

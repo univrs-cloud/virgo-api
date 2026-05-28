@@ -7,21 +7,29 @@ const { version } = require('../../../package.json');
 const BaseModule = require('../base');
 
 class HostModule extends BaseModule {
-	#setupCompletedFile = '/var/www/virgo-api/setup_completed';
 	#etcHostsFile = '/etc/hosts';
 	#rebootRequiredFile = '/run/reboot-required';
+	#setupCompletedFile = '/var/www/virgo-api/setup_completed';
 	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
 	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updateFile = '/var/www/virgo-api/update.log';
 	#updatePid = null;
 	#updateCompletionPromise = null;
 	#updateCompletionGeneration = 0;
+	#readyPromise;
 
 	constructor() {
 		super('host');
 
-		this.#loadSetupCompleted();
-		this.checkUpdate();
+		this.#readyPromise = this.#initialize();
+		this.nsp.use(async (socket, next) => {
+			try {
+				await this.#readyPromise;
+				next();
+			} catch (error) {
+				next(error);
+			}
+		});
 		this.setState('system', {
 			api: {
 				version: version
@@ -45,14 +53,6 @@ class HostModule extends BaseModule {
 		si.cpu((cpu) => {
 			this.setState('system', { ...this.getState('system'), cpu });
 		});
-		(async () => {
-			await Promise.all([
-				this.#loadNetworkIdentifier(),
-				this.#loadNetworkInterfaces(),
-				this.#loadDefaultGateway()
-			]);
-		})();
-
 		this.eventEmitter
 			.on('host:updates:updated', () => {
 				for (const socket of this.nsp.sockets.values()) {
@@ -106,21 +106,38 @@ class HostModule extends BaseModule {
 		this.updatePid = null;
 	}
 
+	get updateCompletionPromise() {
+		return this.#updateCompletionPromise;
+	}
+
+	async awaitUpdateCompletion() {
+		const pending = this.#updateCompletionPromise;
+		if (pending) {
+			await pending.catch(() => {});
+		}
+	}
+
+	emitUpdateState() {
+		const update = this.getState('update');
+		if (update === undefined) {
+			return;
+		}
+
+		for (const socket of this.nsp.sockets.values()) {
+			socket.emit('host:update', update);
+		}
+	}
+
 	async syncUpdatePidFromFile() {
 		this.updatePid = await this.#readPidFromFile();
 	}
 
-	async #readPidFromFile() {
-		try {
-			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
-			if (updatePid === '') {
-				return null;
-			}
-			const parsedPid = parseInt(updatePid, 10);
-			return Number.isFinite(parsedPid) ? parsedPid : null;
-		} catch (error) {
-			return null;
+	async hasActiveUpdateOnDisk() {
+		if (await this.isUpdateInProgress()) {
+			return true;
 		}
+
+		return (await this.#readUpdateExitCode()) !== null;
 	}
 
 	async onConnection(socket) {
@@ -171,12 +188,16 @@ class HostModule extends BaseModule {
 		const updateState = this.getState('update');
 
 		if (await this.isUpdateInProgress()) {
+			await this.#ensureUpdateRunningState();
 			this.#startUpdateCompletionTracking();
 			return;
 		}
 
 		// Update finished (or API restarted before UI acknowledged): exit file is set until completeUpdate clears it.
 		if (exitOnDisk !== null) {
+			if (updateState === undefined) {
+				await this.#hydrateUpdateStateFromDisk(exitOnDisk);
+			}
 			this.#startUpdateCompletionTracking();
 			return;
 		}
@@ -187,101 +208,9 @@ class HostModule extends BaseModule {
 			return;
 		}
 
-		// Idle: pid/exit/log files missing or empty after the user acknowledged completion.
-		if (updateState !== undefined && updateState !== null) {
-			this.setState('update', null);
-			this.nsp.emit('host:update', this.getState('update'));
-		}
-	}
-
-	#startUpdateCompletionTracking() {
-		if (this.#updateCompletionPromise) {
-			return;
-		}
-
-		const generation = this.#updateCompletionGeneration;
-		const watcherPlugin = this.getPlugin('watcher');
-		let updateLogsWatcherPromise = Promise.resolve(null);
-		if (watcherPlugin) {
-			updateLogsWatcherPromise = watcherPlugin.watchUpdateLog(this);
-		}
-
-		this.#updateCompletionPromise = updateLogsWatcherPromise
-			.then((updateLogsWatcher) => {
-				return this.#waitForUpdateCompletion(updateLogsWatcher, generation);
-			})
-			.finally(() => {
-				this.#updateCompletionPromise = null;
-			});
-	}
-
-	async #readUpdateExitCode() {
-		try {
-			const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
-			if (exitCodeContent === '') {
-				return null;
-			}
-			const exitCode = parseInt(exitCodeContent, 10);
-			return Number.isFinite(exitCode) ? exitCode : null;
-		} catch (error) {
-			return null;
-		}
-	}
-
-	async #waitForUpdateExitCode() {
-		let exitCode = await this.#readUpdateExitCode();
-		if (exitCode !== null) {
-			return exitCode;
-		}
-
-		let retries = 10;
-		while (retries > 0) {
-			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
-			exitCode = await this.#readUpdateExitCode();
-			if (exitCode !== null) {
-				return exitCode;
-			}
-			retries--;
-		}
-
-		return null;
-	}
-
-	async #waitForUpdateCompletion(updateLogsWatcher, generation) {
-		while (await this.isUpdateInProgress()) {
-			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
-		}
-
-		await fs.promises.writeFile(this.updatePidFile, '', 'utf8');
-		this.updatePid = null;
-
-		const exitCode = await this.#waitForUpdateExitCode();
-
-		await updateLogsWatcher?.stop();
-
-		if (generation !== this.#updateCompletionGeneration) {
-			return;
-		}
-
-		let isRebootRequired = false;
-		try {
-			await fs.promises.access(this.#rebootRequiredFile);
-			isRebootRequired = true;
-		} catch (error) {}
-
-		if (exitCode === null) {
-			console.error('Exit code file is empty or missing after update finished');
-		} else {
-			console.log(`Update completed - exit code: ${exitCode}`);
-		}
-
-		const resolvedExitCode = (exitCode === null ? 1 : exitCode);
-		const state = (resolvedExitCode === 0 ? 'succeeded' : 'failed');
-		console.log(`Setting update state to: ${state} (exitCode: ${resolvedExitCode})`);
-		this.setState('update', { ...this.getState('update'), isRebootRequired, state });
-		this.nsp.emit('host:update', this.getState('update'));
-
-		this.generateUpdates();
+		// Idle: pid/exit/log files missing or empty (e.g. after acknowledge or app restart).
+		this.setState('update', null);
+		this.emitUpdateState();
 	}
 
 	async generateUpdates() {
@@ -345,6 +274,160 @@ class HostModule extends BaseModule {
 		}
 	}
 
+	async #readPidFromFile() {
+		try {
+			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (updatePid === '') {
+				return null;
+			}
+			const parsedPid = parseInt(updatePid, 10);
+			return Number.isFinite(parsedPid) ? parsedPid : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
+	async #waitForUpdateCompletion(updateLogsWatcher, generation) {
+		while (await this.isUpdateInProgress()) {
+			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
+		}
+
+		await fs.promises.writeFile(this.updatePidFile, '', 'utf8');
+		this.updatePid = null;
+
+		const exitCode = await this.#waitForUpdateExitCode();
+
+		await updateLogsWatcher?.stop();
+
+		if (generation !== this.#updateCompletionGeneration) {
+			return;
+		}
+
+		if (this.getState('update') === null) {
+			return;
+		}
+
+		let isRebootRequired = false;
+		try {
+			await fs.promises.access(this.#rebootRequiredFile);
+			isRebootRequired = true;
+		} catch (error) {}
+
+		if (exitCode === null) {
+			console.error('Exit code file is empty or missing after update finished');
+		} else {
+			console.log(`Update completed - exit code: ${exitCode}`);
+		}
+
+		const resolvedExitCode = (exitCode === null ? 1 : exitCode);
+		const state = (resolvedExitCode === 0 ? 'succeeded' : 'failed');
+		console.log(`Setting update state to: ${state} (exitCode: ${resolvedExitCode})`);
+		const currentUpdate = this.getState('update') ?? { steps: [] };
+		this.setState('update', { ...currentUpdate, isRebootRequired, state });
+		this.emitUpdateState();
+		this.generateUpdates();
+	}
+
+	async #hydrateUpdateStateFromDisk(exitCode) {
+		let steps = [];
+		try {
+			const data = (await fs.promises.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (data !== '') {
+				steps = data.split('\n');
+			}
+		} catch (error) {}
+
+		let isRebootRequired = false;
+		try {
+			await fs.promises.access(this.#rebootRequiredFile);
+			isRebootRequired = true;
+		} catch (error) {}
+
+		const state = (exitCode === 0 ? 'succeeded' : 'failed');
+		this.setState('update', { steps, isRebootRequired, state });
+	}
+
+	async #ensureUpdateRunningState() {
+		const update = this.getState('update');
+		if (update?.state === 'running') {
+			return;
+		}
+
+		let steps = update?.steps ?? [];
+		try {
+			const data = (await fs.promises.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (data !== '') {
+				steps = data.split('\n');
+			}
+		} catch (error) {}
+
+		this.setState('update', { steps, state: 'running' });
+		this.emitUpdateState();
+	}
+
+	#startUpdateCompletionTracking() {
+		if (this.#updateCompletionPromise) {
+			return;
+		}
+
+		const generation = this.#updateCompletionGeneration;
+		const watcherPlugin = this.getPlugin('watcher');
+		let updateLogsWatcherPromise = Promise.resolve(null);
+		if (watcherPlugin) {
+			updateLogsWatcherPromise = watcherPlugin.watchUpdateLog(this);
+		}
+
+		this.#updateCompletionPromise = updateLogsWatcherPromise
+			.then((updateLogsWatcher) => {
+				return this.#waitForUpdateCompletion(updateLogsWatcher, generation);
+			})
+			.finally(() => {
+				this.#updateCompletionPromise = null;
+			});
+	}
+
+	async #readUpdateExitCode() {
+		try {
+			const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+			if (exitCodeContent === '') {
+				return null;
+			}
+			const exitCode = parseInt(exitCodeContent, 10);
+			return Number.isFinite(exitCode) ? exitCode : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
+	async #waitForUpdateExitCode() {
+		let exitCode = await this.#readUpdateExitCode();
+		if (exitCode !== null) {
+			return exitCode;
+		}
+
+		let retries = 10;
+		while (retries > 0) {
+			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
+			exitCode = await this.#readUpdateExitCode();
+			if (exitCode !== null) {
+				return exitCode;
+			}
+			retries--;
+		}
+
+		return null;
+	}
+
+	async #initialize() {
+		await Promise.all([
+			this.#loadSetupCompleted(),
+			this.#loadUpdate(),
+			this.#loadNetworkIdentifier(),
+			this.#loadNetworkInterfaces(),
+			this.#loadDefaultGateway()
+		]);
+	}
+
 	#loadSetupCompleted() {
 		try {
 			if (fs.existsSync(this.#setupCompletedFile)) { // Check if it exists, if it exists, setup is compelted
@@ -353,6 +436,11 @@ class HostModule extends BaseModule {
 		} catch (error) {
 			this.setState('setupCompleted', false);
 		}
+	}
+
+	async #loadUpdate() {
+		await this.checkUpdate();
+		this.emitUpdateState();
 	}
 
 	async #loadNetworkIdentifier() {
