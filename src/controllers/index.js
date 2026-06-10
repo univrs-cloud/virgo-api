@@ -1,6 +1,6 @@
 import path from 'path';
 import express from 'express';
-import staticController from './static.js';
+import * as staticController from './static.js';
 
 const router = express.Router();
 

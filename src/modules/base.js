@@ -6,7 +6,7 @@ import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
 import { getIO } from '../socket.js';
 import { isFromTrustedProxy } from '../utils/trusted_proxy.js';
-import nlp from '../utils/nlp.js';
+import * as nlp from '../utils/nlp.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

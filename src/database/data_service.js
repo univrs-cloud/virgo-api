@@ -1,7 +1,7 @@
 import { sequelize } from './index.js';
 import Configuration from './models/Configuration.js';
 import { Application, Bookmark, ItemOrder } from './models/associations.js';
-import traefikConfig from '../utils/traefik_config.js';
+import * as traefikConfig from '../utils/traefik_config.js';
 
 class DataService {
 	static async initialize() {

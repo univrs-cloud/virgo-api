@@ -1,7 +1,7 @@
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 import configurationManager from './configuration_manager.js';
-import trustedProxy from '../../utils/trusted_proxy.js';
+import * as trustedProxy from '../../utils/trusted_proxy.js';
 
 class ConfigurationModule extends BaseModule {
 	constructor() {
