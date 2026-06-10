@@ -1,5 +1,5 @@
 import { execaSync } from 'execa';
-import { InvalidArgumentError } from 'commander';
+import * as commander from 'commander';
 import { Queue } from 'bullmq';
 import config from '../config.js';
 import DataService from '../src/database/data_service.js';
@@ -328,7 +328,7 @@ const register = (program) => {
 	function parseEnvPair(value) {
 		const index = value.indexOf('=');
 		if (index === -1) {
-			throw new InvalidArgumentError('Expected --env KEY=value');
+			throw new commander.InvalidArgumentError('Expected --env KEY=value');
 		}
 		return [value.slice(0, index), value.slice(index + 1)];
 	}

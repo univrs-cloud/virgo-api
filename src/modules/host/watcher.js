@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import touch from 'touch';
 import FileWatcher from '../../utils/file_watcher.js';
@@ -29,7 +29,7 @@ const watchSetupCompleted = async (module) => {
 	async function syncSetupCompletedState() {
 		let setupCompleted = false;
 		try {
-			await fs.promises.access(module.setupCompletedFile);
+			await fs.access(module.setupCompletedFile);
 			setupCompleted = true;
 		} catch (error) {}
 
@@ -44,7 +44,7 @@ const watchUpdateLog = async (module) => {
 	}
 
 	try {
-		await fs.promises.access(module.updateFile);
+		await fs.access(module.updateFile);
 	} catch (error) {
 		await touch(module.updateFile);
 	}
@@ -71,7 +71,7 @@ const watchUpdateLog = async (module) => {
 	async function readFile() {
 		let data = '';
 		try {
-			data = (await fs.promises.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+			data = (await fs.readFile(module.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
 		} catch (error) {}
 		if (data !== '') {
 			const update = module.getState('update');

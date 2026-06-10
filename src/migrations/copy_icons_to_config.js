@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
@@ -21,20 +21,20 @@ const copyIconsToConfig = async () => {
 
 	const copyDirIfDestMissing = async (src, dest) => {
 		try {
-			await fs.promises.access(dest);
+			await fs.access(dest);
 			console.log(`${dest} already exists. Skipping.`);
 			return;
 		} catch (error) {
 			// Destination does not exist, proceed with copy
 		}
 		try {
-			await fs.promises.access(src);
+			await fs.access(src);
 		} catch (error) {
 			console.log(`Source directory does not exist: ${src}`);
 			return;
 		}
-		await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-		await fs.promises.cp(src, dest, { recursive: true, force: false });
+		await fs.mkdir(path.dirname(dest), { recursive: true });
+		await fs.cp(src, dest, { recursive: true, force: false });
 		console.log(`Copied ${src} -> ${dest}`);
 	};
 

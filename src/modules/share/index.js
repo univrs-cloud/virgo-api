@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { execa } from 'execa';
 import ini from 'ini';
@@ -60,7 +60,7 @@ class ShareModule extends BaseModule {
 		const timeMachinesConfName = path.basename(this.timeMachinesConf);
 		let entries;
 		try {
-			entries = await fs.promises.readdir(dir, { withFileTypes: true });
+			entries = await fs.readdir(dir, { withFileTypes: true });
 		} catch {
 			return null;
 		}
@@ -73,7 +73,7 @@ class ShareModule extends BaseModule {
 			}
 			const filepath = path.join(dir, entry.name);
 			try {
-				const shares = ini.parse(await fs.promises.readFile(filepath, 'utf8'));
+				const shares = ini.parse(await fs.readFile(filepath, 'utf8'));
 				if (shares[name]) {
 					return filepath;
 				}

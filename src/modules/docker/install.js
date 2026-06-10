@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
 import { execa } from 'execa';
 import stream from 'stream';
@@ -24,7 +24,7 @@ const installApp = async (job, module) => {
 	const dataset = `${module.appsDataset}/${template.name}`;
 	const appDir = path.join(module.appsDir, template.name);
 	try {
-		await fs.promises.access(appDir);
+		await fs.access(appDir);
 		await module.updateJobProgress(job, `Storage space ${dataset} for ${template.title} already exists. Skipping creation.`);
 	} catch (error) {
 		if (error.code === 'ENOENT') {
@@ -47,11 +47,11 @@ const installApp = async (job, module) => {
 	let env = Object.entries(config?.env || {}).map(([key, value]) => `${key}='${value}'`).join('\n');
 	const composeProjectDir = path.join(module.composeDir, template.name);
 	await module.updateJobProgress(job, `Making ${template.title} project directory...`);
-	await fs.promises.mkdir(composeProjectDir, { recursive: true });
+	await fs.mkdir(composeProjectDir, { recursive: true });
 	await module.updateJobProgress(job, `Writing ${template.title} project template...`);
-	await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
+	await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 	await module.updateJobProgress(job, `Writing ${template.title} project configuration...`);
-	await fs.promises.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
+	await fs.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
 	
 	await module.updateJobProgress(job, `Downloading ${template.title}...`);
 	const parsePullProgress = dockerPullProgressParser();
@@ -75,10 +75,10 @@ const installApp = async (job, module) => {
 	});
 
 	const icon = template.logo.split('/').pop();
-	await fs.promises.mkdir(module.appIconsDir, { recursive: true });
+	await fs.mkdir(module.appIconsDir, { recursive: true });
 	const responseIcon = await fetch(template.logo);
 	if (responseIcon.ok) {
-		await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.appIconsDir, icon)));
+		await streamPipeline(responseIcon.body, createWriteStream(path.join(module.appIconsDir, icon)));
 	}
 	const app = {
 		name: template.name,

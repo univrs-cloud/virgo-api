@@ -1,4 +1,4 @@
-import { openDb } from '../indexer/db.js';
+import * as database from '../indexer/db.js';
 
 const register = (program) => {
 	const indexerCmd = program
@@ -26,7 +26,7 @@ const register = (program) => {
 		.option('--dataset <names>', 'Dataset root(s), comma-separated; reset each root and its children')
 		.action(async (options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				query.reindex(db, options);
 			} finally {
@@ -51,7 +51,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (term, options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.search(db, term, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));
@@ -69,7 +69,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (path, options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.history(db, path, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));
@@ -90,7 +90,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.deleted(db, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));
@@ -111,7 +111,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (snapshot, options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.changes(db, snapshot, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));
@@ -130,7 +130,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (snapA, snapB, options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.diff(db, snapA, snapB, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));
@@ -147,7 +147,7 @@ const register = (program) => {
 		.option('--json', 'Output as JSON')
 		.action(async (options) => {
 			const query = await import('../indexer/query.js');
-			const db = openDb();
+			const db = database.open();
 			try {
 				const result = query.stats(db, options);
 				if (options.json) console.log(JSON.stringify(result, null, 2));

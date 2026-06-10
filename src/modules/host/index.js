@@ -1,5 +1,5 @@
 import os from 'os';
-import fs from 'fs';
+import fsSync, { promises as fs } from 'fs';
 import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
@@ -262,7 +262,7 @@ class HostModule extends BaseModule {
 					if (pids.length > 0 && pids[0] !== '') {
 						// Update the PID to the actual running process
 						this.updatePid = parseInt(pids[0], 10);
-						await fs.promises.writeFile(this.updatePidFile, this.updatePid, 'utf8');
+						await fs.writeFile(this.updatePidFile, this.updatePid, 'utf8');
 						return true;
 					}
 				} catch (error) {
@@ -278,7 +278,7 @@ class HostModule extends BaseModule {
 
 	async #readPidFromFile() {
 		try {
-			const updatePid = (await fs.promises.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
+			const updatePid = (await fs.readFile(this.updatePidFile, { encoding: 'utf8', flag: 'r' })).trim();
 			if (updatePid === '') {
 				return null;
 			}
@@ -294,7 +294,7 @@ class HostModule extends BaseModule {
 			await new Promise((resolve) => { return setTimeout(resolve, 1000); });
 		}
 
-		await fs.promises.writeFile(this.updatePidFile, '', 'utf8');
+		await fs.writeFile(this.updatePidFile, '', 'utf8');
 		this.updatePid = null;
 
 		const exitCode = await this.#waitForUpdateExitCode();
@@ -311,7 +311,7 @@ class HostModule extends BaseModule {
 
 		let isRebootRequired = false;
 		try {
-			await fs.promises.access(this.#rebootRequiredFile);
+			await fs.access(this.#rebootRequiredFile);
 			isRebootRequired = true;
 		} catch (error) {}
 
@@ -333,7 +333,7 @@ class HostModule extends BaseModule {
 	async #hydrateUpdateStateFromDisk(exitCode) {
 		let steps = [];
 		try {
-			const data = (await fs.promises.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+			const data = (await fs.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
 			if (data !== '') {
 				steps = data.split('\n');
 			}
@@ -341,7 +341,7 @@ class HostModule extends BaseModule {
 
 		let isRebootRequired = false;
 		try {
-			await fs.promises.access(this.#rebootRequiredFile);
+			await fs.access(this.#rebootRequiredFile);
 			isRebootRequired = true;
 		} catch (error) {}
 
@@ -357,7 +357,7 @@ class HostModule extends BaseModule {
 
 		let steps = update?.steps ?? [];
 		try {
-			const data = (await fs.promises.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
+			const data = (await fs.readFile(this.updateFile, { encoding: 'utf8', flag: 'r' })).trim();
 			if (data !== '') {
 				steps = data.split('\n');
 			}
@@ -390,7 +390,7 @@ class HostModule extends BaseModule {
 
 	async #readUpdateExitCode() {
 		try {
-			const exitCodeContent = (await fs.promises.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
+			const exitCodeContent = (await fs.readFile(this.updateExitStatusFile, { encoding: 'utf8', flag: 'r' })).trim();
 			if (exitCodeContent === '') {
 				return null;
 			}
@@ -432,7 +432,7 @@ class HostModule extends BaseModule {
 
 	#loadSetupCompleted() {
 		try {
-			if (fs.existsSync(this.#setupCompletedFile)) { // Check if it exists, if it exists, setup is compelted
+			if (fsSync.existsSync(this.#setupCompletedFile)) { // Check if it exists, if it exists, setup is compelted
 				this.setState('setupCompleted', true);
 			}
 		} catch (error) {
@@ -470,13 +470,13 @@ class HostModule extends BaseModule {
 		try {
 			let targetInterface = ifname;
 			const bondingPath = `/sys/class/net/${ifname}/bonding/active_slave`;
-			if (fs.existsSync(bondingPath)) { // Check if it's a bond interface
-				const activeSlave = await fs.promises.readFile(bondingPath, 'utf8');
+			if (fsSync.existsSync(bondingPath)) { // Check if it's a bond interface
+				const activeSlave = await fs.readFile(bondingPath, 'utf8');
 				if (activeSlave.trim()) {
 					targetInterface = activeSlave.trim();
 				}
 			}
-			const speed = await fs.promises.readFile(`/sys/class/net/${targetInterface}/speed`, 'utf8');
+			const speed = await fs.readFile(`/sys/class/net/${targetInterface}/speed`, 'utf8');
 			const speedValue = parseInt(speed.trim(), 10);
 			return (isNaN(speedValue) || speedValue < 0) ? 0 : speedValue;
 		} catch {

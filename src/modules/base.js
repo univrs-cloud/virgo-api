@@ -4,8 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { Queue, Worker } from 'bullmq';
 import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
-import { getIO } from '../socket.js';
-import { isFromTrustedProxy } from '../utils/trusted_proxy.js';
+import * as socket from '../socket.js';
+import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as nlp from '../utils/nlp.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
@@ -25,7 +25,7 @@ class BaseModule {
 
 	constructor(name) {
 		this.#name = name;
-		this.#io = getIO();
+		this.#io = socket.getIO();
 		this.#nsp = this.#io.of(`/${this.#name}`);
 		this.#eventEmitter = eventEmitter;
 
@@ -107,7 +107,7 @@ class BaseModule {
 
 	#setupMiddleware() {
 		this.#nsp.use((socket, next) => {
-			const remoteUser = (isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['remote-user'] : undefined);
+			const remoteUser = (trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['remote-user'] : undefined);
 			socket.isAuthenticated = (remoteUser !== undefined);
 			socket.isAdmin = (socket.isAuthenticated && socket.handshake.headers['remote-groups']?.split(',')?.includes('admins')) || false;
 			socket.username = (socket.isAuthenticated ? remoteUser : 'guest');

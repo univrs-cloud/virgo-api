@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
@@ -12,7 +12,7 @@ const moveDatabaseLocation = async () => {
 	
 	// Check if new database already exists
 	try {
-		await fs.promises.access(newDbPath);
+		await fs.access(newDbPath);
 		console.log(`Database already exists at ${newDbPath}. Skipping movement.`);
 		return;
 	} catch (error) {
@@ -20,7 +20,7 @@ const moveDatabaseLocation = async () => {
 	}
 	// Check if old database file exists
 	try {
-		await fs.promises.access(oldDbPath);
+		await fs.access(oldDbPath);
 		console.log(`Found existing database at ${oldDbPath}`);
 	} catch (error) {
 		console.log(`No existing database found at ${oldDbPath}.`);
@@ -36,15 +36,15 @@ const moveDatabaseLocation = async () => {
 	}
 	// Ensure the new config directory exists
 	try {
-		await fs.promises.access(configDir);
+		await fs.access(configDir);
 	} catch (error) {
-		await fs.promises.mkdir(configDir, { recursive: true });
+		await fs.mkdir(configDir, { recursive: true });
 		console.log(`Created config directory: ${configDir}`);
 	}
 		
 	try {
-		await fs.promises.copyFile(oldDbPath, newDbPath);
-		await fs.promises.unlink(oldDbPath);
+		await fs.copyFile(oldDbPath, newDbPath);
+		await fs.unlink(oldDbPath);
 		console.log(`Successfully moved database from ${oldDbPath} to ${newDbPath}`);
 		
 	} catch (error) {

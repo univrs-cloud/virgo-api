@@ -1,5 +1,5 @@
 import FileWatcher from '../../utils/file_watcher.js';
-import { INDEX_DB_PATH } from '../../../indexer/db.js';
+import * as database from '../../../indexer/db.js';
 
 // The indexer keeps SQLite in WAL mode, so the main `index.db` file is only
 // touched on checkpoint (typically at the end of a run). That makes it the
@@ -16,7 +16,7 @@ const watchIndexDb = (module) => {
 		return indexDbWatcher;
 	}
 
-	indexDbWatcher = new FileWatcher(INDEX_DB_PATH);
+	indexDbWatcher = new FileWatcher(database.INDEX_DB_PATH);
 	indexDbWatcher
 		.onChange((event, changedPath) => {
 			if (changedPath !== INDEX_DB_PATH) {

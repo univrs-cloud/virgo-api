@@ -3,13 +3,13 @@
 import config from './config.js';
 import createApp from './src/app.js';
 import createServer from './src/server.js';
-import { initializeSocket } from './src/socket.js';
+import * as socket from './src/socket.js';
 import modules from './src/modules/index.js';
 
 async function main() {
 	const app = createApp();
 	const server = createServer(app);
-	initializeSocket(server);
+	socket.initializeSocket(server);
 	await modules();
 
 	server.listen(config.server.port, () => {

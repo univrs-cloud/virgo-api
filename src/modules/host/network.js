@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
@@ -79,7 +79,7 @@ ff02::2		ip6-allrouters
 127.0.1.1	${fqdn} ${hostname}
 ${ip}	${fqdn} ${hostname}
 `;
-	await fs.promises.writeFile(module.etcHosts, configuration, 'utf8');
+	await fs.writeFile(module.etcHosts, configuration, 'utf8');
 };
 
 const updateIdentifier = async (job, module) => {

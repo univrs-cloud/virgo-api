@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import DataService from '../database/data_service.js';
@@ -12,7 +12,7 @@ const DB_PATHS = ['/messier/.config/virgo.db', '/var/www/virgo-api/virgo.db'];
 const databaseExists = async () => {
 	for (const dbPath of DB_PATHS) {
 		try {
-			await fs.promises.access(dbPath);
+			await fs.access(dbPath);
 			return true;
 		} catch (_) {
 			// continue

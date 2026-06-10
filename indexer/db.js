@@ -6,7 +6,7 @@ const INDEX_DB_DIR = '/messier/.config';
 const INDEX_DB_NAME = 'index.db';
 const INDEX_DB_PATH = join(INDEX_DB_DIR, INDEX_DB_NAME);
 
-function openDb() {
+function open() {
 	const root = dirname(INDEX_DB_DIR);
 	if (!existsSync(root)) {
 		throw new Error(`Fatal: ${root} does not exist. Is the ZFS pool mounted?`);
@@ -214,4 +214,4 @@ function disableBulkMode(db) {
 	checkpoint(db);
 }
 
-export { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };
+export { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, open, transaction, enableBulkMode, disableBulkMode, checkpoint };

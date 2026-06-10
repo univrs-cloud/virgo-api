@@ -1,8 +1,8 @@
 import DataService from '../src/database/data_service.js';
-import { INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } from './db.js';
-import { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles } from './zfs.js';
-import { walkSnapshot } from './walker.js';
-import { formatSize, formatDuration, acquireLock, releaseLock } from './utils.js';
+import * as database from './db.js';
+import * as zfs from './zfs.js';
+import * as walker from './walker.js';
+import * as utils from './utils.js';
 import { execaSync } from 'execa';
 import { stat } from 'fs/promises';
 
@@ -89,9 +89,9 @@ function makeSnapshotStatError(snap, snapPath, failures, total) {
  * @returns {never}
  */
 function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
-	const recoverable = isZfsDiffFailure(e) || isSnapshotStatFailure(e);
+	const recoverable = zfs.isZfsDiffFailure(e) || isSnapshotStatFailure(e);
 	const transition = prevSnap ? `${prevSnap.name} → ${snap.name}` : snap.name;
-	if (isZfsDiffFailure(e)) {
+	if (zfs.isZfsDiffFailure(e)) {
 		console.warn(`  ⚠  zfs diff failed (${transition}): ${e.message}`);
 	} else if (isSnapshotStatFailure(e)) {
 		console.warn(`  ⚠  ${e.message}`);
@@ -126,7 +126,7 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 }
 
 function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
-	transaction(db, () => {
+	database.transaction(db, () => {
 		stmt.deleteChangesBySnapshot.run(snapId);
 		if (mode === 'changes_only') {
 			stmt.clearDeletedAt.run(snapId);
@@ -176,7 +176,7 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 		}
 		const reason = !inScope ? 'removed from indexer configuration' : 'no longer present on ZFS';
 		console.log(`  🗑  Dropping index data for ${name} (${reason})`);
-		transaction(db, () => {
+		database.transaction(db, () => {
 			stmt.deleteChangesForDataset.run(id);
 			stmt.deleteFileVersionsForDataset.run(id);
 			stmt.deleteFilesForDataset.run(id);
@@ -187,7 +187,7 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 }
 
 function persistLastRunMeta(db, stmt, perf, restartCount) {
-	transaction(db, () => {
+	database.transaction(db, () => {
 		stmt.setMeta.run('last_run_at', new Date().toISOString());
 		stmt.setMeta.run('last_run_orphan_changes', String(perf.orphanedChanges));
 		stmt.setMeta.run('last_run_stat_failures', String(perf.statFailures));
@@ -228,7 +228,7 @@ function normalizeIndexerDatasets(configuration) {
 }
 
 async function run(_opts = {}) {
-	const staleTemps = cleanupStaleTempFiles();
+	const staleTemps = zfs.cleanupStaleTempFiles();
 	if (staleTemps > 0) {
 		console.log(`🧹 Cleaned up ${staleTemps} stale zfs-diff temp file(s) from previous run(s).`);
 	}
@@ -240,15 +240,15 @@ async function run(_opts = {}) {
 		console.log(
 			'Indexer: Configuration key `indexer` is missing, empty, or not a JSON array (virgo.db); clearing the index database.'
 		);
-		const lockPath = acquireLock(INDEX_DB_PATH);
+		const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
 		try {
-			const db = openDb();
+			const db = database.open();
 			try {
 				const stmt = prepareDatasetPruneStatements(db);
 				pruneStaleIndexedDatasets(db, stmt, [], new Set());
-				disableBulkMode(db);
+				database.disableBulkMode(db);
 				const lastRunAt = new Date().toISOString();
-				transaction(db, () => {
+				database.transaction(db, () => {
 					db.prepare(`
 						INSERT INTO meta(key, value) VALUES ('last_run_at', ?)
 						ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -264,12 +264,12 @@ async function run(_opts = {}) {
 				db.close();
 			}
 		} finally {
-			releaseLock(lockPath);
+			utils.releaseLock(lockPath);
 		}
 		return;
 	}
 
-	const lockPath = acquireLock(INDEX_DB_PATH);
+	const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
 	try {
 		const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
 		const maxAttempts = Math.max(1, maxRestarts + 1);
@@ -294,14 +294,14 @@ async function run(_opts = {}) {
 			}
 		}
 	} finally {
-		releaseLock(lockPath);
+		utils.releaseLock(lockPath);
 	}
 }
 
 async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCount = 0, lockPath = null) {
 	const pool = includeDatasets[0].split('/')[0];
 
-	const db = openDb();
+	const db = database.open();
 
 	const perf = {
 		t0: Date.now(), snapsCrawled: 0, snapsIncremental: 0, snapsSkipped: 0,
@@ -411,7 +411,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		console.log(`\n⚠  Received ${sig} during indexing, restoring DB state…`);
 		if (inBulkMode) {
 			try {
-				disableBulkMode(db);
+				database.disableBulkMode(db);
 			} catch {
 				/* ignore */
 			}
@@ -427,7 +427,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			/* ignore */
 		}
 		if (lockPath) {
-			releaseLock(lockPath);
+			utils.releaseLock(lockPath);
 		}
 		process.exit(sig === 'SIGTERM' ? 143 : 130);
 	};
@@ -439,7 +439,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		console.log(`   Pool: ${pool}`);
 		console.log(`   Include: ${includeDatasets.join(', ')}`);
 
-		const { datasets, snapshots } = discoverAll({ pool });
+		const { datasets, snapshots } = zfs.discoverAll({ pool });
 		// Pool-wide discovery; keep only configured roots and their descendants.
 		const filteredDatasets = datasets.filter(d =>
 			includeDatasets.some(p => d.name === p || d.name.startsWith(p + '/'))
@@ -483,7 +483,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			for (const snap of stmt.getSnapshotsForDataset.all(dsId)) {
 				if (!liveFullNames.has(snap.full_name)) {
 					console.log(`  🗑  Pruning: ${snap.full_name}`);
-					transaction(db, () => {
+					database.transaction(db, () => {
 						stmt.deleteChangesBySnapshot.run(snap.id);
 						stmt.deleteVersionsBySnapshot.run(snap.id);
 						stmt.clearFirstSeen.run(snap.id);
@@ -494,7 +494,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 				}
 			}
 		}
-		transaction(db, () => {
+		database.transaction(db, () => {
 			for (const d of filteredDatasets) {
 				const dsId = datasetIds[d.name];
 				stmt.repairLastSeenNull.run(dsId);
@@ -504,10 +504,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			stmt.deleteOrphanedFiles.run();
 		});
 
-		enableBulkMode(db);
+		database.enableBulkMode(db);
 		inBulkMode = true;
 
-		transaction(db, () => {
+		database.transaction(db, () => {
 			stmt.setMeta.run('last_activity_at', new Date().toISOString());
 		});
 
@@ -522,7 +522,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			let snapIdx = 0;
 			for (const snap of dsSnaps) {
 				try {
-					const snapPath = snapshotMountPath(d.mountpoint, snap.name);
+					const snapPath = zfs.snapshotMountPath(d.mountpoint, snap.name);
 
 					const needIndex = !snap.indexed_at;
 					const needDiff = prevSnap && !snap.diff_done;
@@ -581,8 +581,8 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 					snapIdx++;
 
 					if (snapIdx % 10 === 0) {
-						checkpoint(db);
-						transaction(db, () => {
+						database.checkpoint(db);
+						database.transaction(db, () => {
 							stmt.setMeta.run('last_activity_at', new Date().toISOString());
 						});
 					}
@@ -605,7 +605,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			}
 		}
 
-		disableBulkMode(db);
+		database.disableBulkMode(db);
 		inBulkMode = false;
 
 		finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, '\n✅ Indexing complete.');
@@ -616,7 +616,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		// before the explicit disableBulkMode above.
 		if (inBulkMode) {
 			try {
-				disableBulkMode(db);
+				database.disableBulkMode(db);
 				inBulkMode = false;
 			} catch (e) {
 				console.warn(`  ⚠  disableBulkMode failed during cleanup: ${e.message}`);
@@ -656,12 +656,12 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 	let count = 0;
 	const t0 = Date.now();
 
-	const result = await walkSnapshot(snapPath, (batch) => {
+	const result = await walker.walkSnapshot(snapPath, (batch) => {
 		if (batch === null) {
 			return;
 		}
 		const t = Date.now();
-		transaction(db, () => {
+		database.transaction(db, () => {
 			perf.sqlTxns++;
 			for (const e of batch) {
 				const fileRow = stmt.upsertFile.get(datasetId, e.path, e.inode, e.type, snapId, snapId);
@@ -844,7 +844,7 @@ async function runDiffStream({
 	let changeCount = 0;
 	let batch = [];
 
-	for await (const c of diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
+	for await (const c of zfs.diffSnapshots(prevSnap.full_name, snap.full_name, mountpoint)) {
 		batch.push(c);
 		if (batch.length >= INCR_BATCH_SIZE) {
 			const n = batch.length;
@@ -1126,7 +1126,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 	);
 
 	const t = Date.now();
-	transaction(db, () => {
+	database.transaction(db, () => {
 		perf.sqlTxns++;
 		for (let i = 0; i < batch.length; i++) {
 			const c = batch[i];
@@ -1183,7 +1183,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 	);
 
 	const t = Date.now();
-	transaction(db, () => {
+	database.transaction(db, () => {
 		perf.sqlTxns++;
 		for (let i = 0; i < batch.length; i++) {
 			const c = batch[i];
@@ -1279,7 +1279,7 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
 
 	const t = Date.now();
-	transaction(db, () => {
+	database.transaction(db, () => {
 		perf.sqlTxns++;
 		for (let i = 0; i < changes.length; i++) {
 			const c = changes[i];
@@ -1396,22 +1396,22 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	}
 
 	console.log('\n💾 SQLite:');
-	console.log(`DB size: ${formatSize(pgSz * pgCount)}`);
-	console.log(`Used: ${formatSize(pgSz * (pgCount - pgFree))} (${pgCount - pgFree} pages)`);
-	console.log(`Free: ${formatSize(pgSz * pgFree)} (${pgFree} pages)`);
-	console.log(`Page size: ${formatSize(pgSz)}`);
+	console.log(`DB size: ${utils.formatSize(pgSz * pgCount)}`);
+	console.log(`Used: ${utils.formatSize(pgSz * (pgCount - pgFree))} (${pgCount - pgFree} pages)`);
+	console.log(`Free: ${utils.formatSize(pgSz * pgFree)} (${pgFree} pages)`);
+	console.log(`Page size: ${utils.formatSize(pgSz)}`);
 	console.log(`Journal mode: ${jMode}`);
 	console.log(`Cache size: ${Math.abs(cSz)}${cSz < 0 ? 'KiB' : ' pages'}`);
 
 	console.log('\n⏱  Performance:');
-	console.log(`Total runtime: ${formatDuration(totalMs)}`);
+	console.log(`Total runtime: ${utils.formatDuration(totalMs)}`);
 	if (restartCount > 0) {
 		console.log(`Restarts: ${restartCount}`);
 		console.log('Note: Crawl/diff/SQL counters below are for the last completed pass only.');
 	}
-	console.log(`Crawl time: ${formatDuration(perf.crawlMs)}`);
-	console.log(`Diff time: ${formatDuration(perf.diffMs)}`);
-	console.log(`Stat time: ${formatDuration(perf.statMs)}`);
+	console.log(`Crawl time: ${utils.formatDuration(perf.crawlMs)}`);
+	console.log(`Diff time: ${utils.formatDuration(perf.diffMs)}`);
+	console.log(`Stat time: ${utils.formatDuration(perf.statMs)}`);
 	console.log(`Full crawls: ${perf.snapsCrawled}`);
 	console.log(`Incremental: ${perf.snapsIncremental}`);
 	console.log(`Skipped: ${perf.snapsSkipped}`);
@@ -1430,7 +1430,7 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	console.log(`Selects: ${perf.sqlSelects.toLocaleString()}`);
 	console.log(`Updates: ${perf.sqlUpdates.toLocaleString()}`);
 	console.log(`Transactions: ${perf.sqlTxns.toLocaleString()}`);
-	console.log(`SQL time: ${formatDuration(perf.sqlMs)}`);
+	console.log(`SQL time: ${utils.formatDuration(perf.sqlMs)}`);
 	if (totalMs > 0) {
 		console.log(`SQL % of total: ${(perf.sqlMs / totalMs * 100).toFixed(1)}%`);
 	}

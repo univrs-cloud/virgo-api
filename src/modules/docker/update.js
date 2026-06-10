@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
 import stream from 'stream';
 import { promisify } from 'util';
@@ -31,11 +31,11 @@ const updateApp = async (job, module) => {
 			if (response.ok) {
 				const stack = await response.text();
 				await module.updateJobProgress(job, `Writing ${template.title} project template...`);
-				await fs.promises.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
+				await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 				const icon = template.logo.split('/').pop();
 				const responseIcon = await fetch(template.logo);
 				if (responseIcon.ok) {
-					await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.appIconsDir, icon)));
+					await streamPipeline(responseIcon.body, createWriteStream(path.join(module.appIconsDir, icon)));
 					const updatedApp = { ...existingApp, icon: icon };
 					await DataService.setApplication(updatedApp);
 					module.eventEmitter.emit('configured:updated');

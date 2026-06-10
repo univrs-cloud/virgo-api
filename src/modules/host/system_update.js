@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 
 const checkUpdates = async (socket, module) => {
@@ -85,7 +85,7 @@ const completeUpdate = async (socket, module) => {
 
 	module.resetUpdateTracking();
 	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile]) {
-		await fs.promises.writeFile(file, '');
+		await fs.writeFile(file, '');
 	}
 	module.setState('update', null);
 	module.emitUpdateState();

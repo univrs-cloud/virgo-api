@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
 import stream from 'stream';
 import { promisify } from 'util';
@@ -15,8 +15,8 @@ const createBookmark = async (job, module) => {
 		const iconFilename = config.icon.split('/').pop();
 		const responseIcon = await fetch(config.icon);
 		if (responseIcon.ok) {
-			await fs.promises.mkdir(module.bookmarkIconsDir, { recursive: true });
-			await streamPipeline(responseIcon.body, fs.createWriteStream(path.join(module.bookmarkIconsDir, iconFilename)));
+			await fs.mkdir(module.bookmarkIconsDir, { recursive: true });
+			await streamPipeline(responseIcon.body, createWriteStream(path.join(module.bookmarkIconsDir, iconFilename)));
 			icon = iconFilename;
 		}
 	}

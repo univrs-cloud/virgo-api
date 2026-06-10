@@ -1,4 +1,4 @@
-import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
+import * as fs from 'fs';
 
 function formatSize(bytes) {
 	if (bytes === null || bytes === undefined) {
@@ -32,28 +32,28 @@ function formatDuration(ms) {
 
 function acquireLock(dbPath) {
 	const lockPath = dbPath + '.lock';
-	if (existsSync(lockPath)) {
+	if (fs.existsSync(lockPath)) {
 		let stalePid;
 		try {
-			stalePid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+			stalePid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
 			process.kill(stalePid, 0);
 			throw new Error(`Another indexer is already running (PID ${stalePid}). Lock: ${lockPath}`);
 		} catch (e) {
 			if (e.code === 'ESRCH') {
 				console.warn(`  ⚠  Removing stale lock file (PID ${stalePid} no longer running)`);
-				unlinkSync(lockPath);
+				fs.unlinkSync(lockPath);
 			} else {
 				throw e;
 			}
 		}
 	}
-	writeFileSync(lockPath, String(process.pid));
+	fs.writeFileSync(lockPath, String(process.pid));
 	return lockPath;
 }
 
 function releaseLock(lockPath) {
 	try {
-		unlinkSync(lockPath);
+		fs.unlinkSync(lockPath);
 	} catch {
 		/* ignore */
 	}

@@ -1,4 +1,4 @@
-import { isFromTrustedProxy } from '../utils/trusted_proxy.js';
+import * as trustedProxy from '../utils/trusted_proxy.js';
 
 /**
  * Middleware for non-WebSocket HTTP requests only.
@@ -18,7 +18,7 @@ export default (req, res, next) => {
 	};
 	// Node’s HTTP API calls the TCP connection “socket” (not WebSocket). We need that connection’s
 	// peer address so we can tell proxy (loopback) from direct clients.
-	if (isFromTrustedProxy(req.socket?.remoteAddress) && req.headers['remote-user']) {
+	if (trustedProxy.isFromTrustedProxy(req.socket?.remoteAddress) && req.headers['remote-user']) {
 		const account = {
 			name: req.headers['remote-name'],
 			user: req.headers['remote-user'],

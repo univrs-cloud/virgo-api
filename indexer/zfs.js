@@ -1,9 +1,9 @@
 import { execaSync, execa } from 'execa';
-import { createReadStream, promises as fsp, readdirSync, statSync, unlinkSync } from 'fs';
+import { createReadStream, promises as fs, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import readline from 'readline';
 import { noiseGrepPattern } from './scope.js';
-import { INDEX_DB_DIR } from './db.js';
+import * as database from './db.js';
 
 // ─── Temp file lifecycle ────────────────────────────────────────────────────
 //
@@ -116,7 +116,7 @@ async function withSpoolProgress(promise, tmpPath, label) {
 function cleanupStaleTempFiles() {
 	let entries;
 	try {
-		entries = readdirSync(INDEX_DB_DIR);
+		entries = readdirSync(database.INDEX_DB_DIR);
 	} catch {
 		return 0;
 	}
@@ -134,7 +134,7 @@ function cleanupStaleTempFiles() {
 			continue;
 		}
 		try {
-			unlinkSync(join(INDEX_DB_DIR, name));
+			unlinkSync(join(database.INDEX_DB_DIR, name));
 			removed++;
 		} catch {
 			/* ignore */
@@ -283,7 +283,7 @@ function unescapeZfsPath(str) {
  */
 async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	installExitHandlers();
-	const tmpPath = join(INDEX_DB_DIR, `${TEMP_PREFIX}${process.pid}-${++tempSeq}.tsv`);
+	const tmpPath = join(database.INDEX_DB_DIR, `${TEMP_PREFIX}${process.pid}-${++tempSeq}.tsv`);
 	activeTempFiles.add(tmpPath);
 
 	try {
@@ -352,7 +352,7 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 		}
 	} finally {
 		activeTempFiles.delete(tmpPath);
-		try { await fsp.unlink(tmpPath); } catch { /* ignore */ }
+		try { await fs.unlink(tmpPath); } catch { /* ignore */ }
 	}
 }
 

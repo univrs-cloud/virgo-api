@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import camelcaseKeys from 'camelcase-keys';
@@ -161,13 +161,13 @@ const checkForUpdates = async (module) => {
 		try {
 			const composeFilePath = labels?.comDockerComposeProjectConfigFiles || path.join(module.composeDir, labels?.comDockerComposeProject, 'docker-compose.yml');
 			try {
-				await fs.promises.access(composeFilePath);
+				await fs.access(composeFilePath);
 			} catch (error) {
 				// Compose file doesn't exist, skip image comparison and fall back to digest comparison
 				throw error;
 			}
 
-			const composeFileContent = await fs.promises.readFile(composeFilePath, 'utf-8');
+			const composeFileContent = await fs.readFile(composeFilePath, 'utf-8');
 			const composeData = yaml.load(composeFileContent);
 			const service = composeData?.services?.[labels?.comDockerComposeService];
 			if (service?.image && imageName !== service.image) {
@@ -232,7 +232,7 @@ const fetchStackFiles = async (module) => {
 
 		// Check if compose directory exists
 		try {
-			await fs.promises.access(composeDir);
+			await fs.access(composeDir);
 		} catch (error) {
 			console.warn(`Compose directory ${composeDir} does not exist. Skipping compose files update.`);
 			return;
@@ -264,7 +264,7 @@ const fetchStackFiles = async (module) => {
 
 				// Check if docker-compose.yml file exists
 				try {
-					await fs.promises.access(composeFilePath);
+					await fs.access(composeFilePath);
 				} catch (error) {
 					// File doesn't exist, skip
 					continue;
@@ -280,7 +280,7 @@ const fetchStackFiles = async (module) => {
 				const stack = await response.text();
 
 				// Replace the docker-compose.yml file
-				await fs.promises.writeFile(composeFilePath, stack, 'utf-8');
+				await fs.writeFile(composeFilePath, stack, 'utf-8');
 				console.log(`Updated docker-compose.yml for ${appName}`);
 			} catch (error) {
 				console.warn(`Error updating compose file for ${appName}:`, error.message);

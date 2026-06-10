@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import yaml from 'js-yaml';
 import linuxSysUser from 'linux-sys-user';
@@ -25,12 +25,12 @@ const deleteUser = async (job, module) => {
 	return `User ${config.username} deleted.`
 
 	async function deleteAutheliaUser() {
-		const fileContents = await fs.promises.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
 			delete autheliaUsersConfig.users[config.username];
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
+			await fs.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 };

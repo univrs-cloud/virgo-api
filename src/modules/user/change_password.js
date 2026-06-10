@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
 import linuxSysUser from 'linux-sys-user';
@@ -25,12 +25,12 @@ const changePassword = async (job, module) => {
 	return `${config.username} password changed.`;
 
 	async function setAutheliaUserPassword() {
-		const fileContents = await fs.promises.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
 			autheliaUsersConfig.users[config.username].password = bcrypt.hashSync(config.password, module.cost);
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
+			await fs.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 };

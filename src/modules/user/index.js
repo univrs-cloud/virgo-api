@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import yaml from 'js-yaml';
 import linuxSysUser from 'linux-sys-user';
@@ -64,18 +64,18 @@ class UserModule extends BaseModule {
 	}
 
 	async toggleAutheliaUserLock(username, status) {
-		const fileContents = await fs.promises.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig.users && autheliaUsersConfig.users[username]) {
 			autheliaUsersConfig.users[username].disabled = status;
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			await fs.promises.writeFile(this.autheliaUsersFile, updatedYaml, 'utf8');
+			await fs.writeFile(this.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 
 	async #loadUsers() {
 		try {
-			const fileContents = await fs.promises.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+			const fileContents = await fs.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 			let autheliaUsersConfig = yaml.load(fileContents);
 			let users = await linuxUser.getUsers();
 			let groups = await linuxUser.getGroups();

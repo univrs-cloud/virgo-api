@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
@@ -33,7 +33,7 @@ const createUser = async (job, module) => {
 	return `User ${config.username} created.`
 
 	async function createAutheliaUser () {
-		const fileContents = await fs.promises.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (!autheliaUsersConfig.users) {
 			autheliaUsersConfig.users = {};
@@ -46,7 +46,7 @@ const createUser = async (job, module) => {
 			disabled: false
 		};
 		const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-		await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
+		await fs.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 	};
 };
 

@@ -1,4 +1,4 @@
-import { InvalidArgumentError, Option } from 'commander';
+import * as commander from 'commander';
 import { Queue } from 'bullmq';
 import config from '../config.js';
 import { getQueueName } from '../src/queues.js';
@@ -90,7 +90,7 @@ const register = (program) => {
 		.command('update')
 		.description('Configure IPv4 (DHCP or static address)')
 		.addOption(
-			new Option('--method <mode>', 'DHCP (auto) or static IP (manual)')
+			new commander.Option('--method <mode>', 'DHCP (auto) or static IP (manual)')
 				.choices(['auto', 'manual'])
 				.makeOptionMandatory()
 		)
@@ -102,7 +102,7 @@ const register = (program) => {
 	function parsePrefixOption(value) {
 		const n = Number.parseInt(value, 10);
 		if (Number.isNaN(n)) {
-			throw new InvalidArgumentError('Not a valid integer.');
+			throw new commander.InvalidArgumentError('Not a valid integer.');
 		}
 		return n;
 	}

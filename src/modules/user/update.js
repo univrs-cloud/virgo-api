@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import yaml from 'js-yaml';
 const updateUser = async (job, module) => {
@@ -24,7 +24,7 @@ const updateUser = async (job, module) => {
 	return `User ${config.username} updated.`
 
 	async function updateAutheliaUser() {
-		const fileContents = await fs.promises.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+		const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
 		let autheliaUsersConfig = yaml.load(fileContents);
 		if (autheliaUsersConfig?.users?.[config.username]) {
 			autheliaUsersConfig.users[config.username].displayname = config.fullname;
@@ -33,7 +33,7 @@ const updateUser = async (job, module) => {
 				autheliaUsersConfig.users[config.username].groups = (config.role === 'admin' ? ['admins'] : ['users']);
 			}
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
-			await fs.promises.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
+			await fs.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
 		}
 	}
 };

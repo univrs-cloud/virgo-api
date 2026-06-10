@@ -1,5 +1,5 @@
-import { transaction } from './db.js';
-import { formatSize } from './utils.js';
+import * as database from './db.js';
+import * as utils from './utils.js';
 import { changeTypeBreakdown } from './index.js';
 
 // ─── Dataset scope (opts.dataset / opts.datasets) ───────────────────────────
@@ -196,7 +196,7 @@ function search(db, pattern, opts = {}) {
 		for (const r of results) {
 			const del = r.deleted ? ' [DELETED]' : '';
 			console.log(`${r.dataset} ${r.path}${del}`);
-			console.log(`${r.type} ${formatSize(r.size)} modified ${r.modified_on}`);
+			console.log(`${r.type} ${utils.formatSize(r.size)} modified ${r.modified_on}`);
 
 			if (r.deleted) {
 				const recoverPath = r.versions?.[r.versions.length - 1]?.snapshot_path;
@@ -213,7 +213,7 @@ function search(db, pattern, opts = {}) {
 				console.log(`history (${r.versions.length} versions):`);
 				for (const v of r.versions) {
 					const ch = v.change ? ` [${v.change}]` : '';
-					console.log(`[${v.snapshot_on}] ${formatSize(v.size)}${ch} ${v.snapshot}`);
+					console.log(`[${v.snapshot_on}] ${utils.formatSize(v.size)}${ch} ${v.snapshot}`);
 				}
 			}
 			console.log('');
@@ -288,7 +288,7 @@ function history(db, path, opts = {}) {
 			console.log('Versions:');
 			for (const v of versions) {
 				console.log(`  [${v.snapshot_date}] ${v.dataset}@${v.snapshot}`);
-				console.log(`    Size: ${formatSize(v.size)}  Mode: ${v.mode}  Modified: ${v.modified}`);
+				console.log(`    Size: ${utils.formatSize(v.size)}  Mode: ${v.mode}  Modified: ${v.modified}`);
 				if (v.snapshot_path) {
 					console.log(`    path: ${v.snapshot_path}`);
 				}
@@ -298,12 +298,12 @@ function history(db, path, opts = {}) {
 		if (chgs.length) {
 			console.log('\nChange events:');
 			for (const c of chgs) {
-				const delta = c.delta_bytes > 0 ? `+${formatSize(c.delta_bytes)}` : formatSize(c.delta_bytes);
+				const delta = c.delta_bytes > 0 ? `+${utils.formatSize(c.delta_bytes)}` : utils.formatSize(c.delta_bytes);
 				if (c.change_type === 'renamed') {
 					console.log(`  [${c.snapshot_date}] RENAMED ${c.old_path} → ${c.new_path}`);
 				} else {
-					const szOld = (c.old_size !== null && c.old_size !== undefined) ? formatSize(c.old_size) : '?';
-					const szNew = (c.new_size !== null && c.new_size !== undefined) ? formatSize(c.new_size) : '?';
+					const szOld = (c.old_size !== null && c.old_size !== undefined) ? utils.formatSize(c.old_size) : '?';
+					const szNew = (c.new_size !== null && c.new_size !== undefined) ? utils.formatSize(c.new_size) : '?';
 					console.log(`  [${c.snapshot_date}] ${c.change_type.toUpperCase()} ${szOld} → ${szNew} (${delta})`);
 				}
 			}
@@ -372,7 +372,7 @@ function deleted(db, opts = {}) {
 		console.log(`\n🗑  Deleted files (${rows.length}):\n`);
 		for (const r of rows) {
 			console.log(`${r.dataset} ${r.last_path} [${r.type}]`);
-			console.log(`Size: ${formatSize(r.size)} Last seen: ${r.last_seen} Deleted: ${r.deleted_in} (${r.deleted_snapshot})`);
+			console.log(`Size: ${utils.formatSize(r.size)} Last seen: ${r.last_seen} Deleted: ${r.deleted_in} (${r.deleted_snapshot})`);
 			if (r.snapshot_path) {
 				console.log(`  recover from: ${r.snapshot_path}`);
 			}
@@ -471,7 +471,7 @@ function changes(db, snapshotName, opts = {}) {
 					console.log(`    ${r.old_path} → ${r.new_path}`);
 				} else {
 					const delta = (r.delta_bytes !== null && r.delta_bytes !== undefined)
-						? ` (${r.delta_bytes >= 0 ? '+' : ''}${formatSize(r.delta_bytes)})`
+						? ` (${r.delta_bytes >= 0 ? '+' : ''}${utils.formatSize(r.delta_bytes)})`
 						: '';
 					console.log(`    ${r.old_path ?? r.new_path}${delta}`);
 				}
@@ -572,7 +572,7 @@ function diff(db, snapA, snapB, opts = {}) {
 	if (!json) {
 		console.log(`\n Diff ${snapA} → ${snapB}: ${rows.length} changed files\n`);
 		for (const r of rows) {
-			const delta = r.delta >= 0 ? `+${formatSize(r.delta)}` : formatSize(r.delta);
+			const delta = r.delta >= 0 ? `+${utils.formatSize(r.delta)}` : utils.formatSize(r.delta);
 			console.log(`  [${r.status.toUpperCase().padEnd(8)}] ${r.path}  (${delta})`);
 		}
 	}
@@ -602,7 +602,7 @@ function reindex(db, opts = {}) {
 			return;
 		}
 
-		transaction(db, () => {
+		database.transaction(db, () => {
 			for (const id of ids) {
 				db.prepare('DELETE FROM changes WHERE snapshot_id IN (SELECT id FROM snapshots WHERE dataset_id = ?)').run(id);
 				db.prepare('DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?)').run(id);
@@ -613,7 +613,7 @@ function reindex(db, opts = {}) {
 
 		console.log(`Reset indexing state for ${ids.length} dataset(s). Run 'virgo indexer index' to rebuild.`);
 	} else {
-		transaction(db, () => {
+		database.transaction(db, () => {
 			db.exec('DELETE FROM changes');
 			db.exec('DELETE FROM file_versions');
 			db.exec('DELETE FROM files');
@@ -687,7 +687,7 @@ function stats(db, opts = {}) {
 		console.log('\n📊 ZFS Index Statistics\n');
 		console.log(`Last run (completed): ${statsRow.last_run_at ?? 'null'}`);
 		console.log(`Last activity: ${statsRow.last_activity_at ?? 'null'}`);
-		console.log(`DB size: ${formatSize(statsRow.db_bytes)}`);
+		console.log(`DB size: ${utils.formatSize(statsRow.db_bytes)}`);
 		console.log(`Datasets: ${statsRow.datasets}`);
 		console.log(`Snapshots: ${statsRow.snapshots} (${statsRow.indexed} indexed)`);
 		console.log(`Unique files: ${statsRow.files.toLocaleString()}`);
