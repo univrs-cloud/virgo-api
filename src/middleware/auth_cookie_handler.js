@@ -1,4 +1,4 @@
-const { isFromTrustedProxy } = require('../utils/trusted_proxy');
+import { isFromTrustedProxy } from '../utils/trusted_proxy.js';
 
 /**
  * Middleware for non-WebSocket HTTP requests only.
@@ -6,7 +6,7 @@ const { isFromTrustedProxy } = require('../utils/trusted_proxy');
  * Only sets the cookie when the request came from proxy (loopback),
  * so remote-user is not spoofed.
  */
-module.exports = (req, res, next) => {
+export default (req, res, next) => {
 	const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
 	const cookieOptions = {
 		domain: req.hostname,

@@ -1,7 +1,7 @@
-const BaseModule = require('../base');
-const DataService = require('../../database/data_service');
-const configurationManager = require('./configuration_manager');
-const trustedProxy = require('../../utils/trusted_proxy');
+import BaseModule from '../base.js';
+import DataService from '../../database/data_service.js';
+import configurationManager from './configuration_manager.js';
+import trustedProxy from '../../utils/trusted_proxy.js';
 
 class ConfigurationModule extends BaseModule {
 	constructor() {
@@ -37,6 +37,6 @@ class ConfigurationModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new ConfigurationModule();
 };

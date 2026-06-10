@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * Directory subtrees that we ALWAYS skip during indexing.
  *
@@ -118,4 +116,4 @@ function noiseGrepPattern(mountpoint) {
 	return `${TAB}${anchor}/(${alt})(${TAB}|/|$)`;
 }
 
-module.exports = { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, isNoisePath, noisePrefixes, noiseGrepPattern };
+export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, isNoisePath, noisePrefixes, noiseGrepPattern };

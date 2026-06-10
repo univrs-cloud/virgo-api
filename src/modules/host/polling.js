@@ -1,7 +1,7 @@
-const { execa } = require('execa');
-const si = require('systeminformation');
-const camelcaseKeys = require('camelcase-keys').default;
-const Poller = require('../../utils/poller');
+import { execa } from 'execa';
+import si from 'systeminformation';
+import camelcaseKeys from 'camelcase-keys';
+import Poller from '../../utils/poller.js';
 
 const polls = [];
 
@@ -186,7 +186,7 @@ const startPolling = () => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'polling',
 	register,
 	startPolling

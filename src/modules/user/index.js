@@ -1,8 +1,10 @@
-const fs = require('fs');
-const { execa } = require('execa');
-const yaml = require('js-yaml');
-const linuxUser = require('linux-sys-user').promise();
-const BaseModule = require('../base');
+import fs from 'fs';
+import { execa } from 'execa';
+import yaml from 'js-yaml';
+import linuxSysUser from 'linux-sys-user';
+import BaseModule from '../base.js';
+
+const linuxUser = linuxSysUser.promise();
 
 class UserModule extends BaseModule {
 	#autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
@@ -100,6 +102,6 @@ class UserModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new UserModule();
 };

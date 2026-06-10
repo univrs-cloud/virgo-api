@@ -1,7 +1,8 @@
-const path = require('path');
-const express = require('express');
+import path from 'path';
+import express from 'express';
+import staticController from './static.js';
+
 const router = express.Router();
-const staticController = require('./static');
 
 router.use('/assets/img/apps', express.static(staticController.appsIconsDir, staticController.configIconsOptions));
 router.use('/assets/img/bookmarks', express.static(staticController.bookmarksIconsDir, staticController.configIconsOptions));
@@ -10,4 +11,4 @@ router.get(/.*/, (req, res) => {
 	res.sendFile(path.join(staticController.folderPath, 'index.html'));
 });
 
-module.exports = router;
+export default router;

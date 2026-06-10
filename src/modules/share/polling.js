@@ -1,4 +1,4 @@
-const Poller = require('../../utils/poller');
+import Poller from '../../utils/poller.js';
 
 const polls = [];
 
@@ -16,7 +16,7 @@ const startPolling = () => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'polling',
 	register,
 	startPolling

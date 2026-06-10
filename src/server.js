@@ -1,6 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function createServer(app) {
 	const options = {
@@ -10,4 +13,4 @@ function createServer(app) {
 	return https.createServer(options, app);
 }
 
-module.exports = createServer;
+export default createServer;

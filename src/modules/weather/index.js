@@ -1,5 +1,5 @@
-const BaseModule = require('../base');
-const DataService = require('../../database/data_service');
+import BaseModule from '../base.js';
+import DataService from '../../database/data_service.js';
 
 class WeatherModule extends BaseModule {
 	#fetchDelay = 10000;
@@ -104,6 +104,6 @@ class WeatherModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new WeatherModule();
 };

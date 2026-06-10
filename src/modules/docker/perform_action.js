@@ -1,8 +1,8 @@
-const path = require('path');
-const { execa } = require('execa');
-const camelcaseKeys = require('camelcase-keys').default;
-const docker = require('../../utils/docker_client');
-const DataService = require('../../database/data_service');
+import path from 'path';
+import { execa } from 'execa';
+import camelcaseKeys from 'camelcase-keys';
+import docker from '../../utils/docker_client.js';
+import DataService from '../../database/data_service.js';
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause'];
 
@@ -85,7 +85,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'perform_action',
 	onConnection,
 	jobs: {

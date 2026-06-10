@@ -33,7 +33,7 @@
 		"node": ">=24.13.0",
 		"npm": ">=11.6.2"
 	},
-	"type": "commonjs",
+	"type": "module",
 	"cpu": [
 		"arm64"
 	],
@@ -43,7 +43,7 @@
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
-		"commander": "^14.0.3",
+		"commander": "^15.0.0",
 		"compromise": "^14.15.1",
 		"docker-compose": "^1.4.2",
 		"dockerode": "^5.0.0",

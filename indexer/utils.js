@@ -1,6 +1,4 @@
-'use strict';
-
-const { writeFileSync, unlinkSync, readFileSync, existsSync } = require('fs');
+import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
 
 function formatSize(bytes) {
 	if (bytes === null || bytes === undefined) {
@@ -61,4 +59,4 @@ function releaseLock(lockPath) {
 	}
 }
 
-module.exports = { formatSize, formatDuration, acquireLock, releaseLock };
+export { formatSize, formatDuration, acquireLock, releaseLock };

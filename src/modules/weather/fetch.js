@@ -5,7 +5,7 @@ const register = (module) => {
 	);
 };
 
-module.exports = {
+export default {
 	name: 'fetch',
 	register,
 	jobs: {

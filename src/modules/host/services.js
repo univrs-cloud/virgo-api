@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 const loadServices = async (module) => {
 	try {
@@ -289,7 +289,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'services',
 	register,
 	onConnection,

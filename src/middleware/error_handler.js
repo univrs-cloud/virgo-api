@@ -2,7 +2,7 @@
  * Global error handling middleware.
  * This should be the last middleware added to the Express app.
  */
-module.exports = (error, req, res, next) => {
+export default (error, req, res, next) => {
 	console.error(error);
 	const statusCode = error.status || 500;
 	res.status(statusCode).send({

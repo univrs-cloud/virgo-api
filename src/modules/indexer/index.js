@@ -1,7 +1,7 @@
-const { execa } = require('execa');
-const camelcaseKeys = require('camelcase-keys').default;
-const BaseModule = require('../base');
-const DataService = require('../../database/data_service');
+import { execa } from 'execa';
+import camelcaseKeys from 'camelcase-keys';
+import BaseModule from '../base.js';
+import DataService from '../../database/data_service.js';
 
 class IndexerModule extends BaseModule {
 	constructor() {
@@ -64,6 +64,6 @@ class IndexerModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new IndexerModule();
 };

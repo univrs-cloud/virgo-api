@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const yaml = require('js-yaml');
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
 
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const TRAEFIK_ENV_PATH = '/opt/docker/traefik/.env';
@@ -269,7 +269,7 @@ const enrichBookmarks = async (bookmarks) => {
 	});
 };
 
-module.exports = {
+export {
 	getDomain,
 	readAll,
 	parse,

@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 // Track active log sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
@@ -72,7 +72,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'service_logs',
 	onConnection
 };

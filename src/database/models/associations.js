@@ -1,6 +1,6 @@
-const Application = require('./Application');
-const Bookmark = require('./Bookmark');
-const ItemOrder = require('./ItemOrder');
+import Application from './Application.js';
+import Bookmark from './Bookmark.js';
+import ItemOrder from './ItemOrder.js';
 
 // Define associations
 Application.hasOne(ItemOrder, {
@@ -23,7 +23,7 @@ ItemOrder.belongsTo(Bookmark, {
 	constraints: false
 });
 
-module.exports = {
+export {
 	Application,
 	Bookmark,
 	ItemOrder

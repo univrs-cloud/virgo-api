@@ -1,6 +1,4 @@
-'use strict';
-
-const { openDb } = require('../indexer/db');
+import { openDb } from '../indexer/db.js';
 
 const register = (program) => {
 	const indexerCmd = program
@@ -12,8 +10,8 @@ const register = (program) => {
 	indexerCmd
 		.command('index')
 		.description('Index ZFS datasets and snapshots (uses configured indexer paths)')
-		.action((options) => {
-			const indexer = require('../indexer/index');
+		.action(async (options) => {
+			const indexer = await import('../indexer/index.js');
 			indexer.run(options).catch((err) => {
 				console.error(err);
 				process.exitCode = 1;
@@ -26,8 +24,8 @@ const register = (program) => {
 		.command('reindex')
 		.description('Clear indexed data and force a full re-crawl on next run')
 		.option('--dataset <names>', 'Dataset root(s), comma-separated; reset each root and its children')
-		.action((options) => {
-			const query = require('../indexer/query');
+		.action(async (options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				query.reindex(db, options);
@@ -51,8 +49,8 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 100)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((term, options) => {
-			const query = require('../indexer/query');
+		.action(async (term, options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.search(db, term, options);
@@ -69,8 +67,8 @@ const register = (program) => {
 		.description('Full version history of a file')
 		.option('--dataset <names>', 'Limit to dataset root(s), comma-separated (each matches that dataset and children)')
 		.option('--json', 'Output as JSON')
-		.action((path, options) => {
-			const query = require('../indexer/query');
+		.action(async (path, options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.history(db, path, options);
@@ -90,8 +88,8 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 2000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((options) => {
-			const query = require('../indexer/query');
+		.action(async (options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.deleted(db, options);
@@ -111,8 +109,8 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 5000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((snapshot, options) => {
-			const query = require('../indexer/query');
+		.action(async (snapshot, options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.changes(db, snapshot, options);
@@ -130,8 +128,8 @@ const register = (program) => {
 		.option('--limit <n>', 'Max results (default 5000)', parseInt)
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
-		.action((snapA, snapB, options) => {
-			const query = require('../indexer/query');
+		.action(async (snapA, snapB, options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.diff(db, snapA, snapB, options);
@@ -147,8 +145,8 @@ const register = (program) => {
 		.command('stats')
 		.description('Index statistics')
 		.option('--json', 'Output as JSON')
-		.action((options) => {
-			const query = require('../indexer/query');
+		.action(async (options) => {
+			const query = await import('../indexer/query.js');
 			const db = openDb();
 			try {
 				const result = query.stats(db, options);
@@ -159,4 +157,4 @@ const register = (program) => {
 		});
 };
 
-module.exports = register;
+export default register;

@@ -1,5 +1,9 @@
-const fs = require('fs');
-const { execa } = require('execa');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execa } from 'execa';
+
+const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const configureZram = async () => {
 	console.log(`Starting zram configuration...`);
@@ -81,9 +85,8 @@ echo "Configured zram: \${PERCENT}% of RAM with zstd compression"
 	}
 };
 
-// Run if this file is executed directly
-if (require.main === module) {
+if (isMainModule) {
 	configureZram();
 }
 
-module.exports = configureZram;
+export default configureZram;

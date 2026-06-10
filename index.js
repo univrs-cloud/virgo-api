@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-const config = require('./config');
-const createApp = require('./src/app');
-const createServer = require('./src/server');
-const { initializeSocket } = require('./src/socket');
-const modules = require('./src/modules');
+import config from './config.js';
+import createApp from './src/app.js';
+import createServer from './src/server.js';
+import { initializeSocket } from './src/socket.js';
+import modules from './src/modules/index.js';
 
 async function main() {
 	const app = createApp();

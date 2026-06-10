@@ -1,4 +1,4 @@
-const DataService = require('../../database/data_service');
+import DataService from '../../database/data_service.js';
 
 const updateLocation = async (job, module) => {
 	const { config } = job.data;
@@ -19,7 +19,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'location',
 	onConnection,
 	jobs: {

@@ -1,4 +1,4 @@
-const BaseModule = require('../base');
+import BaseModule from '../base.js';
 
 class BookmarkModule extends BaseModule {
 	#bookmarkIconsDir = '/messier/.config/assets/img/bookmarks';
@@ -12,6 +12,6 @@ class BookmarkModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new BookmarkModule();
 };

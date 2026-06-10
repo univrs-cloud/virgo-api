@@ -1,5 +1,6 @@
-const dockerode = require('dockerode');
-const docker = new dockerode();
+import Dockerode from 'dockerode';
 
-module.exports = docker;
+const docker = new Dockerode();
+
+export default docker;
 

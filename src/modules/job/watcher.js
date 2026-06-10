@@ -1,5 +1,5 @@
 
-const { Queue, QueueEvents } = require('bullmq');
+import { Queue, QueueEvents } from 'bullmq';
 
 const queues = new Map();
 
@@ -44,7 +44,7 @@ const onConnection = async (socket, module) => {
 	socket.emit('jobs', jobs);
 };
 
-module.exports = {
+export default {
 	name: 'watcher',
 	register,
 	onConnection

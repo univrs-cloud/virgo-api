@@ -144,4 +144,4 @@ const dockerPullProgressParser = () => {
 	};
 };
 
-module.exports = dockerPullProgressParser;
+export default dockerPullProgressParser;

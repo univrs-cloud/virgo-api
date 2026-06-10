@@ -1,5 +1,5 @@
-const FileWatcher = require('../../utils/file_watcher');
-const { INDEX_DB_PATH } = require('../../../indexer/db');
+import FileWatcher from '../../utils/file_watcher.js';
+import { INDEX_DB_PATH } from '../../../indexer/db.js';
 
 // The indexer keeps SQLite in WAL mode, so the main `index.db` file is only
 // touched on checkpoint (typically at the end of a run). That makes it the
@@ -39,7 +39,7 @@ const register = (module) => {
 	watchIndexDb(module);
 };
 
-module.exports = {
+export default {
 	name: 'watcher',
 	register
 };

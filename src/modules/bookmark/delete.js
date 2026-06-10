@@ -1,4 +1,4 @@
-const DataService = require('../../database/data_service');
+import DataService from '../../database/data_service.js';
 
 const deleteBookmark = async (job, module) => {
 	const { config } = job.data;
@@ -23,7 +23,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'delete',
 	onConnection,
 	jobs: {

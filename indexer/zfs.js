@@ -1,11 +1,9 @@
-'use strict';
-
-const { execaSync, execa } = require('execa');
-const { createReadStream, promises: fsp, readdirSync, statSync, unlinkSync } = require('fs');
-const { join } = require('path');
-const readline = require('readline');
-const { noiseGrepPattern } = require('./scope');
-const { INDEX_DB_DIR } = require('./db');
+import { execaSync, execa } from 'execa';
+import { createReadStream, promises as fsp, readdirSync, statSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import readline from 'readline';
+import { noiseGrepPattern } from './scope.js';
+import { INDEX_DB_DIR } from './db.js';
 
 // ─── Temp file lifecycle ────────────────────────────────────────────────────
 //
@@ -416,4 +414,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
 	return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-module.exports = { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles };
+export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles };

@@ -1,6 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const { execa } = require('execa');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execa } from 'execa';
+
+const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const OLD_APPS_ICONS = '/var/www/virgo-ui/app/dist/assets/img/apps';
 const OLD_BOOKMARKS_ICONS = '/var/www/virgo-ui/app/dist/assets/img/bookmarks';
@@ -41,11 +44,11 @@ const copyIconsToConfig = async () => {
 	console.log('Icons copy to config completed.');
 };
 
-if (require.main === module) {
+if (isMainModule) {
 	copyIconsToConfig().catch((error) => {
 		console.error('Icons copy failed:', error);
 		process.exit(1);
 	});
 }
 
-module.exports = copyIconsToConfig;
+export default copyIconsToConfig;

@@ -1,8 +1,10 @@
-const fs = require('fs');
-const { execa } = require('execa');
-const yaml = require('js-yaml');
-const bcrypt = require('bcryptjs');
-const linuxUser = require('linux-sys-user').promise();
+import fs from 'fs';
+import { execa } from 'execa';
+import yaml from 'js-yaml';
+import bcrypt from 'bcryptjs';
+import linuxSysUser from 'linux-sys-user';
+
+const linuxUser = linuxSysUser.promise();
 const createUser = async (job, module) => {
 	const { config } = job.data;
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
@@ -58,7 +60,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'create',
 	onConnection,
 	jobs: {

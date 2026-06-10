@@ -1,7 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const ini = require('ini');
-const { execa } = require('execa');
+import fs from 'fs';
+import path from 'path';
+import ini from 'ini';
+import { execa } from 'execa';
 
 const slug = (comment) => {
 	return (comment || '').toLowerCase().trim().replace(/\s+/g, '_');
@@ -153,7 +153,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'create',
 	onConnection,
 	jobs: {

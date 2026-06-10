@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 const applyProjectspace = async (job, module) => {
 	const { sharePath, comment } = job.data;
@@ -33,7 +33,7 @@ const removeProjectspace = async (job, module) => {
 	return `Removed projectspace from ${label}.`;
 };
 
-module.exports = {
+export default {
 	name: 'projectspace',
 	jobs: {
 		'share:projectspace:apply': applyProjectspace,

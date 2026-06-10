@@ -65,7 +65,7 @@ function isFromTrustedProxy(remoteAddress) {
 	});
 }
 
-module.exports = {
+export {
 	isFromTrustedProxy,
 	clear,
 	add

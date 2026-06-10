@@ -1,8 +1,8 @@
-const express = require('express');
-const authCookieHandler = require('./middleware/auth_cookie_handler');
-const controllers = require('./controllers');
-const error404Handler = require('./middleware/error_404_handler');
-const errorHandler = require('./middleware/error_handler');
+import express from 'express';
+import authCookieHandler from './middleware/auth_cookie_handler.js';
+import controllers from './controllers/index.js';
+import error404Handler from './middleware/error_404_handler.js';
+import errorHandler from './middleware/error_handler.js';
 
 function createApp() {
 	const app = express();
@@ -16,4 +16,4 @@ function createApp() {
 	return app;
 }
 
-module.exports = createApp;
+export default createApp;

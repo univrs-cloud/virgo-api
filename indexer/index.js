@@ -1,12 +1,10 @@
-'use strict';
-
-const DataService = require('../src/database/data_service');
-const { INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } = require('./db');
-const { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles } = require('./zfs');
-const { walkSnapshot } = require('./walker');
-const { formatSize, formatDuration, acquireLock, releaseLock } = require('./utils');
-const { execaSync } = require('execa');
-const { stat } = require('fs/promises');
+import DataService from '../src/database/data_service.js';
+import { INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint } from './db.js';
+import { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles } from './zfs.js';
+import { walkSnapshot } from './walker.js';
+import { formatSize, formatDuration, acquireLock, releaseLock } from './utils.js';
+import { execaSync } from 'execa';
+import { stat } from 'fs/promises';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1442,4 +1440,4 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	}
 }
 
-module.exports = { run, changeTypeBreakdown };
+export { run, changeTypeBreakdown };

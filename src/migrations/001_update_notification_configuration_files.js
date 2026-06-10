@@ -1,6 +1,11 @@
-const fs = require('fs');
-const DataService = require('../database/data_service');
-const { updateNotificationConfigurationFiles } = require('../modules/configuration/smtp');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import DataService from '../database/data_service.js';
+import smtp from '../modules/configuration/smtp.js';
+
+const { updateNotificationConfigurationFiles } = smtp;
+const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const DB_PATHS = ['/messier/.config/virgo.db', '/var/www/virgo-api/virgo.db'];
 
@@ -35,9 +40,8 @@ const updateNotificationConfiguration = async () => {
 	}
 };
 
-// Run if this file is executed directly
-if (require.main === module) {
+if (isMainModule) {
 	updateNotificationConfiguration();
 }
 
-module.exports = updateNotificationConfiguration;
+export default updateNotificationConfiguration;

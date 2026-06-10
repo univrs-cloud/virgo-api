@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 const index = async (job, module) => {
 	try {
@@ -18,7 +18,7 @@ const register = (module) => {
 	);
 };
 
-module.exports = {
+export default {
 	name: 'scheduled',
 	register,
 	jobs: {

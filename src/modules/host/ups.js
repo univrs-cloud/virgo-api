@@ -1,5 +1,5 @@
-const { createConnection } = require('net');
-const camelcaseKeys = require('camelcase-keys').default;
+import { createConnection } from 'net';
+import camelcaseKeys from 'camelcase-keys';
 
 const checkUps = async (module) => {
 	let socket = createConnection('/var/run/virgo-ups.sock');
@@ -48,7 +48,7 @@ const onConnection = (socket, module) => {
 	}
 };
 
-module.exports = {
+export default {
 	name: 'ups',
 	register,
 	onConnection

@@ -1,5 +1,9 @@
-const fs = require('fs');
-const { execa } = require('execa');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execa } from 'execa';
+
+const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const moveDatabaseLocation = async () => {
 	const oldDbPath = '/var/www/virgo-api/virgo.db';
@@ -49,9 +53,8 @@ const moveDatabaseLocation = async () => {
 	}
 };
 
-// Run if this file is executed directly
-if (require.main === module) {
+if (isMainModule) {
 	moveDatabaseLocation();
 }
 
-module.exports = moveDatabaseLocation;
+export default moveDatabaseLocation;

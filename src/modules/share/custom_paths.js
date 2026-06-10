@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 const getNextcloudPaths = () => {
 	const DATA = '/messier/apps/nextcloud/data';
@@ -78,7 +78,7 @@ const onConnection = (socket) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'custom_paths',
 	onConnection
 };

@@ -1,6 +1,6 @@
-const fs = require('fs');
-const { execa } = require('execa');
-const DataService = require('../../database/data_service');
+import fs from 'fs';
+import { execa } from 'execa';
+import DataService from '../../database/data_service.js';
 
 const msmtpConfigurationFile = '/etc/msmtprc';
 const zedConfigurationFile = '/etc/zfs/zed.d/zed.rc';
@@ -98,7 +98,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'smtp',
 	register,
 	onConnection,

@@ -1,5 +1,5 @@
-const { Queue } = require('bullmq');
-const config = require('../config');
+import { Queue } from 'bullmq';
+import config from '../config.js';
 
 const MODULES = [
 	'job',
@@ -49,7 +49,7 @@ async function cleanupQueues() {
 	console.log('Queue cleanup complete.');
 }
 
-module.exports = {
+export {
 	MODULES,
 	QUEUE_NAMES,
 	getQueueName,

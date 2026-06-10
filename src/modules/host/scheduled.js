@@ -8,7 +8,7 @@ const register = (module) => {
 	);
 };
 
-module.exports = {
+export default {
 	name: 'scheduled',
 	register,
 	jobs: {

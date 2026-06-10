@@ -1,5 +1,5 @@
-const fs = require('fs');
-const { execa } = require('execa');
+import fs from 'fs';
+import { execa } from 'execa';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const BOND_NAME = 'bond0';
@@ -204,7 +204,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'network',
 	// register, // can't use register to load and emit on change because network is part of system state
 	onConnection,

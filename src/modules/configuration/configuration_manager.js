@@ -26,7 +26,7 @@ const broadcast = (module) => {
 	}
 };
 
-module.exports = {
+export default {
 	name: 'configuration_manager',
 	emitToSocket,
 	broadcast

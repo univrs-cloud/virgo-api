@@ -1,7 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const { execa } = require('execa');
-const FileWatcher = require('../../utils/file_watcher');
+import fs from 'fs';
+import path from 'path';
+import { execa } from 'execa';
+import FileWatcher from '../../utils/file_watcher.js';
 
 let configurationWatcher;
 
@@ -69,7 +69,7 @@ const register = (module) => {
 	watchConfigurations(module);
 };
 
-module.exports = {
+export default {
 	name: 'watcher',
 	register
 };

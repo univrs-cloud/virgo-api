@@ -1,5 +1,5 @@
-const { execa } = require('execa');
-const DataService = require('../../database/data_service');
+import { execa } from 'execa';
+import DataService from '../../database/data_service.js';
 
 const normalizeDataset = (dataset) => {
 	if (typeof dataset !== 'string') {
@@ -74,7 +74,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'datasets',
 	onConnection,
 	jobs: {

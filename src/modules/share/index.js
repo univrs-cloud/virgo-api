@@ -1,10 +1,10 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { execa } = require('execa');
-const ini = require('ini');
-const BaseModule = require('../base');
-const TimeMachine = require('../../utils/time_machine');
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { execa } from 'execa';
+import ini from 'ini';
+import BaseModule from '../base.js';
+import TimeMachine from '../../utils/time_machine.js';
 
 class ShareModule extends BaseModule {
 	#configurationFiles = [
@@ -244,6 +244,6 @@ class ShareModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new ShareModule();
 };

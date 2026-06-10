@@ -1,7 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const touch = require('touch');
-const FileWatcher = require('../../utils/file_watcher');
+import fs from 'fs';
+import path from 'path';
+import touch from 'touch';
+import FileWatcher from '../../utils/file_watcher.js';
 
 let setupCompletedWatcher;
 let updateLogsWatcher;
@@ -88,7 +88,7 @@ const register = (module) => {
 	watchSetupCompleted(module);
 };
 
-module.exports = {
+export default {
 	name: 'watcher',
 	register,
 	watchUpdateLog

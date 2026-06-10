@@ -1,4 +1,4 @@
-const DataService = require('../../database/data_service');
+import DataService from '../../database/data_service.js';
 
 const onConnection = (socket, module) => {
 	socket.on('app:order', async (config) => {
@@ -13,7 +13,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'order',
 	onConnection
 };

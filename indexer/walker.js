@@ -1,7 +1,5 @@
-'use strict';
-
-const { opendir, stat } = require('fs/promises');
-const { isNoisePath } = require('./scope');
+import { opendir, stat } from 'fs/promises';
+import { isNoisePath } from './scope.js';
 
 const BATCH_SIZE = 4096;
 const STAT_CONCURRENCY = 64;
@@ -181,4 +179,4 @@ async function walkSnapshot(snapshotPath, onBatch) {
 	return { total, statFailures, skippedDirs };
 }
 
-module.exports = { walkSnapshot };
+export { walkSnapshot };

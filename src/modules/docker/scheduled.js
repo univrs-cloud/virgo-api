@@ -1,8 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const yaml = require('js-yaml');
-const camelcaseKeys = require('camelcase-keys').default;
-const docker = require('../../utils/docker_client');
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
+import camelcaseKeys from 'camelcase-keys';
+import docker from '../../utils/docker_client.js';
 
 const MANIFEST_ACCEPT = [
 	'application/vnd.docker.distribution.manifest.list.v2+json',
@@ -321,7 +321,7 @@ const onConnection = (socket, module) => {
 	}
 };
 
-module.exports = {
+export default {
 	name: 'scheduled',
 	register,
 	onConnection,

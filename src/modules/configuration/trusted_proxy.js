@@ -1,4 +1,4 @@
-const DataService = require('../../database/data_service');
+import DataService from '../../database/data_service.js';
 
 const loadTrustedProxiesList = async () => {
 	const trustedProxies = (await DataService.getConfiguration()).trustedProxies;
@@ -108,7 +108,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'trusted_proxy',
 	onConnection,
 	jobs: {

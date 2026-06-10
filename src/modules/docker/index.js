@@ -1,9 +1,9 @@
-const path = require('path');
-const camelcaseKeys = require('camelcase-keys').default;
-const config = require('../../../config');
-const docker = require('../../utils/docker_client');
-const BaseModule = require('../base');
-const DataService = require('../../database/data_service');
+import path from 'path';
+import camelcaseKeys from 'camelcase-keys';
+import config from '../../../config.js';
+import docker from '../../utils/docker_client.js';
+import BaseModule from '../base.js';
+import DataService from '../../database/data_service.js';
 
 class DockerModule extends BaseModule {
 	#composeDir = '/opt/docker';
@@ -130,6 +130,6 @@ class DockerModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new DockerModule();
 };

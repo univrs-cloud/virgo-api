@@ -1,5 +1,9 @@
-const fs = require('fs');
-const { execa } = require('execa');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execa } from 'execa';
+
+const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 // Dataset definitions (order matters: parent datasets must come before children)
 const DATASETS = [
@@ -390,7 +394,8 @@ const setup = async () => {
 
 		log(20, `Running database move migration if needed...`);
 		try {
-			await require('./move_database_location')();
+			const { default: moveDatabaseLocation } = await import('./move_database_location.js');
+			await moveDatabaseLocation();
 			log(20, `Database move migration completed (or skipped).`);
 		} catch (error) {
 			console.error(`Database move migration failed:`, error);
@@ -399,7 +404,8 @@ const setup = async () => {
 
 		log(21, `Copying icon assets into messier config if needed...`);
 		try {
-			await require('./copy_icons_to_config')();
+			const { default: copyIconsToConfig } = await import('./copy_icons_to_config.js');
+			await copyIconsToConfig();
 			log(21, `Icon copy migration completed (or skipped).`);
 		} catch (error) {
 			console.error(`Icon copy migration failed:`, error);
@@ -428,9 +434,8 @@ const setup = async () => {
 	}
 };
 
-// Run if this file is executed directly
-if (require.main === module) {
+if (isMainModule) {
 	setup().catch(() => process.exit(1));
 }
 
-module.exports = setup;
+export default setup;

@@ -1,12 +1,10 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
-'use strict';
-
-const { Command } = require('commander');
-const pkg = require('../package.json');
-const registerIndexer = require('./indexer');
-const registerNetwork = require('./network');
-const registerApps = require('./apps');
+import { Command } from 'commander';
+import pkg from '../package.json' with { type: 'json' };
+import registerIndexer from './indexer.js';
+import registerNetwork from './network.js';
+import registerApps from './apps.js';
 
 const program = new Command();
 

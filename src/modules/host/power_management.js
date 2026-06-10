@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 const reboot = async (socket, module) => {
 	if (module.getState('reboot') !== undefined) {
@@ -45,7 +45,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'power_management',
 	onConnection
 };

@@ -1,4 +1,4 @@
-const { execa } = require('execa');
+import { execa } from 'execa';
 
 const unlockUser = async (job, module) => {
 	const { config } = job.data;
@@ -27,7 +27,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'unlock',
 	onConnection,
 	jobs: {

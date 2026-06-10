@@ -1,5 +1,5 @@
-const stream = require('stream');
-const docker = require('../../utils/docker_client');
+import stream from 'stream';
+import docker from '../../utils/docker_client.js';
 
 // Track active log sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
@@ -84,7 +84,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'logs',
 	onConnection
 };

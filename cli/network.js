@@ -1,9 +1,7 @@
-'use strict';
-
-const { InvalidArgumentError, Option } = require('commander');
-const { Queue } = require('bullmq');
-const config = require('../config');
-const { getQueueName } = require('../src/queues');
+import { InvalidArgumentError, Option } from 'commander';
+import { Queue } from 'bullmq';
+import config from '../config.js';
+import { getQueueName } from '../src/queues.js';
 
 const enqueueHostJob = async (jobName, data, doneMessage) => {
 	const queueName = getQueueName('host');
@@ -110,4 +108,4 @@ const register = (program) => {
 	}
 };
 
-module.exports = register;
+export default register;

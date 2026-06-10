@@ -1,6 +1,6 @@
-const fs = require('fs');
-const ini = require('ini');
-const { execa } = require('execa');
+import fs from 'fs';
+import ini from 'ini';
+import { execa } from 'execa';
 
 const updateFolder = async (job, module) => {
 	const { config } = job.data;
@@ -111,7 +111,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'update',
 	onConnection,
 	jobs: {

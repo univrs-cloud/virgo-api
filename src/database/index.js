@@ -1,5 +1,5 @@
-const fs = require('fs');
-const { Sequelize } = require('sequelize');
+import fs from 'fs';
+import { Sequelize } from 'sequelize';
 
 // Check if the target directory exists, fallback to old location if not
 let dbPath = '/messier/.config/virgo.db';
@@ -13,4 +13,4 @@ const sequelize = new Sequelize({
 	logging: false
 });
 
-module.exports = { sequelize };
+export { sequelize };

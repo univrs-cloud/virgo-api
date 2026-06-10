@@ -1,11 +1,9 @@
-'use strict';
-
-const { execaSync } = require('execa');
-const { InvalidArgumentError } = require('commander');
-const { Queue } = require('bullmq');
-const config = require('../config');
-const DataService = require('../src/database/data_service');
-const { getQueueName } = require('../src/queues');
+import { execaSync } from 'execa';
+import { InvalidArgumentError } from 'commander';
+import { Queue } from 'bullmq';
+import config from '../config.js';
+import DataService from '../src/database/data_service.js';
+import { getQueueName } from '../src/queues.js';
 
 const getHostFQDN = () => {
 	try {
@@ -336,4 +334,4 @@ const register = (program) => {
 	}
 };
 
-module.exports = register;
+export default register;

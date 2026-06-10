@@ -1,12 +1,15 @@
-const fs = require('fs');
-const path = require('path');
-const { Queue, Worker } = require('bullmq');
-const config = require('../../config');
-const eventEmitter = require('../utils/event_emitter');
-const { getIO } = require('../socket');
-const { isFromTrustedProxy } = require('../utils/trusted_proxy');
-const nlp = require('../utils/nlp');
-const { getQueueName, getScheduledQueueName } = require('../queues');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { Queue, Worker } from 'bullmq';
+import config from '../../config.js';
+import eventEmitter from '../utils/event_emitter.js';
+import { getIO } from '../socket.js';
+import { isFromTrustedProxy } from '../utils/trusted_proxy.js';
+import nlp from '../utils/nlp.js';
+import { getQueueName, getScheduledQueueName } from '../queues.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 class BaseModule {
 	#name;
@@ -200,12 +203,13 @@ class BaseModule {
 		this.#wireWorkerEvents(this.#scheduledWorker);
 	}
 
-	#loadPlugins() {
+	async #loadPlugins() {
 		const pluginDir = path.join(__dirname, this.#name);
 		const pluginFiles = fs.readdirSync(pluginDir)?.filter((file) => { return file.endsWith('.js') && file !== 'index.js'; });
 		for (const file of pluginFiles) {
 			try {
-				const plugin = require(path.join(pluginDir, file));
+				const module = await import(pathToFileURL(path.join(pluginDir, file)).href);
+				const plugin = module.default;
 				if (!plugin || typeof plugin !== 'object') {
 					console.warn(`[${this.#name}] Invalid plugin in ${file}: not an object`);
 					continue;
@@ -221,4 +225,4 @@ class BaseModule {
 	}
 }
 
-module.exports = BaseModule;
+export default BaseModule;

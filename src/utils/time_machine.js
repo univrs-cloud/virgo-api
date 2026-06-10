@@ -1,5 +1,5 @@
-const fs = require('fs').promises;
-const path = require('path');
+import { promises as fs } from 'fs';
+import path from 'path';
 
 class TimeMachine {
 	#backupPath;
@@ -96,4 +96,4 @@ class TimeMachine {
 	}
 }
 
-module.exports = TimeMachine;
+export default TimeMachine;

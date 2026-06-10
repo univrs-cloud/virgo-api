@@ -1,5 +1,5 @@
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../index');
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../index.js';
 
 const ItemOrder = sequelize.define('ItemOrder', {
 	id: {
@@ -28,5 +28,5 @@ const ItemOrder = sequelize.define('ItemOrder', {
 	]
 });
 
-module.exports = ItemOrder;
+export default ItemOrder;
 

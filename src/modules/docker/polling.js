@@ -1,8 +1,8 @@
-const { execa } = require('execa');
-const si = require('systeminformation');
-const camelcaseKeys = require('camelcase-keys').default;
-const docker = require('../../utils/docker_client');
-const Poller = require('../../utils/poller');
+import { execa } from 'execa';
+import si from 'systeminformation';
+import camelcaseKeys from 'camelcase-keys';
+import docker from '../../utils/docker_client.js';
+import Poller from '../../utils/poller.js';
 const polls = [];
 let appsNetworkSnapshot = {};
 
@@ -192,7 +192,7 @@ const startPolling = () => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'polling',
 	register,
 	startPolling

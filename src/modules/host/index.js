@@ -1,10 +1,12 @@
-const os = require('os');
-const fs = require('fs');
-const { execa } = require('execa');
-const si = require('systeminformation');
-const camelcaseKeys = require('camelcase-keys').default;
-const { version } = require('../../../package.json');
-const BaseModule = require('../base');
+import os from 'os';
+import fs from 'fs';
+import { execa } from 'execa';
+import si from 'systeminformation';
+import camelcaseKeys from 'camelcase-keys';
+import pkg from '../../../package.json' with { type: 'json' };
+import BaseModule from '../base.js';
+
+const { version } = pkg;
 
 class HostModule extends BaseModule {
 	#etcHostsFile = '/etc/hosts';
@@ -528,6 +530,6 @@ class HostModule extends BaseModule {
 	}
 }
 
-module.exports = () => {
+export default () => {
 	return new HostModule();
 };

@@ -1,5 +1,5 @@
-const fs = require('fs');
-const { execa } = require('execa');
+import fs from 'fs';
+import { execa } from 'execa';
 
 const checkUpdates = async (socket, module) => {
 	if (!socket.isAuthenticated || !socket.isAdmin) {
@@ -112,7 +112,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'system_update',
 	onConnection
 };

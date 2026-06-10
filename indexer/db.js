@@ -1,8 +1,6 @@
-'use strict';
-
-const { DatabaseSync } = require('node:sqlite');
-const { existsSync } = require('fs');
-const { dirname, join } = require('path');
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync } from 'fs';
+import { dirname, join } from 'path';
 
 const INDEX_DB_DIR = '/messier/.config';
 const INDEX_DB_NAME = 'index.db';
@@ -216,4 +214,4 @@ function disableBulkMode(db) {
 	checkpoint(db);
 }
 
-module.exports = { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };
+export { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, openDb, transaction, enableBulkMode, disableBulkMode, checkpoint };

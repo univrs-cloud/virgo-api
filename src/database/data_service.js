@@ -1,7 +1,7 @@
-const { sequelize } = require('../database/index');
-const Configuration = require('../database/models/Configuration');
-const { Application, Bookmark, ItemOrder } = require('../database/models/associations');
-const traefikConfig = require('../utils/traefik_config');
+import { sequelize } from './index.js';
+import Configuration from './models/Configuration.js';
+import { Application, Bookmark, ItemOrder } from './models/associations.js';
+import traefikConfig from '../utils/traefik_config.js';
 
 class DataService {
 	static async initialize() {
@@ -346,4 +346,4 @@ class DataService {
 	}
 }
 
-module.exports = DataService;
+export default DataService;

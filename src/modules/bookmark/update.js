@@ -1,9 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const stream = require('stream');
-const streamPipeline = require('util').promisify(stream.pipeline);
-const changeCase = require('change-case');
-const DataService = require('../../database/data_service');
+import fs from 'fs';
+import path from 'path';
+import stream from 'stream';
+import { promisify } from 'util';
+import changeCase from 'change-case';
+import DataService from '../../database/data_service.js';
+
+const streamPipeline = promisify(stream.pipeline);
 
 const updateBookmark = async (job, module) => {
 	const { config } = job.data;
@@ -48,7 +50,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'update',
 	onConnection,
 	jobs: {

@@ -1,11 +1,13 @@
-const fs = require('fs');
-const path = require('path');
-const { execa } = require('execa');
-const stream = require('stream');
-const streamPipeline = require('util').promisify(stream.pipeline);
-const dockerCompose = require('docker-compose');
-const dockerPullProgressParser = require('../../utils/docker_pull_progress_parser');
-const DataService = require('../../database/data_service');
+import fs from 'fs';
+import path from 'path';
+import { execa } from 'execa';
+import stream from 'stream';
+import { promisify } from 'util';
+import dockerCompose from 'docker-compose';
+import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
+import DataService from '../../database/data_service.js';
+
+const streamPipeline = promisify(stream.pipeline);
 const installApp = async (job, module) => {
 	const { config } = job.data;
 	const template = module.toArray(module.getState('templates')).find((template) => { return template.name === config?.name; });
@@ -101,7 +103,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'install',
 	onConnection,
 	jobs: {

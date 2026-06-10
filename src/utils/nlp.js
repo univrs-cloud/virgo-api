@@ -1,5 +1,5 @@
-const nlp = require('compromise');
-const camelcaseKeys = require('camelcase-keys').default;
+import nlp from 'compromise';
+import camelcaseKeys from 'camelcase-keys';
 
 /**
  * Get different forms of a verb
@@ -10,6 +10,6 @@ function conjugate(verb) {
   return camelcaseKeys(nlp(verb).verbs().conjugate()[0]);
 }
 
-module.exports = {
+export {
 	conjugate
 };

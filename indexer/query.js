@@ -1,8 +1,6 @@
-'use strict';
-
-const { transaction } = require('./db');
-const { formatSize } = require('./utils');
-const { changeTypeBreakdown } = require('./index');
+import { transaction } from './db.js';
+import { formatSize } from './utils.js';
+import { changeTypeBreakdown } from './index.js';
 
 // ─── Dataset scope (opts.dataset / opts.datasets) ───────────────────────────
 // Each root matches that ZFS dataset name or any child (messier/apps → messier/apps/foo).
@@ -758,7 +756,7 @@ function parseJsonArray(raw) {
 	}
 }
 
-module.exports = {
+export {
 	search,
 	history,
 	deleted,

@@ -1,6 +1,6 @@
-const fs = require('fs');
-const { execa } = require('execa');
-const yaml = require('js-yaml');
+import fs from 'fs';
+import { execa } from 'execa';
+import yaml from 'js-yaml';
 const updateUser = async (job, module) => {
 	const { config } = job.data;
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
@@ -52,7 +52,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'update',
 	onConnection,
 	jobs: {

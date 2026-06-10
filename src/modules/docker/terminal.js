@@ -1,6 +1,6 @@
-const { execa } = require('execa');
-const stream = require('stream');
-const docker = require('../../utils/docker_client');
+import { execa } from 'execa';
+import stream from 'stream';
+import docker from '../../utils/docker_client.js';
 
 // Track active terminal sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
@@ -151,7 +151,7 @@ const onConnection = (socket, module) => {
 	});
 };
 
-module.exports = {
+export default {
 	name: 'terminal',
 	onConnection
 };

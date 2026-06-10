@@ -1,5 +1,5 @@
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../index');
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../index.js';
 
 const Bookmark = sequelize.define('Bookmark', {
 	id: {
@@ -30,4 +30,4 @@ const Bookmark = sequelize.define('Bookmark', {
 	}
 });
 
-module.exports = Bookmark;
+export default Bookmark;

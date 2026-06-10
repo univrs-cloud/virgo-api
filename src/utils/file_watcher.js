@@ -1,5 +1,5 @@
-const fs = require('fs');
-const chokidar = require('chokidar');
+import fs from 'fs';
+import chokidar from 'chokidar';
 
 class FileWatcher {
 	#watcher = null;
@@ -121,4 +121,4 @@ class FileWatcher {
 	}
 }
 
-module.exports = FileWatcher;
+export default FileWatcher;

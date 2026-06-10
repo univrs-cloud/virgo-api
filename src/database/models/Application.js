@@ -1,5 +1,5 @@
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../index');
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../index.js';
 
 const Application = sequelize.define('Application', {
 	id: {
@@ -31,4 +31,4 @@ const Application = sequelize.define('Application', {
 	}
 });
 
-module.exports = Application;
+export default Application;
