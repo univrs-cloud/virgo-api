@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import stream from 'stream';
 import { promisify } from 'util';
-import changeCase from 'change-case';
+import * as changeCase from 'change-case';
 import DataService from '../../database/data_service.js';
 
 const streamPipeline = promisify(stream.pipeline);
