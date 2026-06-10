@@ -38,7 +38,7 @@ const generateAptListchangesConfig = (config) => {
 	return `[apt]
 frontend=log
 which=both
-email_address="${config.recipients.join(' ')}"
+email_address=${config.recipients.join(' ')}
 email_format=html
 confirm=false
 headers=false
@@ -46,7 +46,7 @@ reverse=false
 save_seen=/var/lib/apt/listchanges
 no_network=true
 `;
-}
+};
 
 const updateSmtpConfiguration = async (job, module) => {
 	let config = job.data.config;
