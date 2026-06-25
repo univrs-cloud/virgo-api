@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 const updateUser = async (job, module) => {
 	const { config } = job.data;
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });

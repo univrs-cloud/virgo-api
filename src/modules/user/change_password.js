@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
 import linuxSysUser from 'linux-sys-user';
 

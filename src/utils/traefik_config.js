@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const TRAEFIK_ENV_PATH = '/opt/docker/traefik/.env';

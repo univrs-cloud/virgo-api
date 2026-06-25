@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import linuxSysUser from 'linux-sys-user';
 
 const linuxUser = linuxSysUser.promise();
