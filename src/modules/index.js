@@ -1,4 +1,5 @@
 import { cleanupQueues } from '../queues.js';
+import createRuntimeModule from './runtime/index.js';
 import createJobModule from './job/index.js';
 import createConfigurationModule from './configuration/index.js';
 import createHostModule from './host/index.js';
@@ -14,6 +15,7 @@ export default async () => {
 	await cleanupQueues();
 
 	const modules = [
+		createRuntimeModule(),
 		createJobModule(),
 		createConfigurationModule(),
 		createHostModule(),
