@@ -81,7 +81,11 @@ class FleetModule extends BaseModule {
 		const local = io(`${this.#localApiUrl()}${namespace}`, {
 			path: '/api',
 			reconnection: false,
-			rejectUnauthorized: false
+			rejectUnauthorized: false,
+			extraHeaders: {
+				'remote-user': 'fleet-proxy',
+				'remote-groups': 'admins'
+			}
 		});
 		this.#proxySessions.set(sessionId, local);
 
