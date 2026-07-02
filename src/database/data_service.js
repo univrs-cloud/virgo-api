@@ -45,7 +45,8 @@ class DataService {
 				},
 				smtp: null,
 				trustedProxies: [],
-				indexer: []
+				indexer: [],
+				fleet: { enabled: false }
 			};
 		}
 	}

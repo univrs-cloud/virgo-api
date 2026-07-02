@@ -1,9 +1,28 @@
+const sanitizeFleetConfig = (fleet) => {
+	if (!fleet) {
+		return null;
+	}
+	return {
+		enabled: Boolean(fleet.enabled),
+		email: fleet.email || null,
+		registered: Boolean(fleet.token)
+	};
+};
+
 const emitToSocket = (socket, module) => {
 	try {
-		let configuration = module.getState('configuration') || {};
+		const source = module.getState('configuration') || {};
+		let configuration = source;
 		if (!socket.isAuthenticated || !socket.isAdmin) {
+			configuration = { ...source };
 			delete configuration.smtp;
 			delete configuration.trustedProxies;
+			delete configuration.fleet;
+		} else if (source.fleet) {
+			configuration = {
+				...source,
+				fleet: sanitizeFleetConfig(source.fleet)
+			};
 		}
 		socket.emit('configuration', configuration);
 	} catch (error) {
@@ -13,13 +32,8 @@ const emitToSocket = (socket, module) => {
 
 const broadcast = (module) => {
 	try {
-		let configuration = module.getState('configuration') || {};
 		for (const socket of module.nsp.sockets.values()) {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
-				delete configuration.smtp;
-				delete configuration.trustedProxies;
-			}
-			socket.emit('configuration', configuration);
+			emitToSocket(socket, module);
 		}
 	} catch (error) {
 		console.error(`Error broadcasting configuration:`, error);

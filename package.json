@@ -53,13 +53,14 @@
 		"express-rate-limit": "^8.5.2",
 		"express-validator": "^7.3.2",
 		"ini": "^7.0.0",
-		"js-yaml": "^5.2.0",
+		"js-yaml": "^5.2.1",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^1.2.0",
 		"path": "^0.12.7",
 		"plist": "^5.0.0",
 		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.3",
+		"socket.io-client": "^4.8.3",
 		"sqlite3": "^6.0.1",
 		"systeminformation": "^5.31.11",
 		"touch": "^3.1.1"
@@ -69,12 +70,21 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.0.1",
+		"@types/node": "^26.1.0",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
 		"glob": "^13.0.0",
 		"node-gyp": "^12.1.0",
 		"validator": "^13.15.23"
+	},
+	"allowScripts": {
+		"bufferutil@4.1.0": true,
+		"cpu-features@0.0.10": true,
+		"msgpackr-extract@3.0.4": true,
+		"protobufjs@7.6.4": true,
+		"sqlite3@6.0.1": true,
+		"ssh2@1.17.0": true,
+		"utf-8-validate@6.0.6": true
 	}
 }

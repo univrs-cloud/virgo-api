@@ -15,6 +15,10 @@ const initializeSocket = (server) => {
 		}
 	});
 
+	io.of('/runtime').on('connection', (socket) => {
+		socket.emit('runtime', { role: 'node' });
+	});
+
 	return io;
 };
 
