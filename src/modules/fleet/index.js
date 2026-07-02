@@ -1,30 +1,34 @@
 import { io } from 'socket.io-client';
-import si from 'systeminformation';
 import config from '../../../config.js';
-import DataService from '../../database/data_service.js';
 import eventEmitter from '../../utils/event_emitter.js';
+import DataService from '../../database/data_service.js';
 
 let fleetSocket = null;
 let localBridgeSocket = null;
 let heartbeatInterval = null;
 let activeNodeId = null;
 let activeToken = null;
-let registering = false;
-let pendingCredentials = null;
 
 function disconnect() {
+	const wasActive = Boolean(fleetSocket);
+
 	clearInterval(heartbeatInterval);
 	heartbeatInterval = null;
 	activeNodeId = null;
 	activeToken = null;
-	registering = false;
-	pendingCredentials = null;
 	fleetSocket?.offAny();
 	fleetSocket?.disconnect();
 	fleetSocket = null;
 	localBridgeSocket?.offAny();
 	localBridgeSocket?.disconnect();
 	localBridgeSocket = null;
+
+	// Explicit teardown (e.g. disabling fleet, or reconnecting with new credentials before this
+	// connection ever reached a 'connect'/'disconnect' state of its own): notify listeners directly,
+	// since the native socket events won't fire on their own in that case.
+	if (wasActive) {
+		eventEmitter.emit('fleet:status', { connected: false });
+	}
 }
 
 function startHeartbeat(nodeId) {
@@ -76,41 +80,6 @@ function attachLoopbackBridge() {
 	}
 }
 
-async function registerNode(credentials) {
-	const { serial } = await si.system();
-	const serialNumber = String(serial || '').trim();
-	if (!serialNumber) {
-		throw new Error('Unable to read system serial number');
-	}
-
-	return new Promise((resolve, reject) => {
-		fleetSocket.emit('node:register', {
-			serialNumber,
-			name: serialNumber,
-			email: credentials.email,
-			password: credentials.password
-		}, async (response) => {
-			if (!response?.ok) {
-				reject(new Error(response?.error || 'Node registration failed'));
-				return;
-			}
-
-			const configuration = await DataService.getConfiguration();
-			const current = configuration?.fleet || {};
-			await DataService.setConfiguration('fleet', {
-				...current,
-				enabled: true,
-				email: credentials.email,
-				nodeId: response.nodeId,
-				token: response.token
-			});
-			pendingCredentials = null;
-			eventEmitter.emit('configuration:updated');
-			resolve(response);
-		});
-	});
-}
-
 function openAuthenticatedConnection(fleetConfiguration) {
 	const token = fleetConfiguration.token;
 	const nodeId = fleetConfiguration.nodeId;
@@ -134,10 +103,12 @@ function openAuthenticatedConnection(fleetConfiguration) {
 	fleetSocket.on('connect', () => {
 		console.log(`[fleet] connected as ${activeNodeId}`);
 		attachLoopbackBridge();
+		eventEmitter.emit('fleet:status', { connected: true });
 	});
 
 	fleetSocket.on('disconnect', (reason) => {
 		console.warn(`[fleet] disconnected from fleet (${reason})`);
+		eventEmitter.emit('fleet:status', { connected: false });
 	});
 
 	fleetSocket.on('connect_error', (error) => {
@@ -147,89 +118,29 @@ function openAuthenticatedConnection(fleetConfiguration) {
 	startHeartbeat(nodeId);
 }
 
-async function openRegistrationConnection(credentials) {
-	if (registering || fleetSocket) {
+/** Opens (or reopens) the persistent authenticated connection for an enabled, registered fleet configuration; disconnects otherwise. This is a one-shot attempt: the connection itself retries indefinitely on its own once opened. */
+function connect(fleetConfiguration = { enabled: false }) {
+	if (!config.fleet.url || !fleetConfiguration.enabled || !fleetConfiguration.token) {
+		disconnect();
 		return;
 	}
 
-	registering = true;
-
-	fleetSocket = io(`${config.fleet.url}/node`, {
-		path: '/api/fleet',
-		reconnection: false,
-		auth: {
-			role: 'node'
-		}
-	});
-
-	fleetSocket.on('connect', async () => {
-		try {
-			const response = await registerNode(credentials);
-			console.log(`[fleet] node registered as ${response.nodeId}`);
-		} catch (error) {
-			console.error('[fleet] node registration failed:', error.message);
-			const configuration = await DataService.getConfiguration();
-			const current = configuration?.fleet || {};
-			await DataService.setConfiguration('fleet', {
-				...current,
-				enabled: false
-			});
-			eventEmitter.emit('configuration:updated');
-			disconnect();
-		} finally {
-			registering = false;
-		}
-	});
-
-	fleetSocket.on('connect_error', (error) => {
-		console.error('[fleet] registration connection error:', error.message);
-		registering = false;
-		disconnect();
-	});
+	if (activeToken === fleetConfiguration.token && fleetSocket) {
+		return;
+	}
+	openAuthenticatedConnection(fleetConfiguration);
 }
 
-async function sync() {
-	if (!config.fleet.url) {
-		disconnect();
-		return;
-	}
-
-	const configuration = await DataService.getConfiguration();
-	const fleetConfiguration = configuration?.fleet || { enabled: false };
-
-	if (!fleetConfiguration.enabled) {
-		disconnect();
-		return;
-	}
-
-	if (fleetConfiguration.token) {
-		if (activeToken === fleetConfiguration.token && fleetSocket) {
-			return;
-		}
-		openAuthenticatedConnection(fleetConfiguration);
-		return;
-	}
-
-	if (pendingCredentials) {
-		await openRegistrationConnection(pendingCredentials);
-	}
-}
-
+/** Owns the outbound connection to the fleet server. It has no socket namespace of its own: it reacts to `fleet:sync` events (emitted by `configuration/fleet.js` whenever the fleet configuration may have changed) by reading the current configuration and (re)connecting accordingly, and reports its live status back via `fleet:status` events. */
 class FleetModule {
 	constructor() {
-		eventEmitter.on('fleet:register', (credentials) => {
-			pendingCredentials = credentials;
-			sync().catch((error) => {
-				console.error('[fleet] registration sync error:', error);
-			});
-		});
-		eventEmitter.on('configuration:updated', () => {
-			sync().catch((error) => {
-				console.error('[fleet] sync error:', error);
-			});
-		});
-		sync().catch((error) => {
-			console.error('[fleet] startup sync error:', error);
+		eventEmitter.on('fleet:sync', async () => {
+			try {
+				const configuration = await DataService.getConfiguration();
+				connect(configuration?.fleet);
+			} catch (error) {
+				console.error('[fleet] Failed to sync connection:', error);
+			}
 		});
 	}
 }

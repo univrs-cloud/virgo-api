@@ -1,11 +1,12 @@
-const sanitizeFleetConfig = (fleet) => {
+const sanitizeFleetConfig = (fleet, connected) => {
 	if (!fleet) {
 		return null;
 	}
 	return {
 		enabled: Boolean(fleet.enabled),
 		email: fleet.email || null,
-		registered: Boolean(fleet.token)
+		registered: Boolean(fleet.token),
+		connected: Boolean(connected)
 	};
 };
 
@@ -21,7 +22,7 @@ const emitToSocket = (socket, module) => {
 		} else if (source.fleet) {
 			configuration = {
 				...source,
-				fleet: sanitizeFleetConfig(source.fleet)
+				fleet: sanitizeFleetConfig(source.fleet, module.getState('fleetConnected'))
 			};
 		}
 		socket.emit('configuration', configuration);

@@ -1,4 +1,3 @@
-import config from '../../config.js';
 import { cleanupQueues } from '../queues.js';
 import createJobModule from './job/index.js';
 import createConfigurationModule from './configuration/index.js';
@@ -23,12 +22,9 @@ export default async () => {
 		createBookmarkModule(),
 		createShareModule(),
 		createIndexerModule(),
-		createWeatherModule()
+		createWeatherModule(),
+		createFleetModule()
 	];
-
-	if (config.fleet.url) {
-		modules.push(createFleetModule());
-	}
 
 	return {
 		modules
