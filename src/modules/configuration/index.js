@@ -11,15 +11,9 @@ class ConfigurationModule extends BaseModule {
 			await this.#loadConfiguration();
 		})();
 
-		this.setState('fleetConnected', false);
-
 		this.eventEmitter
 			.on('configuration:updated', async () => {
 				await this.#loadConfiguration();
-				configurationManager.broadcast(this);
-			})
-			.on('fleet:status', ({ connected }) => {
-				this.setState('fleetConnected', connected);
 				configurationManager.broadcast(this);
 			});
 	}
