@@ -19,7 +19,7 @@ const watchIndexDb = (module) => {
 	indexDbWatcher = new FileWatcher(database.INDEX_DB_PATH);
 	indexDbWatcher
 		.onChange((event, changedPath) => {
-			if (changedPath !== INDEX_DB_PATH) {
+			if (changedPath !== database.INDEX_DB_PATH) {
 				return;
 			}
 			
