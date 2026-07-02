@@ -1,7 +1,9 @@
 import { io } from 'socket.io-client';
+import { promises as fs } from 'fs';
 import config from '../../../config.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
+import { contentTypeForPath, resolveAssetFile } from './assets.js';
 
 class FleetModule extends BaseModule {
 	#fleetSocket = null;
@@ -125,6 +127,39 @@ class FleetModule extends BaseModule {
 
 		this.#fleetSocket.on('proxy:close', ({ sessionId } = {}) => {
 			this.#closeProxySession(sessionId, false);
+		});
+
+		this.#fleetSocket.on('proxy:asset', async ({ requestId, path: assetPath } = {}) => {
+			if (!requestId || !assetPath) {
+				return;
+			}
+
+			const filePath = resolveAssetFile(assetPath);
+			if (!filePath) {
+				this.#fleetSocket.emit('proxy:asset:response', {
+					requestId,
+					status: 404,
+					error: 'Invalid asset path'
+				});
+				return;
+			}
+
+			try {
+				const body = await fs.readFile(filePath);
+				this.#fleetSocket.emit('proxy:asset:response', {
+					requestId,
+					status: 200,
+					contentType: contentTypeForPath(filePath),
+					body: body.toString('base64')
+				});
+			} catch (error) {
+				const status = error?.code === 'ENOENT' ? 404 : 500;
+				this.#fleetSocket.emit('proxy:asset:response', {
+					requestId,
+					status,
+					error: error.message
+				});
+			}
 		});
 	}
 
