@@ -1,10 +1,76 @@
 import DataService from '../../database/data_service.js';
 
-async function saveFleetConfiguration(module, fleet) {
-	await DataService.setConfiguration('fleet', fleet);
+const waitForFleetRegistration = (module, credentials) => {
+	return new Promise((resolve, reject) => {
+		const onRegistered = (payload) => {
+			cleanup();
+			resolve(payload);
+		};
+		const onError = ({ error } = {}) => {
+			cleanup();
+			reject(new Error(error || 'Node registration failed'));
+		};
+		const cleanup = () => {
+			module.eventEmitter.off('fleet:registered', onRegistered);
+			module.eventEmitter.off('fleet:register:error', onError);
+		};
+
+		module.eventEmitter.once('fleet:registered', onRegistered);
+		module.eventEmitter.once('fleet:register:error', onError);
+		module.eventEmitter.emit('fleet:register', credentials);
+	});
+};
+
+const updateFleetConfiguration = async (job, module) => {
+	const configuration = await DataService.getConfiguration();
+	const current = configuration?.fleet || {};
+	const enabled = Boolean(job.data.config?.enabled);
+	const email = String(job.data.config?.email || current.email || '').trim().toLowerCase() || null;
+
+	if (enabled && !current.token && (!email || !job.data.config?.password)) {
+		throw new Error('Fleet email and password are required');
+	}
+
+	let updated;
+	let message;
+	if (enabled && !current.token) {
+		await module.updateJobProgress(job, 'Registering with fleet...');
+		let response;
+		try {
+			response = await waitForFleetRegistration(module, {
+				email,
+				password: job.data.config.password
+			});
+		} catch (error) {
+			throw new Error(`Unable to register with fleet: ${error.message}`);
+		}
+		updated = {
+			...current,
+			enabled: true,
+			email,
+			nodeId: response.nodeId,
+			token: response.token
+		};
+		message = 'Registered with fleet.';
+	} else {
+		updated = {
+			...current,
+			enabled,
+			email
+		};
+		message = (enabled ? 'Fleet configuration saved.' : 'Fleet disabled.');
+	}
+
+	await DataService.setConfiguration('fleet', updated);
 	module.eventEmitter.emit('configuration:updated');
+
+	if (updated.enabled) {
+		await module.updateJobProgress(job, 'Connecting to fleet...');
+	}
 	module.eventEmitter.emit('fleet:sync');
-}
+
+	return message;
+};
 
 const onConnection = (socket, module) => {
 	socket.on('configuration:fleet:update', async (config) => {
@@ -12,46 +78,19 @@ const onConnection = (socket, module) => {
 			return;
 		}
 
-		const configuration = await DataService.getConfiguration();
-		const current = configuration?.fleet || {};
-		const enabled = Boolean(config?.enabled);
-		const email = String(config?.email || current.email || '').trim().toLowerCase() || null;
-
-		// A first-time enable needs a token, which only exists after registering with the fleet.
-		// The actual registration is owned by the fleet module; it emits `fleet:registered` back to
-		// us with the token, which we then persist below.
-		if (enabled && !current.token) {
-			if (!email || !config?.password) {
-				return;
-			}
-			module.eventEmitter.emit('fleet:register', { email, password: config.password });
-			return;
-		}
-
-		await saveFleetConfiguration(module, { ...current, enabled, email });
+		await module.addJob('fleet:update', { config, username: socket.username });
 	});
 };
 
-const onRegister = (module) => {
-	// Persist fleet credentials once the fleet module has finished registering this node.
-	module.eventEmitter.on('fleet:registered', async ({ email, nodeId, token } = {}) => {
-		const configuration = await DataService.getConfiguration();
-		const current = configuration?.fleet || {};
-		await saveFleetConfiguration(module, {
-			...current,
-			enabled: true,
-			email: email || current.email || null,
-			nodeId,
-			token
-		});
-	});
-
-	// Reconnect using previously stored credentials at startup.
+const register = (module) => {
 	module.eventEmitter.emit('fleet:sync');
 };
 
 export default {
 	name: 'fleet',
 	onConnection,
-	register: onRegister
+	register,
+	jobs: {
+		'fleet:update': updateFleetConfiguration
+	}
 };
