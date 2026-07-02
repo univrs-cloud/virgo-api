@@ -72,6 +72,37 @@ class FleetModule extends BaseModule {
 		}, 25000);
 	}
 
+	#localApiUrl() {
+		const { host, port } = config.server;
+		return `https://${host}:${port}`;
+	}
+
+	#openLocalProxySession(sessionId, namespace) {
+		const local = io(`${this.#localApiUrl()}${namespace}`, {
+			path: '/api',
+			reconnection: false,
+			rejectUnauthorized: false
+		});
+		this.#proxySessions.set(sessionId, local);
+
+		local.onAny((event, ...args) => {
+			if (this.#fleetSocket?.connected) {
+				this.#fleetSocket.emit('proxy:event', { sessionId, event, args });
+			}
+		});
+
+		local.on('connect_error', (error) => {
+			console.error(`[fleet] proxy loopback failed (${namespace}):`, error.message);
+			this.#closeProxySession(sessionId, true);
+		});
+
+		local.on('disconnect', () => {
+			this.#closeProxySession(sessionId, true);
+		});
+
+		return local;
+	}
+
 	/** Wires the multiplexed proxy tunnel: the fleet relays any namespace a client asks for, and the node
 	 * decides how to service it by opening a loopback connection to its own local module of that name. */
 	#attachProxyBridge() {
@@ -80,22 +111,7 @@ class FleetModule extends BaseModule {
 				return;
 			}
 			this.#closeProxySession(sessionId, false);
-
-			const local = io(namespace, {
-				path: '/api',
-				reconnection: false
-			});
-			this.#proxySessions.set(sessionId, local);
-
-			local.onAny((event, ...args) => {
-				if (this.#fleetSocket?.connected) {
-					this.#fleetSocket.emit('proxy:event', { sessionId, event, args });
-				}
-			});
-
-			local.on('disconnect', () => {
-				this.#closeProxySession(sessionId, true);
-			});
+			this.#openLocalProxySession(sessionId, namespace);
 		});
 
 		this.#fleetSocket.on('proxy:event', ({ sessionId, event, args } = {}) => {
