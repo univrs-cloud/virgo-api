@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import { execa } from 'execa';
 import ini from 'ini';

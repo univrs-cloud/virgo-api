@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import camelcaseKeys from 'camelcase-keys';

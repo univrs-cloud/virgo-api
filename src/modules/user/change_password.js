@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import * as yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
 import linuxSysUser from 'linux-sys-user';
