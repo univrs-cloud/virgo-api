@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
 

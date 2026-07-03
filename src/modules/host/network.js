@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import { execa } from 'execa';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
