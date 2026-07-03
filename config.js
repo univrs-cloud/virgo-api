@@ -9,5 +9,8 @@ export default {
 	},
 	apps: {
 		templatesUrl: 'https://apps.univrs.cloud/templates.json'
+	},
+	fleet: {
+		url: 'https://fleet.univrs.cloud'
 	}
 };
