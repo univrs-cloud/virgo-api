@@ -11,6 +11,10 @@ const localFetchDispatcher = new Agent({
 	connect: { rejectUnauthorized: false }
 });
 
+const localTlsOptions = {
+	rejectUnauthorized: false
+};
+
 const pickResponseHeaders = (headers) => {
 	const selected = {};
 	const contentType = headers.get('content-type');
@@ -166,11 +170,12 @@ const abortHttpRequest = ({ requestId } = {}) => {
 };
 
 const openInternalSocket = ({ namespace, user }) => {
-	const url = `http://127.0.0.1:${serverConfig.server.port}${namespace}`;
+	const url = `https://${serverConfig.server.host}:${serverConfig.server.port}${namespace}`;
 	return ioClient(url, {
 		path: '/api',
 		transports: ['websocket'],
 		reconnection: false,
+		...localTlsOptions,
 		extraHeaders: {
 			'remote-user': user?.email || 'fleet-proxy',
 			'remote-groups': (user?.groups || ['admins']).join(',')
