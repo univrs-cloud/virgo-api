@@ -1,11 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { io as ioClient } from 'socket.io-client';
-import { fileURLToPath } from 'url';
 import serverConfig from '../../config.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const distFolder = path.join(__dirname, '..', '..', '..', 'virgo-ui/app/dist');
+import { folderPath as distFolder } from '../controllers/static.js';
 
 const contentTypes = {
 	'.html': 'text/html; charset=utf-8',
