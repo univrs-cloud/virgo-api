@@ -39,7 +39,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^5.79.2",
+		"bullmq": "^5.79.3",
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -60,8 +60,9 @@
 		"plist": "^5.0.0",
 		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.3",
+		"socket.io-client": "^4.8.3",
 		"sqlite3": "^6.0.1",
-		"systeminformation": "^5.31.13",
+		"systeminformation": "^5.31.14",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
