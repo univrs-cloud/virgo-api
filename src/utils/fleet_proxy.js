@@ -1,33 +1,18 @@
-import fs from 'fs/promises';
 import path from 'path';
 import { io as ioClient } from 'socket.io-client';
 import serverConfig from '../../config.js';
 import { folderPath as distFolder } from '../controllers/static.js';
 
-const contentTypes = {
-	'.html': 'text/html; charset=utf-8',
-	'.js': 'application/javascript; charset=utf-8',
-	'.mjs': 'application/javascript; charset=utf-8',
-	'.css': 'text/css; charset=utf-8',
-	'.json': 'application/json; charset=utf-8',
-	'.map': 'application/json; charset=utf-8',
-	'.svg': 'image/svg+xml',
-	'.png': 'image/png',
-	'.jpg': 'image/jpeg',
-	'.jpeg': 'image/jpeg',
-	'.gif': 'image/gif',
-	'.ico': 'image/x-icon',
-	'.webp': 'image/webp',
-	'.woff': 'font/woff',
-	'.woff2': 'font/woff2',
-	'.ttf': 'font/ttf',
-	'.otf': 'font/otf',
-	'.eot': 'application/vnd.ms-fontobject',
-	'.txt': 'text/plain; charset=utf-8'
-};
+const HTTP_CHUNK_SIZE = 256 * 1024;
+const activeHttpRequests = new Map();
 
-const getContentType = (filePath) => {
-	return contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+const pickResponseHeaders = (headers) => {
+	const selected = {};
+	const contentType = headers.get('content-type');
+	if (contentType) {
+		selected['content-type'] = contentType;
+	}
+	return selected;
 };
 
 const resolveDistPath = (assetPath) => {
@@ -40,27 +25,138 @@ const resolveDistPath = (assetPath) => {
 	return target;
 };
 
-const handleAssetRequest = async (socket, { requestId, path: assetPath }) => {
-	try {
-		const target = resolveDistPath(assetPath || '/index.html');
-		if (!target) {
-			socket.emit('proxy:asset:response', { requestId, status: 400, error: 'Invalid path' });
+const buildLocalAssetUrl = (assetPath) => {
+	const normalizedPath = assetPath?.startsWith('/') ? assetPath : `/${assetPath || 'index.html'}`;
+	return new URL(normalizedPath, `http://${serverConfig.server.host}:${serverConfig.server.port}`);
+};
+
+const createAckGate = (socket, requestId) => {
+	let nextSeq = 0;
+	let pendingAck = null;
+	let aborted = false;
+
+	const abort = () => {
+		aborted = true;
+		if (pendingAck) {
+			pendingAck.reject(new Error('Transfer aborted'));
+			pendingAck = null;
+		}
+	};
+
+	const onAck = ({ requestId: ackRequestId, seq } = {}) => {
+		if (ackRequestId !== requestId || !pendingAck || pendingAck.seq !== seq) {
 			return;
 		}
-		const body = await fs.readFile(target);
-		socket.emit('proxy:asset:response', {
-			requestId,
-			status: 200,
-			contentType: getContentType(target),
-			body: body.toString('base64')
+		pendingAck.resolve();
+		pendingAck = null;
+	};
+
+	const sendChunk = async (chunk) => {
+		if (aborted) {
+			throw new Error('Transfer aborted');
+		}
+		const seq = nextSeq++;
+		const payload = Buffer.from(chunk);
+		await new Promise((resolve, reject) => {
+			pendingAck = { seq, resolve, reject };
+			socket.emit('proxy:http:chunk', { requestId, seq }, payload);
 		});
-	} catch (error) {
-		socket.emit('proxy:asset:response', {
+	};
+
+	return { sendChunk, onAck, abort };
+};
+
+const emitChunkedBody = async (reader, ackGate) => {
+	let pending = Buffer.alloc(0);
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (value?.byteLength) {
+			pending = Buffer.concat([pending, Buffer.from(value)]);
+		}
+
+		while (pending.length >= HTTP_CHUNK_SIZE || (done && pending.length > 0)) {
+			const chunkSize = done ? pending.length : HTTP_CHUNK_SIZE;
+			const chunk = Buffer.from(pending.subarray(0, chunkSize));
+			pending = pending.subarray(chunkSize);
+			if (chunk.length === 0) {
+				break;
+			}
+			await ackGate.sendChunk(chunk);
+		}
+
+		if (done) {
+			break;
+		}
+	}
+};
+
+const handleHttpRequest = async (socket, { requestId, method = 'GET', path: assetPath } = {}) => {
+	if (!requestId) {
+		return;
+	}
+
+	const target = resolveDistPath(assetPath || '/index.html');
+	if (!target) {
+		socket.emit('proxy:http:error', { requestId, status: 400, error: 'Invalid path' });
+		return;
+	}
+
+	const abortController = new AbortController();
+	const ackGate = createAckGate(socket, requestId);
+	activeHttpRequests.set(requestId, { abortController, ackGate });
+
+	try {
+		const response = await fetch(buildLocalAssetUrl(assetPath || '/index.html'), {
+			method,
+			signal: abortController.signal,
+			headers: {
+				accept: '*/*',
+				'accept-encoding': 'identity'
+			}
+		});
+
+		if (!socket.connected) {
+			return;
+		}
+
+		socket.emit('proxy:http:response', {
 			requestId,
-			status: error.code === 'ENOENT' ? 404 : 500,
+			status: response.status,
+			headers: pickResponseHeaders(response.headers)
+		});
+
+		if (!response.body) {
+			socket.emit('proxy:http:end', { requestId });
+			return;
+		}
+
+		await emitChunkedBody(response.body.getReader(), ackGate);
+		if (socket.connected) {
+			socket.emit('proxy:http:end', { requestId });
+		}
+	} catch (error) {
+		if (abortController.signal.aborted) {
+			return;
+		}
+		socket.emit('proxy:http:error', {
+			requestId,
+			status: 500,
 			error: error.message
 		});
+	} finally {
+		activeHttpRequests.delete(requestId);
 	}
+};
+
+const abortHttpRequest = ({ requestId } = {}) => {
+	const active = activeHttpRequests.get(requestId);
+	if (!active) {
+		return;
+	}
+	active.ackGate.abort();
+	active.abortController.abort();
+	activeHttpRequests.delete(requestId);
 };
 
 const openInternalSocket = ({ namespace, user }) => {
@@ -84,9 +180,15 @@ const attachProxyHandlers = (fleetSocket) => {
 	fleetSocket.data.proxyAttached = true;
 	const sessions = new Map();
 
-	fleetSocket.on('proxy:asset', (payload) => {
-		handleAssetRequest(fleetSocket, payload || {});
+	fleetSocket.on('proxy:http:request', (payload) => {
+		handleHttpRequest(fleetSocket, payload || {});
 	});
+
+	fleetSocket.on('proxy:http:chunk:ack', (payload) => {
+		activeHttpRequests.get(payload?.requestId)?.ackGate?.onAck(payload);
+	});
+
+	fleetSocket.on('proxy:http:abort', abortHttpRequest);
 
 	fleetSocket.on('proxy:open', ({ sessionId, namespace, user } = {}) => {
 		if (!sessionId || !namespace) {
@@ -126,6 +228,11 @@ const attachProxyHandlers = (fleetSocket) => {
 	});
 
 	fleetSocket.on('disconnect', () => {
+		for (const active of activeHttpRequests.values()) {
+			active.ackGate.abort();
+			active.abortController.abort();
+		}
+		activeHttpRequests.clear();
 		for (const client of sessions.values()) {
 			client.disconnect();
 		}
