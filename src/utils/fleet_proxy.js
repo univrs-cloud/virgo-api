@@ -1,10 +1,15 @@
 import path from 'path';
+import { Agent } from 'undici';
 import { io as ioClient } from 'socket.io-client';
 import serverConfig from '../../config.js';
 import { folderPath as distFolder } from '../controllers/static.js';
 
 const HTTP_CHUNK_SIZE = 256 * 1024;
 const activeHttpRequests = new Map();
+
+const localFetchDispatcher = new Agent({
+	connect: { rejectUnauthorized: false }
+});
 
 const pickResponseHeaders = (headers) => {
 	const selected = {};
@@ -27,7 +32,7 @@ const resolveDistPath = (assetPath) => {
 
 const buildLocalAssetUrl = (assetPath) => {
 	const normalizedPath = assetPath?.startsWith('/') ? assetPath : `/${assetPath || 'index.html'}`;
-	return new URL(normalizedPath, `http://${serverConfig.server.host}:${serverConfig.server.port}`);
+	return new URL(normalizedPath, `https://${serverConfig.server.host}:${serverConfig.server.port}`);
 };
 
 const createAckGate = (socket, requestId) => {
@@ -110,6 +115,7 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 		const response = await fetch(buildLocalAssetUrl(assetPath || '/index.html'), {
 			method,
 			signal: abortController.signal,
+			dispatcher: localFetchDispatcher,
 			headers: {
 				accept: '*/*',
 				'accept-encoding': 'identity'
