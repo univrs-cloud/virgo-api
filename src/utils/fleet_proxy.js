@@ -176,7 +176,7 @@ const openInternalSocket = ({ namespace, user }) => {
 		transports: ['websocket'],
 		reconnection: false,
 		...localTlsOptions,
-		extraHeaders: {
+		auth: {
 			'remote-user': 'voyager',
 			'remote-groups': 'admins'
 		}
