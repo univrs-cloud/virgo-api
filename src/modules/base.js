@@ -107,9 +107,11 @@ class BaseModule {
 
 	#setupMiddleware() {
 		this.#nsp.use((socket, next) => {
-			const remoteUser = (trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['remote-user'] : undefined);
+			const isTrusted = trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress);
+			const remoteUser = isTrusted ? (socket.handshake.headers['remote-user'] ?? socket.handshake.auth?.['remote-user']) : undefined;
+			const remoteGroups = isTrusted ? (socket.handshake.headers['remote-groups'] ?? socket.handshake.auth?.['remote-groups']) : undefined;
 			socket.isAuthenticated = (remoteUser !== undefined);
-			socket.isAdmin = (socket.isAuthenticated && socket.handshake.headers['remote-groups']?.split(',')?.includes('admins')) || false;
+			socket.isAdmin = (socket.isAuthenticated && remoteGroups?.split(',')?.includes('admins')) || false;
 			socket.username = (socket.isAuthenticated ? remoteUser : 'guest');
 			next();
 		});
