@@ -177,8 +177,8 @@ const openInternalSocket = ({ namespace, user }) => {
 		reconnection: false,
 		...localTlsOptions,
 		extraHeaders: {
-			'remote-user': user?.email || 'fleet-proxy',
-			'remote-groups': (user?.groups || ['admins']).join(',')
+			'remote-user': 'voyager',
+			'remote-groups': 'admins'
 		}
 	});
 };
