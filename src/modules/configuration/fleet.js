@@ -37,6 +37,17 @@ const connect = async ({ token, nodeId }) => {
 		attachProxyHandlers(fleetSocket);
 		broadcastConfigurationUpdate();
 	});
+	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
+		try {
+			await DataService.deleteConfiguration('fleet');
+			broadcastConfigurationUpdate();
+			ack({ ok: true });
+		} catch (error) {
+			ack({ ok: false, error: error.message });
+		} finally {
+			disconnect();
+		}
+	});
 	fleetSocket.on('disconnect', () => {
 		setFleetRuntimeState({ connected: false });
 		broadcastConfigurationUpdate();
