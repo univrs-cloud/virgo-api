@@ -64,6 +64,16 @@ class DataService {
 		}
 	}
 
+	static async deleteConfiguration(key) {
+		try {
+			await Configuration.destroy({ where: { key } });
+			return true;
+		} catch (error) {
+			console.error(`Error deleting configuration key '${key}' from database:`, error);
+			return false;
+		}
+	}
+
 	static async updateConfiguration(updates) {
 		try {
 			for (const [key, value] of Object.entries(updates)) {
