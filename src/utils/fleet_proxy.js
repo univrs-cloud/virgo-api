@@ -107,7 +107,7 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 
 	const target = resolveDistPath(assetPath || '/index.html');
 	if (!target) {
-		socket.emit('proxy:http:error', { requestId, status: 400, error: 'Invalid path' });
+		socket.emit('proxy:http:error', { requestId, status: 400, message: 'Invalid path' });
 		return;
 	}
 
@@ -149,11 +149,7 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 		if (abortController.signal.aborted) {
 			return;
 		}
-		socket.emit('proxy:http:error', {
-			requestId,
-			status: 500,
-			error: error.message
-		});
+		socket.emit('proxy:http:error', { requestId, status: 500, message: error.message });
 	} finally {
 		activeHttpRequests.delete(requestId);
 	}

@@ -41,9 +41,9 @@ const connect = async ({ token, nodeId }) => {
 		try {
 			await DataService.deleteConfiguration('fleet');
 			broadcastConfigurationUpdate();
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		} finally {
 			disconnect();
 		}
@@ -86,8 +86,8 @@ const registerNode = ({ email, password, serialNumber, name }) => {
 		socket.on('connect', () => {
 			socket.emit('node:register', { serialNumber, name, email, password }, (response) => {
 				socket.disconnect();
-				if (!response?.ok) {
-					reject(new Error(response?.error || 'Fleet registration failed'));
+				if (response?.status !== 'succeeded') {
+					reject(new Error(response?.message || 'Fleet registration failed'));
 					return;
 				}
 				resolve({ nodeId: response.nodeId, token: response.token });
