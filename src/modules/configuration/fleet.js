@@ -7,8 +7,15 @@ import { setFleetRuntimeState, resetFleetRuntimeState } from '../../utils/fleet_
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
+// A mass power event brings many nodes back at once; without a spread they'd all open their
+// control socket in the same tick and hammer the fleet server (each connect is a serialised
+// SQLite write). Delay the boot-time auto-connect by a random offset in this window so the
+// reconnect load arrives smeared across time instead of as a single spike.
+const STARTUP_JITTER_MS = 30000;
 let fleetSocket = null;
 let fleetModule = null;
+
+const randomStartupDelay = () => Math.floor(Math.random() * STARTUP_JITTER_MS);
 
 const broadcastConfigurationUpdate = () => {
 	fleetModule?.eventEmitter?.emit('configuration:updated');
@@ -30,7 +37,10 @@ const connect = async ({ token, nodeId }) => {
 		auth: { role: 'node', secret: token },
 		reconnection: true,
 		reconnectionDelay: 2000,
-		reconnectionDelayMax: 10000
+		reconnectionDelayMax: 10000,
+		// Spread reconnection attempts: when the fleet server restarts, every node drops and
+		// retries at once, so widen the backoff randomisation to de-correlate the retry storm.
+		randomizationFactor: 0.75
 	});
 	fleetSocket.on('connect', () => {
 		setFleetRuntimeState({ connected: true, authFailed: false });
@@ -151,7 +161,13 @@ const startIfEnabled = async () => {
 		const configuration = await DataService.getConfiguration();
 		const fleet = configuration?.fleet;
 		if (fleet?.enabled && fleet?.token) {
-			await connect({ token: fleet.token, nodeId: fleet.nodeId });
+			// Jitter only the boot-time auto-connect; user-initiated register/enable stay immediate.
+			const delay = randomStartupDelay();
+			setTimeout(() => {
+				connect({ token: fleet.token, nodeId: fleet.nodeId }).catch((error) => {
+					console.error('Error starting fleet connection:', error);
+				});
+			}, delay);
 		}
 	} catch (error) {
 		console.error('Error starting fleet connection:', error);
