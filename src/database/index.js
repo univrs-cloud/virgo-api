@@ -13,4 +13,8 @@ const sequelize = new Sequelize({
 	logging: false
 });
 
+await sequelize.query('PRAGMA journal_mode = WAL;');
+await sequelize.query('PRAGMA busy_timeout = 5000;');
+await sequelize.query('PRAGMA synchronous = NORMAL;');
+
 export { sequelize };
