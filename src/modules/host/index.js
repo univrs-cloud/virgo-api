@@ -240,7 +240,7 @@ class HostModule extends BaseModule {
 		} catch (error) {
 			this.setState('updates', false);
 		}
-		this.eventEmitter.emit('host:updates:updated');
+		this.eventEmitter.emit('host:updates:updated', this.getState('updates'));
 	}
 
 	async isUpdateInProgress() {
