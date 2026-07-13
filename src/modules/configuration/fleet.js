@@ -14,6 +14,14 @@ const AUTH_FAILED_ERROR = 'Node authentication failed';
 const STARTUP_JITTER_MS = 30000;
 let fleetSocket = null;
 let fleetModule = null;
+// Shape matches host:updates: array | [] | false.
+let lastUpdates = false;
+
+const reportUpdatesToFleet = () => {
+	if (fleetSocket?.connected) {
+		fleetSocket.emit('node:updates', { updates: lastUpdates });
+	}
+};
 
 const randomStartupDelay = () => Math.floor(Math.random() * STARTUP_JITTER_MS);
 
@@ -46,6 +54,7 @@ const connect = async ({ token, nodeId }) => {
 		setFleetRuntimeState({ connected: true, authFailed: false });
 		attachProxyHandlers(fleetSocket);
 		broadcastConfigurationUpdate();
+		reportUpdatesToFleet();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
 		try {
@@ -176,6 +185,10 @@ const startIfEnabled = async () => {
 
 const register = (module) => {
 	fleetModule = module;
+	module.eventEmitter.on('host:updates:updated', (updates) => {
+		lastUpdates = updates;
+		reportUpdatesToFleet();
+	});
 	startIfEnabled();
 };
 
