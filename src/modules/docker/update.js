@@ -71,6 +71,7 @@ const updateApp = async (job, module) => {
 		return !containers.some((container) => { return container.id === update.containerId; });
 	});
 	module.setState('updates', updates);
+	module.eventEmitter.emit('app:updates:updated', module.getState('updates'));
 	module.nsp.emit('app:updates', module.getState('updates'));
 	return `${existingApp.title} updated.`;
 };

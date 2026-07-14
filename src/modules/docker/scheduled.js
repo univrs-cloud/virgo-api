@@ -218,6 +218,7 @@ const checkForUpdates = async (module) => {
 	}
 
 	module.setState('updates', updates);
+	module.eventEmitter.emit('app:updates:updated', module.getState('updates'));
 
 	for (const socket of module.nsp.sockets.values()) {
 		if (socket.isAuthenticated && socket.isAdmin) {
