@@ -40,7 +40,7 @@ class FileWatcher {
 		if (this.#watcher) {
 			await this.#watcher.close();
 			this.#watcher = null;
-			this.#onStopCallback();
+			this.#onStopCallback?.();
 		}
 		return this;
 	}

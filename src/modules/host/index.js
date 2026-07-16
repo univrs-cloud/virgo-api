@@ -13,8 +13,9 @@ class HostModule extends BaseModule {
 	#rebootRequiredFile = '/run/reboot-required';
 	#setupCompletedFile = '/var/www/virgo-api/setup_completed';
 	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
-	#updatePidFile = '/var/www/virgo-api/update.pid';
+	#updateProgressFile = '/var/www/virgo-api/update_progress';
 	#updateFile = '/var/www/virgo-api/update.log';
+	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updatePid = null;
 	#updateCompletionPromise = null;
 	#updateCompletionGeneration = 0;
@@ -92,6 +93,10 @@ class HostModule extends BaseModule {
 
 	get updateFile() {
 		return this.#updateFile;
+	}
+
+	get updateProgressFile() {
+		return this.#updateProgressFile;
 	}
 
 	get updatePid() {
