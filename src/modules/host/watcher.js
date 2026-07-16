@@ -7,9 +7,6 @@ let setupCompletedWatcher;
 let updateLogsWatcher;
 let updateProgressWatcher;
 
-// Parse apt's APT::Status-Fd stream. Lines look like `dlstatus:<item>:<percent>:<message>`
-// (download) or `pmstatus:<package>:<percent>:<message>` (install); apt already reports the
-// overall percentage per stage, so we take the most recent one.
 const parseAptProgress = (data) => {
 	const lines = data.split('\n');
 	for (let i = lines.length - 1; i >= 0; i--) {
