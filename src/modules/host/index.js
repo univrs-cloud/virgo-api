@@ -133,6 +133,7 @@ class HostModule extends BaseModule {
 		for (const socket of this.nsp.sockets.values()) {
 			socket.emit('host:update', update);
 		}
+		this.eventEmitter.emit('host:update:updated', update);
 	}
 
 	async syncUpdatePidFromFile() {

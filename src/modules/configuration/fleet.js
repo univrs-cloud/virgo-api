@@ -17,6 +17,8 @@ let fleetModule = null;
 // Each matches its source event: system is host:updates, apps is app:updates (array | [] | false).
 let lastSystemUpdates = false;
 let lastAppUpdates = false;
+let lastUpdate = null;
+let lastUpdateSignature = null;
 
 const reportUpdatesToFleet = () => {
 	if (fleetSocket?.connected) {
@@ -24,7 +26,41 @@ const reportUpdatesToFleet = () => {
 	}
 };
 
-const randomStartupDelay = () => Math.floor(Math.random() * STARTUP_JITTER_MS);
+const fleetUpdate = () => {
+	const state = lastUpdate?.state;
+	if (state === 'running') {
+		return { state, progress: lastUpdate.progress ?? null };
+	}
+
+	if (state === 'succeeded' || state === 'failed') {
+		return { state };
+	}
+	
+	return null;
+};
+
+const updateSignature = (update) => {
+	if (!update) {
+		return null;
+	}
+	return update.state === 'running'
+		? `running:${update.progress?.stage ?? ''}:${update.progress?.percent ?? ''}`
+		: update.state;
+};
+
+const reportUpdateToFleet = () => {
+	if (!fleetSocket?.connected) {
+		return;
+	}
+
+	const update = fleetUpdate();
+	lastUpdateSignature = updateSignature(update);
+	fleetSocket.emit('node:update', update);
+};
+
+const randomStartupDelay = () => {
+	return Math.floor(Math.random() * STARTUP_JITTER_MS);
+};
 
 const broadcastConfigurationUpdate = () => {
 	fleetModule?.eventEmitter?.emit('configuration:updated');
@@ -56,6 +92,7 @@ const connect = async ({ token, nodeId }) => {
 		attachProxyHandlers(fleetSocket);
 		broadcastConfigurationUpdate();
 		reportUpdatesToFleet();
+		reportUpdateToFleet();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
 		try {
@@ -193,6 +230,13 @@ const register = (module) => {
 	module.eventEmitter.on('app:updates:updated', (updates) => {
 		lastAppUpdates = updates;
 		reportUpdatesToFleet();
+	});
+	module.eventEmitter.on('host:update:updated', (update) => {
+		lastUpdate = update;
+		if (updateSignature(fleetUpdate()) === lastUpdateSignature) {
+			return;
+		}
+		reportUpdateToFleet();
 	});
 	startIfEnabled();
 };
