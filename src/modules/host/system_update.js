@@ -59,7 +59,7 @@ const update = async (socket, module) => {
 			'UPDATE_EXIT=1',
 			`trap 'echo "$UPDATE_EXIT" > ${module.updateExitStatusFile}' EXIT`,
 			'set -o pipefail',
-			`apt-get dist-upgrade -y -q -o Dpkg::Options::='--force-confold' --auto-remove 2>&1 | tee -a ${module.updateFile}`,
+			`apt-get dist-upgrade -y -q -o APT::Status-Fd=3 -o Dpkg::Options::='--force-confold' --auto-remove 3>>${module.updateProgressFile} 2>&1 | tee -a ${module.updateFile}`,
 			'UPDATE_EXIT=$?',
 		].join('\n');
 		await execa('systemd-run', [
@@ -84,7 +84,7 @@ const completeUpdate = async (socket, module) => {
 	}
 
 	module.resetUpdateTracking();
-	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile]) {
+	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile, module.updateProgressFile]) {
 		await fs.writeFile(file, '');
 	}
 	module.setState('update', null);
