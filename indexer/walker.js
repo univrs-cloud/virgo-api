@@ -1,14 +1,7 @@
 import { opendir, stat } from 'fs/promises';
 import { isNoisePath } from './scope.js';
-
-const BATCH_SIZE = 4096;
-const STAT_CONCURRENCY = 64;
-
-// If a flush's stat() failure rate goes wholesale (>=50% of >=32 entries), it
-// means the snapshot mount has gone away mid-crawl. Abort instead of silently
-// dropping batches of files.
-const STAT_FAILURE_ABORT_RATIO = 0.5;
-const STAT_FAILURE_MIN_SAMPLE = 32;
+import { BATCH_SIZE, STAT_CONCURRENCY, STAT_FAILURE_ABORT_RATIO, STAT_FAILURE_MIN_SAMPLE } from './constants.js';
+import { primeMountReadable } from './snapshot_util.js';
 
 function makeMountError(snapshotPath, detail) {
 	const e = new Error(`Snapshot mount unreadable for ${snapshotPath}: ${detail}`);
@@ -18,23 +11,13 @@ function makeMountError(snapshotPath, detail) {
 
 /**
  * Prime the snapshot's automount before we hit it with a parallel `opendir`
- * salvo. One stat, 250 ms pause, one retry. Identical logic to the
- * incremental-path primer; deliberately not de-duplicated to keep the
- * walker self-contained (the indexer's primer lives in index.js where it
- * has access to `safeStatAsync`).
+ * salvo. Shares the one-stat / 250 ms pause / retry primer with the
+ * incremental path; on failure we raise the walker's own SNAPSHOT_STAT_FAILED.
  */
 async function primeMount(snapshotPath) {
-	for (let attempt = 0; attempt < 2; attempt++) {
-		try {
-			await stat(snapshotPath);
-			return;
-		} catch {
-			if (attempt === 0) {
-				await new Promise(r => setTimeout(r, 250));
-			}
-		}
+	if (!(await primeMountReadable(snapshotPath))) {
+		throw makeMountError(snapshotPath, 'root stat() failed twice; .zfs automount likely not ready.');
 	}
-	throw makeMountError(snapshotPath, 'root stat() failed twice; .zfs automount likely not ready.');
 }
 
 /**

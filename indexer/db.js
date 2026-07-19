@@ -20,6 +20,7 @@ function open() {
 	db.exec(`
 		PRAGMA journal_mode = WAL;
 		PRAGMA synchronous = NORMAL;
+		PRAGMA busy_timeout = 5000;
 		PRAGMA cache_size = -262144;
 		PRAGMA temp_store = MEMORY;
 		PRAGMA mmap_size = 2147483648;

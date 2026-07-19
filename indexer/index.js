@@ -4,7 +4,13 @@ import * as zfs from './zfs.js';
 import * as walker from './walker.js';
 import * as utils from './utils.js';
 import { execaSync } from 'execa';
-import { stat } from 'fs/promises';
+import { BATCH_SIZE } from './constants.js';
+import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
+import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies } from './flush.js';
+import { logBatchProgress, endProgressLine } from './progress.js';
+import { printStats } from './stats.js';
+
+const INCR_BATCH_SIZE = BATCH_SIZE;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -16,61 +22,10 @@ function umountSnapshot(snapPath) {
 	}
 }
 
-async function safeStatAsync(path) {
-	try {
-		return await stat(path);
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Stat each entry's `fullPath`. Returns an array of stat results (null on
- * failure) and a count of failures, so callers can decide whether to abort
- * the whole snapshot (wholesale stat failure usually means the ZFS snapshot
- * automount didn't take and EVERY path will fail).
- */
-async function batchStat(entries, concurrency = 64) {
-	const results = new Array(entries.length);
-	let failures = 0;
-	for (let i = 0; i < entries.length; i += concurrency) {
-		const slice = entries.slice(i, i + concurrency);
-		const stats = await Promise.all(slice.map(e => safeStatAsync(e.fullPath)));
-		for (let j = 0; j < slice.length; j++) {
-			const s = stats[j];
-			results[i + j] = s;
-			if (!s) {
-				failures++;
-			}
-		}
-	}
-	return { results, failures };
-}
-
 function restartIndexerFromBeginning(message) {
 	const e = new Error(message);
 	e.code = 'INDEXER_RESTART_FROM_BEGINNING';
 	throw e;
-}
-
-/**
- * A snapshot mount that should be readable isn't. Almost always the ZFS
- * `.zfs/snapshot/<name>` automount didn't take. Treated like a zfs-diff
- * failure by the snapshot loop: cleanup partial work + restart from the
- * beginning so retention/automount races sort themselves out.
- */
-function isSnapshotStatFailure(e) {
-	return Boolean(e && e.code === 'SNAPSHOT_STAT_FAILED');
-}
-
-function makeSnapshotStatError(snap, snapPath, failures, total) {
-	const ratio = total ? (failures / total) : 1;
-	const msg = total
-		? `Snapshot mount unreadable for ${snap.full_name}: ${failures}/${total} stat() calls failed (${(ratio * 100).toFixed(0)}%). Path=${snapPath}.`
-		: `Snapshot mount unreadable for ${snap.full_name}. Path=${snapPath}.`;
-	const e = new Error(msg);
-	e.code = 'SNAPSHOT_STAT_FAILED';
-	return e;
 }
 
 /**
@@ -325,7 +280,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 	// ── Prepared statements ──
 	const stmt = {
 		upsertDataset: db.prepare(`INSERT INTO datasets(name, pool, mountpoint, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET mountpoint=excluded.mountpoint RETURNING id`),
-		upsertSnapshot: db.prepare(`INSERT INTO snapshots(dataset_id, name, full_name, created_at, used_bytes, referenced_bytes) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(full_name) DO UPDATE SET used_bytes=excluded.used_bytes RETURNING id`),
+		upsertSnapshot: db.prepare(`INSERT INTO snapshots(dataset_id, name, full_name, created_at, used_bytes, referenced_bytes) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(full_name) DO UPDATE SET used_bytes=excluded.used_bytes, referenced_bytes=excluded.referenced_bytes RETURNING id`),
 		getSnapshotByFullName: db.prepare(`SELECT id FROM snapshots WHERE full_name=?`),
 		getSnapshotsForDataset: db.prepare(`SELECT id, name, full_name, created_at, indexed_at, diff_done FROM snapshots WHERE dataset_id=? ORDER BY created_at ASC`),
 		markIndexed: db.prepare(`UPDATE snapshots SET indexed_at=? WHERE id=?`),
@@ -333,9 +288,6 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		upsertFile: db.prepare(`INSERT INTO files(dataset_id, path, inode, type, first_seen_snap_id, last_seen_snap_id) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(dataset_id, path) DO UPDATE SET inode=excluded.inode, type=excluded.type, last_seen_snap_id=excluded.last_seen_snap_id, deleted_at_snap_id=NULL RETURNING id`),
 		insertVersion: db.prepare(`INSERT OR IGNORE INTO file_versions(file_id, snapshot_id, size, mtime, ctime, nlink, mode) VALUES(?, ?, ?, ?, ?, ?, ?)`),
 		getFileByPath: db.prepare(`SELECT id FROM files WHERE dataset_id = ? AND path = ?`),
-		getLatestSize: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? ORDER BY snapshot_id DESC LIMIT 1`),
-		getSizeAtSnapshot: db.prepare(`SELECT size FROM file_versions WHERE file_id = ? AND snapshot_id = ? LIMIT 1`),
-		getSizeByPathAtSnapshot: db.prepare(`SELECT fv.size FROM file_versions fv JOIN files f ON f.id = fv.file_id WHERE f.dataset_id = ? AND f.path = ? AND fv.snapshot_id = ? LIMIT 1`),
 		// Bulk fetch (id, path, latest size) for every path in a batch via
 		// json_each so we don't do 4096 individual selects per flush. Used by
 		// the incremental and unified incremental+diff hot paths.
@@ -441,9 +393,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 		const { datasets, snapshots } = zfs.discoverAll({ pool });
 		// Pool-wide discovery; keep only configured roots and their descendants.
-		const filteredDatasets = datasets.filter(d =>
-			includeDatasets.some(p => d.name === p || d.name.startsWith(p + '/'))
-		);
+		const filteredDatasets = datasets.filter(d => datasetInIncludeScope(d.name, includeDatasets));
 		const liveDatasetNames = new Set(filteredDatasets.map(d => d.name));
 		pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveDatasetNames);
 
@@ -504,16 +454,31 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			stmt.deleteOrphanedFiles.run();
 		});
 
-		database.enableBulkMode(db);
-		inBulkMode = true;
+		// Precompute each dataset's snapshot list so we can decide whether this
+		// pass will do any full crawl before touching FTS trigger state.
+		const datasetWork = filteredDatasets.map(d => ({
+			d,
+			dsId: datasetIds[d.name],
+			dsSnaps: stmt.getSnapshotsForDataset.all(datasetIds[d.name]),
+		}));
+
+		// Bulk mode drops the FTS triggers and rebuilds the whole index in one
+		// shot at the end — a big win for full crawls, but pure overhead for a
+		// steady-state pass that only ingests a small incremental diff. Only pay
+		// it when a full crawl is actually going to run (or when the triggers are
+		// missing, e.g. a previous run was SIGKILLed before restoring them).
+		const needBulkMode = !ftsTriggersPresent(db)
+			|| datasetWork.some(({ d, dsSnaps }) => willDoFullCrawl(dsSnaps, d.mountpoint));
+		if (needBulkMode) {
+			database.enableBulkMode(db);
+			inBulkMode = true;
+		}
 
 		database.transaction(db, () => {
 			stmt.setMeta.run('last_activity_at', new Date().toISOString());
 		});
 
-		for (const d of filteredDatasets) {
-			const dsId = datasetIds[d.name];
-			const dsSnaps = stmt.getSnapshotsForDataset.all(dsId);
+		for (const { d, dsId, dsSnaps } of datasetWork) {
 			console.log(`\n📦 Dataset: ${d.name} (${dsSnaps.length} snapshots)`);
 
 			const lastIncrSnapId = findLastIncrementalSnapId(dsSnaps);
@@ -605,8 +570,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			}
 		}
 
-		database.disableBulkMode(db);
-		inBulkMode = false;
+		if (inBulkMode) {
+			database.disableBulkMode(db);
+			inBulkMode = false;
+		}
 
 		finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, '\n✅ Indexing complete.');
 	} finally {
@@ -629,6 +596,44 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		}
 		db.close();
 	}
+}
+
+/**
+ * Are the FTS maintenance triggers currently installed? They're dropped during
+ * bulk mode and recreated by disableBulkMode; if a previous run was killed
+ * before restoring them, the index would silently stop tracking new paths — so
+ * a missing trigger forces a full bulk-mode rebuild this pass.
+ */
+function ftsTriggersPresent(db) {
+	const row = db.prepare(`
+		SELECT COUNT(*) AS n FROM sqlite_master
+		WHERE type = 'trigger' AND name IN ('fts_paths_ai', 'fts_paths_ad', 'fts_paths_au')
+	`).get();
+	return row.n === 3;
+}
+
+/**
+ * Mirror the per-snapshot branch selection in the dataset loop to decide, ahead
+ * of time, whether this pass will hit the full-crawl path for a dataset. A full
+ * crawl happens for an unindexed snapshot whose predecessor isn't indexed (the
+ * first snapshot of a brand-new dataset, or a gap). Datasets with no mountpoint
+ * never get a snapshot path, so nothing is crawled. Being conservative here only
+ * affects the bulk-mode perf decision, never correctness.
+ */
+function willDoFullCrawl(dsSnaps, mountpoint) {
+	if (!mountpoint) {
+		return false;
+	}
+	let prevIndexed = false;
+	for (const snap of dsSnaps) {
+		if (!snap.indexed_at && !prevIndexed) {
+			return true;
+		}
+		// Whether it was already indexed or gets indexed this pass, the next
+		// snapshot sees an indexed predecessor.
+		prevIndexed = true;
+	}
+	return false;
 }
 
 function findLastIncrementalSnapId(dsSnaps) {
@@ -691,129 +696,20 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 	return count;
 }
 
-// ─── Batch constants ────────────────────────────────────────────────────────
-
-const INCR_BATCH_SIZE = 4096;
-const STAT_CONCURRENCY = 64;
-
-// If more than this fraction of stat() calls in a batch return null (and the
-// sample is at least STAT_FAILURE_MIN_SAMPLE entries), treat it as a wholesale
-// snapshot-mount failure and abort the snapshot. The threshold is high because
-// some real changes are legitimately ENOENT on the snapshot mount (file was
-// deleted between zfs diff and our stat) — but losing >50% of a non-trivial
-// batch is unambiguously a mount problem, not normal churn.
-const STAT_FAILURE_ABORT_RATIO = 0.5;
-const STAT_FAILURE_MIN_SAMPLE = 32;
-
-function sizeFromStat(st) {
-	return st.isDirectory() ? 0 : st.size;
-}
-
-function insertVersionFromStat(stmt, perf, fileId, snapId, st) {
-	const size = sizeFromStat(st);
-	stmt.insertVersion.run(fileId, snapId, size, Math.floor(st.mtimeMs / 1000), Math.floor(st.ctimeMs / 1000), st.nlink, modeStr(st));
-	perf.sqlInserts++;
-	return size;
-}
+// ─── Snapshot mount priming ─────────────────────────────────────────────────
 
 /**
- * Create (or refresh) a `files` row from a successful stat result. Used when
- * `zfs diff` reports a change for a path we don't have indexed yet — usually a
- * file that didn't exist in the earliest indexed snapshot, or whose `added`
- * event got lost in a previous run's partial failure. Self-healing: once the
- * row is here, subsequent events on the same path land normally.
- *
- * Increments `perf.backfilledFiles` so the run summary can flag how often
- * this happens (a steady non-zero rate hints at a deeper indexing gap).
- *
- * Returns the inserted file row, plus the new size for caller's bookkeeping.
- */
-function upsertFileFromStat(stmt, perf, datasetId, relPath, st, snapId) {
-	const type = typeFromStat(st);
-	const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snapId, snapId);
-	perf.sqlUpserts++;
-	if (!fileRow) {
-		return { fileRow: null, newSize: null };
-	}
-	const newSize = insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
-	perf.backfilledFiles = (perf.backfilledFiles ?? 0) + 1;
-	return { fileRow, newSize };
-}
-
-function assertBatchStatHealthy(snap, snapPath, statFailures, statTotal) {
-	if (statTotal >= STAT_FAILURE_MIN_SAMPLE && statFailures / statTotal >= STAT_FAILURE_ABORT_RATIO) {
-		throw makeSnapshotStatError(snap, snapPath, statFailures, statTotal);
-	}
-}
-
-async function prepareIncrementalFlushContext(batch, snap, snapPath, mountpoint, perf, datasetId, stmt) {
-	const t0 = Date.now();
-	const { map: statMap, statTotal, statFailures } = await statBatch(batch, mountpoint, snapPath);
-	perf.statMs += Date.now() - t0;
-	perf.statFailures += statFailures;
-	assertBatchStatHealthy(snap, snapPath, statFailures, statTotal);
-	const paths = resolveBatchPaths(batch, mountpoint);
-	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, paths.lookup);
-	return { statMap, ...paths, fileByPath };
-}
-
-let _progressAnimTick = 0;
-
-function indeterminateBar(width, tick) {
-	const blockLen = Math.max(3, Math.floor(width / 4));
-	const range = Math.max(1, width - blockLen + 1);
-	const start = tick % range;
-	let s = '';
-	for (let i = 0; i < width; i++) {
-		s += i >= start && i < start + blockLen ? '█' : '░';
-	}
-	return s;
-}
-
-function logBatchProgress(unit, batchLen, total, t0) {
-	const elapsedSec = (Date.now() - t0) / 1000;
-	const rate = elapsedSec > 0 ? (total / elapsedSec).toFixed(0) : '0';
-	_progressAnimTick++;
-	if (process.stdout.isTTY) {
-		const bar = indeterminateBar(22, _progressAnimTick);
-		process.stdout.write(`\r    [${bar}] ${total.toLocaleString()} ${unit}  ${rate}/s\x1b[K`);
-	} else {
-		console.log(`    +${batchLen.toLocaleString()} ${unit} → ${total.toLocaleString()} total (${rate}/s)`);
-	}
-}
-
-function endProgressLine() {
-	if (process.stdout.isTTY) {
-		process.stdout.write('\n');
-	}
-}
-
-/**
- * Touch the snapshot's automount root before we start a batch loop.
- *
- * ZFS auto-mounts snapshots lazily on first access to
- * `<dataset>/.zfs/snapshot/<name>`. Without priming, our first big parallel
- * `stat()` salvo can race the kernel and every call returns ENOENT,
- * silently producing orphan change rows for the whole snapshot.
- *
- * Strategy: one stat, one short sleep, one retry. If it's still unreadable,
- * abort the snapshot via `SNAPSHOT_STAT_FAILED` so the snapshot loop catches
- * it, runs `cleanupPartialDiffWork`, and we restart from the beginning.
+ * Prime the snapshot's automount before we start a batch loop, aborting the
+ * snapshot via `SNAPSHOT_STAT_FAILED` if it stays unreadable so the snapshot
+ * loop can clean up and restart from the beginning.
  */
 async function primeSnapshotMount(snap, snapPath) {
-	let st = await safeStatAsync(snapPath);
-	if (st) {
-		return;
+	if (!(await primeMountReadable(snapPath))) {
+		throw makeSnapshotStatError(snap, snapPath, 1, 1);
 	}
-	await new Promise(r => setTimeout(r, 250));
-	st = await safeStatAsync(snapPath);
-	if (st) {
-		return;
-	}
-	throw makeSnapshotStatError(snap, snapPath, 1, 1);
 }
 
-// ─── Incremental (standalone, no changes table) ────────────────────────────
+// ─── Diff streaming ─────────────────────────────────────────────────────────
 
 /**
  * Stream zfs diff output in batches. Shared by incremental, unified, and
@@ -872,6 +768,8 @@ async function runDiffStream({
 	}
 }
 
+// ─── Incremental (standalone, no changes table) ────────────────────────────
+
 async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
 	await runDiffStream({
 		prevSnap,
@@ -904,362 +802,6 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 	});
 }
 
-// Per-snapshot cap (the inline ⚠ line shows a handful so the user has context
-// without flooding the log). Per-run cap is larger because we persist that set
-// to meta and surface it in the dashboard / CLI summary.
-const ORPHAN_SAMPLE_LIMIT = 5;
-const ORPHAN_SAMPLE_RUN_LIMIT = 50;
-
-function sampleOrphan(perf, snap, changeType, relPath, relNewPath, statFailed, source) {
-	const entry = {
-		snapshot: snap?.full_name ?? snap?.name ?? null,
-		type: changeType,
-		path: relNewPath ? `${relPath} → ${relNewPath}` : relPath,
-		cause: statFailed ? 'stat-failed' : 'no-file-row',
-		source,
-	};
-	if (perf.orphanSamples && perf.orphanSamples.length < ORPHAN_SAMPLE_LIMIT) {
-		perf.orphanSamples.push(entry);
-	}
-	if (perf.orphanSamplesAll && perf.orphanSamplesAll.length < ORPHAN_SAMPLE_RUN_LIMIT) {
-		perf.orphanSamplesAll.push(entry);
-	}
-}
-
-function reportSnapshotAnomalies(perf, orphans0, statFails0) {
-	const orphans = perf.orphanedChanges - orphans0;
-	const statFails = perf.statFailures - statFails0;
-	if (orphans > 0) {
-		console.log(`    ⚠  ${orphans.toLocaleString()} change event(s) skipped (no matching file row) — usually a path-normalisation or earlier-snapshot failure.`);
-		for (const s of perf.orphanSamples) {
-			console.log(`        · [${s.type}/${s.cause}] ${s.path}`);
-		}
-		if (orphans > perf.orphanSamples.length) {
-			console.log(`        · …and ${(orphans - perf.orphanSamples.length).toLocaleString()} more`);
-		}
-	}
-	if (statFails > 0) {
-		console.log(`    ⚠  ${statFails.toLocaleString()} stat() failure(s) on snapshot mount — file may have been removed between zfs-diff and stat.`);
-	}
-	// Reset the per-snapshot orphan sample buffer for the next snapshot.
-	perf.orphanSamples = [];
-}
-
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-function resolveRelPath(path, mountpoint) {
-	return mountpoint && path.startsWith(mountpoint) ? path.slice(mountpoint.length) || '/' : path;
-}
-
-/**
- * Patch the in-batch `fileByPath` map so it reflects DB mutations made by
- * `applyFileRename`. The bulk lookup is taken once at batch start; if we
- * don't sync it after each rename, later changes in the same batch can hit
- * stale entries — e.g. a `victim` deleted by an earlier rename whose path
- * is now referenced again, leading to FK constraint failures on
- * `insertVersion(stale_id, ...)`.
- *
- * Semantics:
- *   - victim deleted  → drop map[relNewPath] (the row it pointed to is gone)
- *   - oldFile moved   → drop map[relOldPath], set map[relNewPath] = oldFile
- *   - no oldFile      → set map[relNewPath] = the newly upserted row
- */
-function syncMapForRename(fileByPath, relOldPath, relNewPath, oldFile, victim, resultFileId, newSize) {
-	if (victim && (!oldFile || victim.id !== oldFile.id)) {
-		fileByPath.delete(relNewPath);
-	}
-	if (oldFile) {
-		fileByPath.delete(relOldPath);
-		fileByPath.set(relNewPath, { ...oldFile, latestSize: newSize ?? oldFile.latestSize ?? null });
-	} else if (resultFileId) {
-		fileByPath.set(relNewPath, { id: resultFileId, latestSize: newSize ?? null });
-	}
-}
-
-/**
- * Apply a ZFS rename to the files table without creating a "deleted" tombstone.
- * Previously we marked the old path deleted and inserted a new row, which inflated
- * deleted-file counts and split version history across two file_ids.
- *
- * `oldFile` and `victim` should come from the batch's prefetched bulk lookup
- * map (see flushUnifiedBatch / flushIncrementalBatch). Pass undefined if the
- * caller doesn't know yet and we'll fall back to a direct select.
- *
- * @returns {{ fileId: number | null, oldSize: number | null }}
- */
-function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim) {
-	const type = typeFromStat(st);
-
-	if (oldFile === undefined) {
-		oldFile = stmt.getFileByPath.get(datasetId, relOldPath) ?? null;
-		perf.sqlSelects++;
-	}
-
-	if (!oldFile) {
-		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
-		perf.sqlUpserts++;
-		if (fileRow) {
-			insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
-		}
-		return { fileId: fileRow?.id ?? null, oldSize: null };
-	}
-
-	const oldSize = oldFile.latestSize ?? null;
-
-	if (victim === undefined) {
-		victim = stmt.getFileByPath.get(datasetId, relNewPath) ?? null;
-		perf.sqlSelects++;
-	}
-	if (victim && victim.id !== oldFile.id) {
-		stmt.deleteChangesByFileId.run(victim.id);
-		stmt.deleteVersionsByFileId.run(victim.id);
-		stmt.deleteFileById.run(victim.id);
-	}
-
-	stmt.updateFileRename.run(relNewPath, st.ino, type, snapId, oldFile.id, datasetId);
-	perf.sqlUpdates++;
-	insertVersionFromStat(stmt, perf, oldFile.id, snapId, st);
-	return { fileId: oldFile.id, oldSize };
-}
-
-function typeFromStat(st) {
-	return st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : 'other';
-}
-
-function modeStr(st) {
-	return (st.mode & 0o7777).toString(8).padStart(4, '0');
-}
-
-async function statBatch(batch, mountpoint, snapPath) {
-	const entries = [];
-	for (let i = 0; i < batch.length; i++) {
-		const c = batch[i];
-		if (c.changeType === 'removed') {
-			continue;
-		}
-		let targetPath;
-		if (c.changeType === 'renamed') {
-			const relNew = resolveRelPath(c.newPath, mountpoint);
-			targetPath = snapPath + relNew;
-		} else {
-			const rel = resolveRelPath(c.path, mountpoint);
-			targetPath = snapPath + rel;
-		}
-		entries.push({ idx: i, fullPath: targetPath });
-	}
-
-	const { results, failures } = await batchStat(entries, STAT_CONCURRENCY);
-	const map = new Map();
-	for (let j = 0; j < entries.length; j++) {
-		map.set(entries[j].idx, results[j]);
-	}
-	return { map, statTotal: entries.length, statFailures: failures };
-}
-
-/**
- * Resolve all (rel old, rel new) paths for a batch up front and return them
- * along with the set of paths that need a DB lookup. We need to look up:
- *  - the existing row for removed/modified/renamed sources (oldSize, fileId)
- *  - the victim row at the rename target (so we can vacuum it cleanly)
- */
-function resolveBatchPaths(batch, mountpoint, { lookupAllSources = false } = {}) {
-	const relPaths = new Array(batch.length);
-	const relNewPaths = new Array(batch.length);
-	const lookup = new Set();
-	for (let i = 0; i < batch.length; i++) {
-		const c = batch[i];
-		const relPath = resolveRelPath(c.path, mountpoint);
-		relPaths[i] = relPath;
-		if (lookupAllSources || c.changeType !== 'added') {
-			lookup.add(relPath);
-		}
-		if (c.changeType === 'renamed') {
-			const relNewPath = resolveRelPath(c.newPath, mountpoint);
-			relNewPaths[i] = relNewPath;
-			lookup.add(relNewPath);
-		} else {
-			relNewPaths[i] = null;
-		}
-	}
-	return { relPaths, relNewPaths, lookup };
-}
-
-function bulkLoadFileMap(stmt, perf, datasetId, paths) {
-	if (!paths.size) {
-		return new Map();
-	}
-	const t = Date.now();
-	const rows = stmt.bulkLookupFiles.all(JSON.stringify([...paths]), datasetId);
-	perf.sqlSelects += rows.length;
-	perf.sqlMs += Date.now() - t;
-	const map = new Map();
-	for (const r of rows) {
-		map.set(r.path, { id: r.id, latestSize: r.latest_size ?? null });
-	}
-	return map;
-}
-
-function bulkLoadFileMapWithSnap(stmt, perf, datasetId, paths, snapId) {
-	if (!paths.size) {
-		return new Map();
-	}
-	const t = Date.now();
-	const rows = stmt.bulkLookupFilesWithSnap.all(JSON.stringify([...paths]), datasetId, snapId);
-	perf.sqlSelects += rows.length;
-	perf.sqlMs += Date.now() - t;
-	const map = new Map();
-	for (const r of rows) {
-		map.set(r.path, {
-			id: r.id,
-			latestSize: r.latest_size ?? null,
-			sizeAtSnap: r.size_at_snap ?? null,
-		});
-	}
-	return map;
-}
-
-// ─── Batch flush: incremental only ─────────────────────────────────────────
-
-async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
-		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
-	);
-
-	const t = Date.now();
-	database.transaction(db, () => {
-		perf.sqlTxns++;
-		for (let i = 0; i < batch.length; i++) {
-			const c = batch[i];
-			const relPath = relPaths[i];
-
-			if (c.changeType === 'added') {
-				const st = statMap.get(i);
-				if (st) {
-					const type = typeFromStat(st);
-					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
-					perf.sqlUpserts++;
-					if (fileRow) {
-						const newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
-						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
-					}
-				}
-			} else if (c.changeType === 'removed') {
-				const fileRow = fileByPath.get(relPath);
-				if (fileRow) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
-			} else if (c.changeType === 'modified') {
-				const st = statMap.get(i);
-				if (st) {
-					let fileRow = fileByPath.get(relPath);
-					if (!fileRow) {
-						const r = upsertFileFromStat(stmt, perf, datasetId, relPath, st, snap.id);
-						if (r.fileRow) {
-							fileRow = { id: r.fileRow.id, latestSize: r.newSize };
-							fileByPath.set(relPath, fileRow);
-						}
-					} else {
-						fileRow.latestSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
-					}
-				}
-			} else if (c.changeType === 'renamed') {
-				const st = statMap.get(i);
-				if (st) {
-					const relNewPath = relNewPaths[i];
-					const oldFile = fileByPath.get(relPath) ?? null;
-					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
-					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, sizeFromStat(st));
-				}
-			}
-		}
-	});
-	perf.sqlMs += Date.now() - t;
-}
-
-// ─── Batch flush: unified incremental + diff ────────────────────────────────
-
-async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
-		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
-	);
-
-	const t = Date.now();
-	database.transaction(db, () => {
-		perf.sqlTxns++;
-		for (let i = 0; i < batch.length; i++) {
-			const c = batch[i];
-			const relPath = relPaths[i];
-			const relNewPath = relNewPaths[i];
-			const st = statMap.get(i) ?? null;
-
-			let fileId = null;
-			let oldSize = null;
-			let newSize = null;
-
-			if (c.changeType === 'added') {
-				if (st) {
-					const type = typeFromStat(st);
-					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
-					perf.sqlUpserts++;
-					if (fileRow) {
-						fileId = fileRow.id;
-						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
-						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
-					}
-				}
-			} else if (c.changeType === 'removed') {
-				const fileRow = fileByPath.get(relPath);
-				if (fileRow) {
-					fileId = fileRow.id;
-					oldSize = fileRow.latestSize;
-					stmt.markDeleted.run(snap.id, fileId);
-					perf.sqlUpdates++;
-				}
-			} else if (c.changeType === 'modified') {
-				if (st) {
-					let fileRow = fileByPath.get(relPath);
-					if (!fileRow) {
-						const r = upsertFileFromStat(stmt, perf, datasetId, relPath, st, snap.id);
-						if (r.fileRow) {
-							fileRow = { id: r.fileRow.id, latestSize: r.newSize };
-							fileByPath.set(relPath, fileRow);
-							fileId = fileRow.id;
-							oldSize = null; // we just created the row; no prior version to diff against
-							newSize = r.newSize;
-						}
-					} else {
-						fileId = fileRow.id;
-						oldSize = fileRow.latestSize;
-						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
-						fileRow.latestSize = newSize;
-					}
-				}
-			} else if (c.changeType === 'renamed') {
-				if (st) {
-					newSize = sizeFromStat(st);
-					const oldFile = fileByPath.get(relPath) ?? null;
-					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
-					fileId = rid;
-					oldSize = rold;
-					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, newSize);
-				}
-			}
-
-			if (fileId === null) {
-				perf.orphanedChanges++;
-				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, st === null, 'unified');
-				continue;
-			}
-
-			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
-			stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, relNewPath, oldSize, newSize, delta);
-			perf.sqlInserts++;
-			perf.diffChanges++;
-		}
-	});
-	perf.sqlMs += Date.now() - t;
-}
-
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
 async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
@@ -1274,170 +816,4 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 	});
 }
 
-function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
-	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(changes, mountpoint, { lookupAllSources: true });
-	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
-
-	const t = Date.now();
-	database.transaction(db, () => {
-		perf.sqlTxns++;
-		for (let i = 0; i < changes.length; i++) {
-			const c = changes[i];
-			const relPath = relPaths[i];
-			const relNewPath = relNewPaths[i];
-
-			const fileRow = fileByPath.get(relPath) ?? null;
-			const fileId = fileRow?.id ?? null;
-
-			let oldSize = null;
-			let newSize = null;
-			if (c.changeType === 'removed') {
-				oldSize = fileRow?.latestSize ?? null;
-			} else if (c.changeType === 'added') {
-				newSize = fileRow?.sizeAtSnap ?? null;
-			} else {
-				oldSize = fileRow?.latestSize ?? null;
-				newSize = fileRow?.sizeAtSnap ?? null;
-			}
-
-			if (c.changeType === 'removed' && fileId) { stmt.markDeleted.run(snap.id, fileId); perf.sqlUpdates++; }
-
-			if (fileId === null) {
-				perf.orphanedChanges++;
-				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, false, 'changes');
-				continue;
-			}
-
-			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;
-			stmt.insertChange.run(snap.id, fileId, c.changeType, relPath, c.changeType === 'renamed' ? relNewPath : null, oldSize, newSize, delta);
-			perf.sqlInserts++;
-			perf.diffChanges++;
-		}
-	});
-	perf.sqlMs += Date.now() - t;
-}
-
-// ─── Stats ──────────────────────────────────────────────────────────────────
-
-/**
- * Returns a `{ added, modified, renamed, removed, unknown }` counter object
- * pulled from `changes.change_type`. Missing types are filled with 0 so the
- * shape is stable across runs (handy for diffing or JSON consumers).
- */
-function changeTypeBreakdown(db) {
-	const counts = { added: 0, modified: 0, renamed: 0, removed: 0, unknown: 0 };
-	const rows = db.prepare('SELECT change_type, COUNT(*) AS n FROM changes GROUP BY change_type').all();
-	for (const r of rows) {
-		if (Object.prototype.hasOwnProperty.call(counts, r.change_type)) {
-			counts[r.change_type] = r.n;
-		} else {
-			counts.unknown += r.n;
-		}
-	}
-	return counts;
-}
-
-function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
-	const totalMs =
-		(sessionWallT0 !== null && sessionWallT0 !== undefined) ? Date.now() - sessionWallT0 : Date.now() - perf.t0;
-	const stats = db.prepare(`SELECT (SELECT COUNT(*) FROM datasets) AS datasets, (SELECT COUNT(*) FROM snapshots) AS snapshots, (SELECT COUNT(*) FROM files) AS files, (SELECT COUNT(*) FROM file_versions) AS versions, (SELECT COUNT(*) FROM changes) AS changes, (SELECT COUNT(*) FROM files WHERE deleted_at_snap_id IS NOT NULL) AS deleted`).get();
-	const changeBreakdown = changeTypeBreakdown(db);
-
-	const pgSz = Object.values(db.prepare('SELECT * FROM pragma_page_size()').get())[0];
-	const pgCount = Object.values(db.prepare('SELECT * FROM pragma_page_count()').get())[0];
-	const pgFree = Object.values(db.prepare('SELECT * FROM pragma_freelist_count()').get())[0];
-	const jMode = Object.values(db.prepare('SELECT * FROM pragma_journal_mode()').get())[0];
-	const cSz = Object.values(db.prepare('SELECT * FROM pragma_cache_size()').get())[0];
-
-	console.log('\n📊 Index stats:');
-	console.log(`Datasets: ${stats.datasets}`);
-	console.log(`Snapshots: ${stats.snapshots}`);
-	console.log(`Unique files: ${stats.files.toLocaleString()}`);
-	console.log(`File versions: ${stats.versions.toLocaleString()}`);
-	console.log(`Change events: ${stats.changes.toLocaleString()}`);
-	console.log(`  added:    ${changeBreakdown.added.toLocaleString()}`);
-	console.log(`  modified: ${changeBreakdown.modified.toLocaleString()}`);
-	console.log(`  renamed:  ${changeBreakdown.renamed.toLocaleString()}`);
-	console.log(`  removed:  ${changeBreakdown.removed.toLocaleString()}`);
-	if (changeBreakdown.unknown > 0) {
-		console.log(`  unknown:  ${changeBreakdown.unknown.toLocaleString()}`);
-	}
-	console.log(`Deleted files: ${stats.deleted.toLocaleString()}`);
-
-	const backfilled = perf.backfilledFiles ?? 0;
-	if (backfilled > 0) {
-		console.log(`\n♻  Self-repaired this run: ${backfilled.toLocaleString()} file row(s) backfilled (paths zfs-diff reported but we had no row for; usually files born after the baseline crawl).`);
-	}
-
-	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0;
-	if (anyFailures) {
-		console.log('\n⚠  Failures (this run):');
-		console.log(`Orphan changes skipped: ${perf.orphanedChanges.toLocaleString()}`);
-		console.log(`Stat failures:          ${perf.statFailures.toLocaleString()}`);
-		console.log(`Restarts:               ${restartCount}`);
-		console.log(`Failed snapshots:       ${perf.failedSnapshots.length}`);
-		for (const f of perf.failedSnapshots.slice(0, 5)) {
-			console.log(`  • ${f.name} (${f.reason})`);
-		}
-		if (perf.failedSnapshots.length > 5) {
-			console.log(`  …and ${perf.failedSnapshots.length - 5} more`);
-		}
-		const samples = perf.orphanSamplesAll ?? [];
-		if (samples.length > 0) {
-			console.log('Orphan samples:');
-			for (const s of samples.slice(0, 10)) {
-				const snap = s.snapshot ? ` @${s.snapshot}` : '';
-				console.log(`  · [${s.type}/${s.cause}]${snap} ${s.path}`);
-			}
-			if (perf.orphanedChanges > samples.length) {
-				console.log(`  …and ${(perf.orphanedChanges - samples.length).toLocaleString()} more (not sampled)`);
-			}
-		}
-	}
-
-	console.log('\n💾 SQLite:');
-	console.log(`DB size: ${utils.formatSize(pgSz * pgCount)}`);
-	console.log(`Used: ${utils.formatSize(pgSz * (pgCount - pgFree))} (${pgCount - pgFree} pages)`);
-	console.log(`Free: ${utils.formatSize(pgSz * pgFree)} (${pgFree} pages)`);
-	console.log(`Page size: ${utils.formatSize(pgSz)}`);
-	console.log(`Journal mode: ${jMode}`);
-	console.log(`Cache size: ${Math.abs(cSz)}${cSz < 0 ? 'KiB' : ' pages'}`);
-
-	console.log('\n⏱  Performance:');
-	console.log(`Total runtime: ${utils.formatDuration(totalMs)}`);
-	if (restartCount > 0) {
-		console.log(`Restarts: ${restartCount}`);
-		console.log('Note: Crawl/diff/SQL counters below are for the last completed pass only.');
-	}
-	console.log(`Crawl time: ${utils.formatDuration(perf.crawlMs)}`);
-	console.log(`Diff time: ${utils.formatDuration(perf.diffMs)}`);
-	console.log(`Stat time: ${utils.formatDuration(perf.statMs)}`);
-	console.log(`Full crawls: ${perf.snapsCrawled}`);
-	console.log(`Incremental: ${perf.snapsIncremental}`);
-	console.log(`Skipped: ${perf.snapsSkipped}`);
-	console.log(`Diffs processed: ${perf.diffsDone}`);
-	console.log(`Diff changes: ${perf.diffChanges.toLocaleString()}`);
-	console.log(`Files crawled: ${perf.filesCrawled.toLocaleString()}`);
-	if (perf.crawlMs > 0 && perf.filesCrawled > 0) {
-		console.log(`Crawl rate: ${(perf.filesCrawled / (perf.crawlMs / 1000)).toFixed(0)} files/s`);
-	}
-
-	const totalOps = perf.sqlInserts + perf.sqlUpserts + perf.sqlSelects + perf.sqlUpdates;
-	console.log('\n🗄  SQL:');
-	console.log(`Total queries: ${totalOps.toLocaleString()}`);
-	console.log(`Inserts: ${perf.sqlInserts.toLocaleString()}`);
-	console.log(`Upserts: ${perf.sqlUpserts.toLocaleString()}`);
-	console.log(`Selects: ${perf.sqlSelects.toLocaleString()}`);
-	console.log(`Updates: ${perf.sqlUpdates.toLocaleString()}`);
-	console.log(`Transactions: ${perf.sqlTxns.toLocaleString()}`);
-	console.log(`SQL time: ${utils.formatDuration(perf.sqlMs)}`);
-	if (totalMs > 0) {
-		console.log(`SQL % of total: ${(perf.sqlMs / totalMs * 100).toFixed(1)}%`);
-	}
-	if (perf.sqlMs > 0 && totalOps > 0) {
-		console.log(`SQL ops/s: ${(totalOps / (perf.sqlMs / 1000)).toFixed(0)}`);
-		console.log(`Avg per op: ${(perf.sqlMs / totalOps * 1000).toFixed(1)}μs`);
-	}
-}
-
-export { run, changeTypeBreakdown };
+export { run };
