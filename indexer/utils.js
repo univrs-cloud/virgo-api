@@ -33,17 +33,24 @@ function formatDuration(ms) {
 function acquireLock(dbPath) {
 	const lockPath = dbPath + '.lock';
 	if (fs.existsSync(lockPath)) {
-		let stalePid;
-		try {
-			stalePid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
-			process.kill(stalePid, 0);
-			throw new Error(`Another indexer is already running (PID ${stalePid}). Lock: ${lockPath}`);
-		} catch (e) {
-			if (e.code === 'ESRCH') {
-				console.warn(`  ⚠  Removing stale lock file (PID ${stalePid} no longer running)`);
-				fs.unlinkSync(lockPath);
-			} else {
-				throw e;
+		const stalePid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
+		if (!Number.isInteger(stalePid) || stalePid <= 0) {
+			// Empty / truncated / garbage lock file (e.g. a crash mid-write).
+			// Never feed a NaN pid to process.kill — that throws EINVAL, not
+			// ESRCH, which would wedge every future run behind a dead lock.
+			console.warn(`  ⚠  Removing unreadable lock file (${lockPath})`);
+			fs.unlinkSync(lockPath);
+		} else {
+			try {
+				process.kill(stalePid, 0);
+				throw new Error(`Another indexer is already running (PID ${stalePid}). Lock: ${lockPath}`);
+			} catch (e) {
+				if (e.code === 'ESRCH') {
+					console.warn(`  ⚠  Removing stale lock file (PID ${stalePid} no longer running)`);
+					fs.unlinkSync(lockPath);
+				} else {
+					throw e;
+				}
 			}
 		}
 	}

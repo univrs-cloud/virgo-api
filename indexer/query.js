@@ -1,6 +1,6 @@
 import * as database from './db.js';
 import * as utils from './utils.js';
-import { changeTypeBreakdown } from './index.js';
+import { changeTypeBreakdown } from './stats.js';
 
 // ─── Dataset scope (opts.dataset / opts.datasets) ───────────────────────────
 // Each root matches that ZFS dataset name or any child (messier/apps → messier/apps/foo).
