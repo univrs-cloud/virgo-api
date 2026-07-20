@@ -43,9 +43,8 @@ const updateSignature = (update) => {
 	if (!update) {
 		return null;
 	}
-	return update.state === 'running'
-		? `running:${update.progress?.stage ?? ''}:${update.progress?.percent ?? ''}`
-		: update.state;
+
+	return (update.state === 'running' ? `running:${update.progress?.stage ?? ''}:${update.progress?.percent ?? ''}` : update.state);
 };
 
 const reportUpdateToFleet = () => {
@@ -236,6 +235,7 @@ const register = (module) => {
 		if (updateSignature(fleetUpdate()) === lastUpdateSignature) {
 			return;
 		}
+		
 		reportUpdateToFleet();
 	});
 	startIfEnabled();
