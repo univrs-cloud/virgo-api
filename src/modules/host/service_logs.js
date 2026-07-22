@@ -48,9 +48,7 @@ const serviceLogsConnect = async (socket, serviceName) => {
 
 		journalProcess.stdout.on('data', emitLines);
 		journalProcess.stderr.on('data', emitLines);
-
-		journalProcess.on('close', () => cleanupSession(socket));
-		journalProcess.on('error', () => cleanupSession(socket));
+		journalProcess.then(() => { cleanupSession(socket); }, () => { cleanupSession(socket); });
 
 		socket.on('host:service:logs:disconnect', disconnectHandler);
 		socket.on('disconnect', socketDisconnectHandler);
@@ -58,6 +56,7 @@ const serviceLogsConnect = async (socket, serviceName) => {
 		socket.emit('host:service:logs:connected');
 	} catch (error) {
 		cleanupSession(socket);
+		console.error('[host] Failed to start service logs stream:', error);
 		socket.emit('host:service:logs:error', 'Failed to start service logs stream.');
 	}
 };
