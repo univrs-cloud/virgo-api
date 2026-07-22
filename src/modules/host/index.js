@@ -530,8 +530,8 @@ class HostModule extends BaseModule {
 
 	async #getDnsServers(ifname) {
 		try {
-			const { stdout } = await execa(`nmcli -g IP4.DNS device show ${ifname} | jq -sR 'split("\\n") | map(select(length > 0))'`, { shell: true });
-			return JSON.parse(stdout);
+			const { stdout } = await execa('nmcli', ['-g', 'IP4.DNS', 'device', 'show', ifname]);
+			return stdout.split(/[\n|]/).map((dnsServer) => { return dnsServer.trim(); }).filter(Boolean);
 		} catch (error) {
 			return [];
 		}
