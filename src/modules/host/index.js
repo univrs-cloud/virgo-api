@@ -70,7 +70,6 @@ class HostModule extends BaseModule {
 			})
 			.on('host:network:interface:updated', async () => {
 				await this.#loadNetworkInterfaces();
-				await this.#loadDefaultGateway();
 				this.nsp.emit('host:system', this.getState('system'));
 			});
 	}
@@ -431,8 +430,7 @@ class HostModule extends BaseModule {
 			this.#loadSetupCompleted(),
 			this.#loadUpdate(),
 			this.#loadNetworkIdentifier(),
-			this.#loadNetworkInterfaces(),
-			this.#loadDefaultGateway()
+			this.#loadNetworkInterfaces()
 		]);
 	}
 
@@ -509,13 +507,17 @@ class HostModule extends BaseModule {
 			const networkInterfaces = camelcaseKeys(JSON.parse(addrOutput), { deep: true });
 			const defaultRoutes = JSON.parse(defaultRoutesOutput);
 			let defaultDev = null;
+			let defaultGateway = null;
 			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {
 				defaultDev = defaultRoutes[0].dev;
+				defaultGateway = defaultRoutes[0].gateway || null;
 			}
 			for (const iface of networkInterfaces) {
 				iface.default = (defaultDev !== null && iface.ifname === defaultDev);
 				if (iface.default) {
+					iface.gateway = defaultGateway;
 					iface.speed = await this.#waitForInterfaceSpeed(iface.ifname);
+					iface.dnsServers = await this.#getDnsServers(iface.ifname);
 				} else {
 					iface.speed = await this.#getInterfaceSpeed(iface.ifname);
 				}
@@ -526,12 +528,12 @@ class HostModule extends BaseModule {
 		}
 	}
 
-	async #loadDefaultGateway() {
+	async #getDnsServers(ifname) {
 		try {
-			const defaultGateway = await si.networkGatewayDefault();
-			this.setState('system', { ...this.getState('system'), defaultGateway });
+			const { stdout } = await execa(`nmcli -g IP4.DNS device show ${ifname} | jq -sR 'split("\\n") | map(select(length > 0))'`, { shell: true });
+			return JSON.parse(stdout);
 		} catch (error) {
-			this.setState('system', { ...this.getState('system'), defaultGateway: false });
+			return [];
 		}
 	}
 }

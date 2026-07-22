@@ -30,11 +30,10 @@ const connectionExists = async (connectionName) => {
 	}
 };
 
-const getDnsSearchFromConnection = async (connectionName) => {
+const getConnectionProperty = async (connectionName, property) => {
 	try {
-		const { stdout } = await execa('nmcli', ['-g', 'ipv4.dns-search', 'connection', 'show', connectionName]);
-		const dnsSearch = stdout.trim();
-		return dnsSearch || null;
+		const { stdout } = await execa('nmcli', ['-g', property, 'connection', 'show', connectionName]);
+		return stdout.trim() || null;
 	} catch (error) {
 		return null;
 	}
@@ -90,7 +89,11 @@ const updateIdentifier = async (job, module) => {
 		const defaultInterface = system.networkInterfaces?.find((iface) => { return iface.default; });
 		const connectionName = await getConnectionNameForInterface(defaultInterface.ifname);
 		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns-search', config.domainName]);
-		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns', DEFAULT_DNS_SERVER]);
+		// On DHCP the servers come from the lease, so only a manual connection needs a fallback
+		const isManual = (await getConnectionProperty(connectionName, 'ipv4.method')) === 'manual';
+		if (isManual && !await getConnectionProperty(connectionName, 'ipv4.dns')) {
+			await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns', DEFAULT_DNS_SERVER]);
+		}
 		await execa('nmcli', ['connection', 'reload']);
 		await execa('nmcli', ['connection', 'up', connectionName]);
 		await execa('hostnamectl', ['set-hostname', config.hostname]);
@@ -107,6 +110,10 @@ const updateIdentifier = async (job, module) => {
 	return `Host updated.`;
 };
 
+const normalizeDnsServers = (dnsServers) => {
+	return (dnsServers || []).map((dnsServer) => { return dnsServer?.toString().trim(); }).filter(Boolean);
+};
+
 const createBondConnection = async () => {
 	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=60000`;
 	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', bondOptions]);
@@ -117,13 +124,17 @@ const updateBondConnection = async (config) => {
 	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', bondOptions]);
 	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
 	if (config.method === 'manual') {
+		const dnsServers = normalizeDnsServers(config.dnsServers);
 		args.push('ipv4.addresses', `${config.ipAddress}/${config.netmask}`);
 		args.push('ipv4.gateway', config.gateway);
+		args.push('ipv4.dns', dnsServers.length > 0 ? dnsServers.join(',') : (await getConnectionProperty(BOND_NAME, 'ipv4.dns') || DEFAULT_DNS_SERVER));
+		args.push('ipv4.ignore-auto-dns', 'yes');
 	} else {
 		args.push('ipv4.addresses', '');
 		args.push('ipv4.gateway', '');
+		args.push('ipv4.dns', '');
+		args.push('ipv4.ignore-auto-dns', 'no');
 	}
-	args.push('ipv4.dns', DEFAULT_DNS_SERVER);
 	await execa('nmcli', args);
 };
 
@@ -154,8 +165,10 @@ const updateInterface = async (job, module) => {
 		const eth1ConnectionName = await getConnectionNameForInterface(SECONDARY_INTERFACE);
 		if (!bondExists) {
 			let dnsSearch = null;
+			let dns = null;
 			if (eth0ConnectionName && !eth0ConnectionName.startsWith(`${BOND_NAME}-`)) {
-				dnsSearch = await getDnsSearchFromConnection(eth0ConnectionName);
+				dnsSearch = await getConnectionProperty(eth0ConnectionName, 'ipv4.dns-search');
+				dns = await getConnectionProperty(eth0ConnectionName, 'ipv4.dns');
 			}
 			if (eth0ConnectionName && !eth0ConnectionName.startsWith(`${BOND_NAME}-`)) {
 				await deleteConnection(eth0ConnectionName);
@@ -166,6 +179,9 @@ const updateInterface = async (job, module) => {
 			await createBondConnection();
 			if (dnsSearch) {
 				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns-search', dnsSearch]);
+			}
+			if (dns) {
+				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns', dns]);
 			}
 		}
 		await updateBondConnection(config);
