@@ -52,6 +52,12 @@ const queueHostNetworkInterfaceJob = async (options) => {
 	function buildInterfaceConfig(options) {
 		const { method } = options;
 		const config = { method };
+		if (options.dns.length > 3) {
+			console.error('--dns can be given at most 3 times.');
+			process.exitCode = 1;
+			return null;
+		}
+		config.dnsServers = options.dns;
 		if (method === 'manual') {
 			if (options.address === undefined || options.prefix === undefined || options.gateway === undefined) {
 				console.error('--method manual requires --address, --prefix, and --gateway.');
@@ -97,7 +103,12 @@ const register = (program) => {
 		.option('--address <ip>', 'IPv4 address (required with --method manual)')
 		.option('--prefix <n>', 'CIDR prefix length (required with --method manual)', parsePrefixOption)
 		.option('--gateway <ip>', 'Default gateway (required with --method manual)')
+		.option('--dns <ip>', 'DNS server address, repeatable up to 3 times', collectDnsOption, [])
 		.action(queueHostNetworkInterfaceJob);
+
+	function collectDnsOption(value, previous) {
+		return previous.concat([value]);
+	}
 
 	function parsePrefixOption(value) {
 		const n = Number.parseInt(value, 10);
