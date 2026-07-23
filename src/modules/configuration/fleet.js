@@ -19,10 +19,17 @@ let lastSystemUpdates = false;
 let lastAppUpdates = false;
 let lastUpdate = null;
 let lastUpdateSignature = null;
+let lastStorage = false;
 
 const reportUpdatesToFleet = () => {
 	if (fleetSocket?.connected) {
 		fleetSocket.emit('node:updates', { system: lastSystemUpdates, apps: lastAppUpdates });
+	}
+};
+
+const reportStorageToFleet = () => {
+	if (fleetSocket?.connected) {
+		fleetSocket.emit('node:storage', lastStorage);
 	}
 };
 
@@ -92,6 +99,7 @@ const connect = async ({ token, nodeId }) => {
 		broadcastConfigurationUpdate();
 		reportUpdatesToFleet();
 		reportUpdateToFleet();
+		reportStorageToFleet();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
 		try {
@@ -235,8 +243,12 @@ const register = (module) => {
 		if (updateSignature(fleetUpdate()) === lastUpdateSignature) {
 			return;
 		}
-		
+
 		reportUpdateToFleet();
+	});
+	module.eventEmitter.on('host:storage:updated', (storage) => {
+		lastStorage = storage;
+		reportStorageToFleet();
 	});
 	startIfEnabled();
 };
