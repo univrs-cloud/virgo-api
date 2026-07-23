@@ -139,6 +139,7 @@ const getStorage = async (module) => {
 		module.setState('storage', false);
 	}
 	module.nsp.emit('host:storage', module.getState('storage'));
+	module.eventEmitter.emit('host:storage:updated', module.getState('storage'));
 };
 
 const getSnapshots = async (module) => {
