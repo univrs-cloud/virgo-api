@@ -4,15 +4,24 @@ import { io as ioClient } from 'socket.io-client';
 import serverConfig from '../../config.js';
 import { folderPath as distFolder } from '../controllers/static.js';
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const HTTP_CHUNK_SIZE = 256 * 1024;
 const activeHttpRequests = new Map();
 
+// The node's own API is served over HTTPS with a self-signed cert, so loopback calls have to skip
+// verification. Every URL built with these options goes through localBaseUrl(), which refuses any
+// host that isn't loopback — a self-signed cert must never be accepted over the network.
 const localFetchDispatcher = new Agent({
 	connect: { rejectUnauthorized: false }
 });
 
 const localTlsOptions = {
 	rejectUnauthorized: false
+};
+
+const localBaseUrl = () => {
+	const { host, port } = serverConfig.server;
+	return LOOPBACK_HOSTS.has(host) ? `https://${host}:${port}` : null;
 };
 
 const pickResponseHeaders = (headers) => {
@@ -35,8 +44,13 @@ const resolveDistPath = (assetPath) => {
 };
 
 const buildLocalAssetUrl = (assetPath) => {
+	const base = localBaseUrl();
+	if (!base) {
+		return null;
+	}
+
 	const normalizedPath = assetPath?.startsWith('/') ? assetPath : `/${assetPath || 'index.html'}`;
-	return new URL(normalizedPath, `https://${serverConfig.server.host}:${serverConfig.server.port}`);
+	return new URL(normalizedPath, base);
 };
 
 const createAckGate = (socket, requestId) => {
@@ -111,12 +125,18 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 		return;
 	}
 
+	const url = buildLocalAssetUrl(assetPath || '/index.html');
+	if (!url) {
+		socket.emit('proxy:http:error', { requestId, status: 500, message: 'Local API host is not loopback' });
+		return;
+	}
+
 	const abortController = new AbortController();
 	const ackGate = createAckGate(socket, requestId);
 	activeHttpRequests.set(requestId, { abortController, ackGate });
 
 	try {
-		const response = await fetch(buildLocalAssetUrl(assetPath || '/index.html'), {
+		const response = await fetch(url, {
 			method,
 			signal: abortController.signal,
 			dispatcher: localFetchDispatcher,
@@ -166,8 +186,12 @@ const abortHttpRequest = ({ requestId } = {}) => {
 };
 
 const openInternalSocket = ({ namespace, user }) => {
-	const url = `https://${serverConfig.server.host}:${serverConfig.server.port}${namespace}`;
-	return ioClient(url, {
+	const base = localBaseUrl();
+	if (!base) {
+		return null;
+	}
+
+	return ioClient(`${base}${namespace}`, {
 		path: '/api',
 		transports: ['websocket'],
 		reconnection: false,
@@ -205,6 +229,10 @@ const attachProxyHandlers = (fleetSocket) => {
 			return;
 		}
 		const client = openInternalSocket({ namespace, user });
+		if (!client) {
+			return;
+		}
+
 		sessions.set(sessionId, client);
 		client.onAny((event, ...args) => {
 			if (fleetSocket.connected) {
