@@ -86,6 +86,7 @@ const connect = async ({ token, nodeId }) => {
 	fleetSocket = io(`${fleetUrl}/node`, {
 		path: '/api',
 		auth: { role: 'node', secret: token },
+		rejectUnauthorized: true,
 		reconnection: true,
 		reconnectionDelay: 2000,
 		reconnectionDelayMax: 10000,
@@ -140,6 +141,7 @@ const registerNode = ({ email, password, serialNumber, name }) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
 			auth: { role: 'node' },
+			rejectUnauthorized: true,
 			reconnection: false,
 			timeout: 10000
 		});
