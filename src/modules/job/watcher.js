@@ -33,7 +33,7 @@ const onConnection = async (socket, module) => {
 		return;
 	}
 
-	const states = ['wait', 'paused', 'delayed', 'active'];
+	const states = ['wait', 'paused', 'prioritized', 'delayed', 'active'];
 	let jobs = [];
 	for (const queueName of module.queues) {
 		const queue = queues.get(queueName);
