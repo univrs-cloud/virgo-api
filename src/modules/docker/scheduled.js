@@ -136,6 +136,10 @@ const getRegistryDigest = async (image) => {
 	}
 };
 
+const toUpdate = ({ id, labels }) => {
+	return { containerId: id, app: labels?.comDockerComposeProject, service: labels?.comDockerComposeService };
+};
+
 const checkForUpdates = async (module) => {
 	const updates = [];
 	let images = await docker.listImages({ all: true, digests: true });
@@ -143,7 +147,7 @@ const checkForUpdates = async (module) => {
 	let containers = await docker.listContainers({ all: true });
 	containers = camelcaseKeys(containers, { deep: true });
 
-	// Map of imageId -> { imageName, localDigests, containerIds[] }
+	// Map of imageId -> { imageName, localDigests, imageContainers[] }
 	// Keyed by imageId so containers running different pulled versions of the same image
 	// name each get their own digest comparison rather than sharing the first one seen.
 	const imageIdMap = new Map();
@@ -171,7 +175,7 @@ const checkForUpdates = async (module) => {
 			const composeData = yaml.load(composeFileContent);
 			const service = composeData?.services?.[labels?.comDockerComposeService];
 			if (service?.image && imageName !== service.image) {
-				updates.push({ containerId: id });
+				updates.push(toUpdate({ id, labels }));
 				resolvedByCompose = true;
 			}
 		} catch (error) {
@@ -183,9 +187,9 @@ const checkForUpdates = async (module) => {
 		}
 
 		if (!imageIdMap.has(imageId)) {
-			imageIdMap.set(imageId, { imageName, localDigests, containerIds: [] });
+			imageIdMap.set(imageId, { imageName, localDigests, imageContainers: [] });
 		}
-		imageIdMap.get(imageId).containerIds.push(id);
+		imageIdMap.get(imageId).imageContainers.push({ id, labels });
 	}
 
 	// Deduplicate registry requests by image name — one HTTP request per unique name
@@ -204,21 +208,21 @@ const checkForUpdates = async (module) => {
 
 	// Each imageId entry is compared independently — containers still on a stale image
 	// are flagged even if another container has already pulled the latest version.
-	for (const { imageName, localDigests, containerIds } of imageIdMap.values()) {
+	for (const { imageName, localDigests, imageContainers } of imageIdMap.values()) {
 		const registryDigest = registryDigestByName.get(imageName);
 		if (!registryDigest) {
 			continue;
 		}
 
 		if (!localDigests.includes(registryDigest)) {
-			for (const containerId of containerIds) {
-				updates.push({ containerId });
+			for (const container of imageContainers) {
+				updates.push(toUpdate(container));
 			}
 		}
 	}
 
 	module.setState('updates', updates);
-	module.eventEmitter.emit('app:updates:updated', module.getState('updates'));
+	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
 
 	for (const socket of module.nsp.sockets.values()) {
 		if (socket.isAuthenticated && socket.isAdmin) {

@@ -83,6 +83,44 @@ class DockerModule extends BaseModule {
 		return projectContainers;
 	}
 
+	/** The available app updates grouped per app for remote consumers (the fleet), which only ever see
+	 * this node through what it reports: `[{ name, title, services }]`, or false while unknown. The
+	 * local `updates` state stays a flat container list, since that is what this node's own pages
+	 * match against. */
+	getAppUpdatesSummary() {
+		const updates = this.getState('updates');
+		if (!Array.isArray(updates)) {
+			return false;
+		}
+
+		const configured = this.toArray(this.getState('configured'));
+		const apps = new Map();
+		for (const { app: appName, service } of updates) {
+			if (!appName) {
+				continue;
+			}
+
+			if (!apps.has(appName)) {
+				// Only installed apps: an update is offered remotely as an app:update job, which a compose
+				// project that isn't one of them has no way to run.
+				const app = configured.find((entry) => { return entry.type === 'app' && entry.name === appName; });
+				if (!app) {
+					continue;
+				}
+
+				apps.set(appName, { name: appName, title: app.title || appName, services: [] });
+			}
+			const { services } = apps.get(appName);
+			if (service && !services.includes(service)) {
+				services.push(service);
+			}
+		}
+
+		return [...apps.values()]
+			.map((app) => { return { ...app, services: app.services.sort() }; })
+			.sort((first, second) => { return first.title.localeCompare(second.title); });
+	}
+
 	async onConnection(socket) {
 		const pollingPlugin = this.getPlugin('polling');
 		pollingPlugin?.startPolling(this);
