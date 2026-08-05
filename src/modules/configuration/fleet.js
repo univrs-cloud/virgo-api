@@ -5,6 +5,7 @@ import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import { attachProxyHandlers } from '../../utils/fleet_proxy.js';
 import { setFleetRuntimeState, resetFleetRuntimeState } from '../../utils/fleet_state.js';
+import { normalizeEmail } from '../../utils/email.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
@@ -183,14 +184,21 @@ const registerFleet = async (job, module) => {
 	await module.updateJobProgress(job, 'Registering with fleet...');
 
 	const configuration = await DataService.getConfiguration();
+	const submittedEmail = normalizeEmail(config?.email);
+	const registeredEmail = normalizeEmail(configuration?.fleet?.token ? configuration?.fleet?.email : '');
+	if (registeredEmail && registeredEmail !== submittedEmail) {
+		throw new Error('Fleet email cannot be changed');
+	}
+
+	const email = registeredEmail || submittedEmail;
 	const { nodeId, token } = await registerNode({
-		email: config.email,
+		email,
 		password: config.password,
 		nodeId: await resolveNodeId(configuration),
 		name: await getNodeName()
 	});
 
-	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email: config.email });
+	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email });
 	module.eventEmitter.emit('configuration:updated');
 	await connect({ token, nodeId });
 	return 'Fleet registered.';
