@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import si from 'systeminformation';
 import { io } from 'socket.io-client';
 import config from '../../../config.js';
@@ -72,12 +73,27 @@ const broadcastConfigurationUpdate = () => {
 	fleetModule?.eventEmitter?.emit('configuration:updated');
 };
 
-const getSystemInfo = async () => {
-	const [system, osInfo] = await Promise.all([si.system(), si.osInfo()]);
-	return {
-		serialNumber: system?.serial || null,
-		name: osInfo?.hostname || osInfo?.fqdn || null
-	};
+const getNodeName = async () => {
+	const osInfo = await si.osInfo();
+	return osInfo?.hostname || osInfo?.fqdn || null;
+};
+
+/** This node's fleet identity: minted on first registration and kept for as long as the node stays
+ * enrolled, so a retry after a failed attempt — or a later re-registration — lands on the same fleet
+ * record instead of creating a second one. Persisted before registering for exactly that reason: if
+ * the fleet commits the record but the node never sees the answer, the retry reuses this id and
+ * recovers onto that record rather than stranding it. A node is registered once it holds a token, so
+ * writing the id alone does not present it as enrolled. Unregistering clears the whole record,
+ * identity included, so the next registration mints a fresh one. */
+const resolveNodeId = async (configuration) => {
+	const existing = configuration?.fleet?.nodeId || '';
+	if (existing) {
+		return existing;
+	}
+
+	const nodeId = randomUUID();
+	await DataService.setConfiguration('fleet', { ...configuration?.fleet, nodeId });
+	return nodeId;
 };
 
 const connect = async ({ token, nodeId }) => {
@@ -136,7 +152,7 @@ const disconnect = () => {
 	resetFleetRuntimeState();
 };
 
-const registerNode = ({ email, password, serialNumber, name }) => {
+const registerNode = ({ email, password, nodeId, name }) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
@@ -150,7 +166,7 @@ const registerNode = ({ email, password, serialNumber, name }) => {
 			reject(new Error(error?.message || 'Failed to connect to fleet'));
 		});
 		socket.on('connect', () => {
-			socket.emit('node:register', { serialNumber, name, email, password }, (response) => {
+			socket.emit('node:register', { nodeId, name, email, password }, (response) => {
 				socket.disconnect();
 				if (response?.status !== 'succeeded') {
 					reject(new Error(response?.message || 'Fleet registration failed'));
@@ -166,16 +182,12 @@ const registerFleet = async (job, module) => {
 	const config = job.data.config;
 	await module.updateJobProgress(job, 'Registering with fleet...');
 
-	const { serialNumber, name } = await getSystemInfo();
-	if (!serialNumber) {
-		throw new Error('Serial number is not available');
-	}
-
+	const configuration = await DataService.getConfiguration();
 	const { nodeId, token } = await registerNode({
 		email: config.email,
 		password: config.password,
-		serialNumber,
-		name
+		nodeId: await resolveNodeId(configuration),
+		name: await getNodeName()
 	});
 
 	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email: config.email });
@@ -202,7 +214,7 @@ const disableFleet = async (job, module) => {
 	await module.updateJobProgress(job, 'Disabling fleet...');
 	const configuration = await DataService.getConfiguration();
 	const fleet = configuration?.fleet;
-	if (!fleet) {
+	if (!fleet?.token) {
 		throw new Error('Fleet is not registered');
 	}
 
