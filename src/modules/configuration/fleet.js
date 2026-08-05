@@ -16,7 +16,8 @@ const AUTH_FAILED_ERROR = 'Node authentication failed';
 const STARTUP_JITTER_MS = 30000;
 let fleetSocket = null;
 let fleetModule = null;
-// Each matches its source event: system is host:updates, apps is app:updates (array | [] | false).
+// Each matches its source event: system is host:updates, apps is the docker module's per-app update
+// summary (array | [] | false).
 let lastSystemUpdates = false;
 let lastAppUpdates = false;
 let lastUpdate = null;
@@ -27,6 +28,20 @@ const reportUpdatesToFleet = () => {
 	if (fleetSocket?.connected) {
 		fleetSocket.emit('node:updates', { system: lastSystemUpdates, apps: lastAppUpdates });
 	}
+};
+
+/** An app update in flight, forwarded as the same job this node's own UI receives so the fleet can
+ * follow it the way the apps page does. */
+const reportAppUpdateJobToFleet = (job) => {
+	if (fleetSocket?.connected) {
+		fleetSocket.emit('node:app:update:job', job);
+	}
+};
+
+/** The fleet drops everything it knew about a node when the socket goes, so a fresh connection has to
+ * replay whatever app updates are already running. */
+const requestAppUpdateJobs = () => {
+	fleetModule?.eventEmitter?.emit('app:update:jobs:sync');
 };
 
 const reportStorageToFleet = () => {
@@ -118,6 +133,7 @@ const connect = async ({ token, nodeId }) => {
 		reportUpdatesToFleet();
 		reportUpdateToFleet();
 		reportStorageToFleet();
+		requestAppUpdateJobs();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
 		try {
@@ -260,6 +276,7 @@ const register = (module) => {
 		lastAppUpdates = updates;
 		reportUpdatesToFleet();
 	});
+	module.eventEmitter.on('app:update:job:updated', reportAppUpdateJobToFleet);
 	module.eventEmitter.on('host:update:updated', (update) => {
 		lastUpdate = update;
 		if (updateSignature(fleetUpdate()) === lastUpdateSignature) {
