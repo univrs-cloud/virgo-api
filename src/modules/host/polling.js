@@ -79,7 +79,7 @@ const getDrives = async (module) => {
 		console.error('getDrives:', error);
 		module.setState('drives', false);
 	}
-	module.nsp.emit('host:drives', module.getState('drives'));
+	module.emitChanged('host:drives', module.getState('drives'));
 };
 
 const getStorage = async (module) => {
@@ -138,7 +138,7 @@ const getStorage = async (module) => {
 		console.error('getStorage:', error);
 		module.setState('storage', false);
 	}
-	module.nsp.emit('host:storage', module.getState('storage'));
+	module.emitChanged('host:storage', module.getState('storage'));
 	module.eventEmitter.emit('host:storage:updated', module.getState('storage'));
 };
 
@@ -152,12 +152,9 @@ const getSnapshots = async (module) => {
 		console.error('getSnapshots:', error);
 		module.setState('snapshots', false);
 	}
-	const snapshotsData = module.getState('snapshots');
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('host:storage:snapshots', snapshotsData);
-		}
-	}
+	module.emitChanged('host:storage:snapshots', module.getState('snapshots'), {
+		filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+	});
 };
 
 const getTime = (module) => {

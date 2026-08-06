@@ -72,7 +72,11 @@ const updateApp = async (job, module) => {
 	});
 	module.setState('updates', updates);
 	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
-	module.nsp.emit('app:updates', module.getState('updates'));
+	for (const socket of module.nsp.sockets.values()) {
+		if (socket.isAuthenticated && socket.isAdmin) {
+			socket.emit('app:updates', module.getState('updates'));
+		}
+	}
 	return `${existingApp.title} updated.`;
 };
 

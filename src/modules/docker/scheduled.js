@@ -223,12 +223,9 @@ const checkForUpdates = async (module) => {
 
 	module.setState('updates', updates);
 	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
-
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('app:updates', module.getState('updates'));
-		}
-	}
+	module.emitChanged('app:updates', module.getState('updates'), {
+		filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+	});
 };
 
 const fetchStackFiles = async (module) => {

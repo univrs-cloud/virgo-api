@@ -25,7 +25,7 @@ class ShareModule extends BaseModule {
 		this.eventEmitter
 			.on('shares:updated', async () => {
 				await this.#loadShares();
-				this.nsp.emit('shares', this.getState('shares'));
+				this.emitChanged('shares', this.getState('shares'));
 			});
 	}
 
