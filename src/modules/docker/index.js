@@ -5,6 +5,17 @@ import docker from '../../utils/docker_client.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 
+// Digest-only projection: Docker renders `status` as prose ("Up 4 minutes"), so it advances on its own clock
+// even when nothing about the container changed. `state` says the same thing as an enum, which is all
+// consumers read. Array order is handled by digesting with sortArrays, since the daemon reshuffles it.
+const withoutRenderedStatus = (containers) => {
+	if (!Array.isArray(containers)) {
+		return containers;
+	}
+
+	return containers.map(({ status, ...container }) => { return container; });
+};
+
 class DockerModule extends BaseModule {
 	#composeDir = '/opt/docker';
 	#appsDataset = 'messier/apps';
@@ -25,7 +36,7 @@ class DockerModule extends BaseModule {
 
 		this.eventEmitter
 			.on('app:containers:fetched', async () => {
-				this.nsp.emit('app:containers', this.getState('containers'));
+				this.emitChanged('app:containers', this.getState('containers'), { normalize: withoutRenderedStatus, sortArrays: true });
 			})
 			.on('app:resourceMetrics:fetched', async () => {
 				for (const socket of this.nsp.sockets.values()) {
@@ -39,8 +50,10 @@ class DockerModule extends BaseModule {
 				this.nsp.emit('app:configured', this.getState('configured'));
 			})
 			.on('app:templates:fetch', async () => {
+				// Gated because this one is an hourly cron over a rarely-changing remote catalogue, not a
+				// reaction to something having changed. No sortArrays: order is the catalogue's own.
 				await this.#loadTemplates();
-				this.nsp.emit('app:templates', this.getState('templates'));
+				this.emitChanged('app:templates', this.getState('templates'));
 			});
 	}
 

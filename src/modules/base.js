@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { Queue, Worker } from 'bullmq';
 import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
+import { digest } from '../utils/state_digest.js';
 import * as socket from '../socket.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as nlp from '../utils/nlp.js';
@@ -17,6 +18,7 @@ class BaseModule {
 	#nsp;
 	#eventEmitter;
 	#state = {};
+	#digests = new Map();
 	#queue;
 	#worker;
 	#scheduledQueue;
@@ -103,6 +105,39 @@ class BaseModule {
 
 	toArray(value) {
 		return Array.isArray(value) ? value : [];
+	}
+
+	/**
+	 * Broadcast only when the payload differs from the one last sent for this event, so a poll that
+	 * finds nothing new costs nothing on the wire. State is still written unconditionally, so
+	 * onConnection replays keep late joiners correct regardless of what was suppressed.
+	 * @param {string} event - The event name, also the digest key unless `key` is given
+	 * @param {*} payload - The payload to emit
+	 * @param {object} [options]
+	 * @param {string} [options.key] - Digest key, for events emitted from more than one payload shape
+	 * @param {Function} [options.normalize] - Projection applied before digesting only, to drop volatile fields
+	 * @param {Function} [options.filter] - Per-socket predicate; omit to broadcast to the namespace
+	 * @param {boolean} [options.sortArrays] - Digest arrays as sets, for sources that return them reordered
+	 * @returns {boolean} - Whether the payload changed and was emitted
+	 */
+	emitChanged(event, payload, { key = event, normalize, filter, sortArrays } = {}) {
+		const next = digest(normalize ? normalize(payload) : payload, { sortArrays });
+		if (this.#digests.get(key) === next) {
+			return false;
+		}
+
+		this.#digests.set(key, next);
+		if (!filter) {
+			this.#nsp.emit(event, payload);
+			return true;
+		}
+
+		for (const socket of this.#nsp.sockets.values()) {
+			if (filter(socket)) {
+				socket.emit(event, payload);
+			}
+		}
+		return true;
 	}
 
 	#setupMiddleware() {

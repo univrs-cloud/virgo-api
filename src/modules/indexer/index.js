@@ -25,11 +25,10 @@ class IndexerModule extends BaseModule {
 			})
 			.on('configuration:updated', async () => {
 				await this.#loadDatasets();
-				for (const socket of this.nsp.sockets.values()) {
-					if (socket.isAuthenticated && socket.isAdmin) {
-						socket.emit('indexer:datasets', this.getState('datasets'));
-					}
-				}
+				this.emitChanged('indexer:datasets', this.getState('datasets'), {
+					sortArrays: true,
+					filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+				});
 			});
 	}
 
