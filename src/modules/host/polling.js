@@ -1,7 +1,11 @@
+import path from 'path';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import Poller from '../../utils/poller.js';
+
+const BY_ID_DIR = '/dev/disk/by-id';
 
 const polls = [];
 
@@ -56,8 +60,31 @@ const getMemory = async (module) => {
 	module.nsp.emit('host:memory', module.getState('memory'));
 };
 
+/** Maps each drive's controller device to its `/dev/disk/by-id/nvme-eui.*` entry. Device names are
+ * assigned in probe order and can move between boots, so this is the identifier anything pointing at
+ * a specific drive — zpool above all — has to use. */
+const getDriveIds = async () => {
+	const ids = {};
+	try {
+		for (const entry of await fs.readdir(BY_ID_DIR)) {
+			if (!entry.startsWith('nvme-eui.') || entry.includes('-part')) {
+				continue;
+			}
+
+			// The link points at the namespace (/dev/nvme0n1); smartctl reports the controller (/dev/nvme0).
+			const device = await fs.realpath(path.join(BY_ID_DIR, entry));
+			ids[device.replace(/n\d+$/, '')] = entry;
+		}
+	} catch (error) {
+		console.error('getDriveIds:', error);
+	}
+
+	return ids;
+};
+
 const getDrives = async (module) => {
 	try {
+		const ids = await getDriveIds();
 		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
@@ -67,6 +94,7 @@ const getDrives = async (module) => {
 		module.setState('drives', drives.map((drive, index) => {
 			return {
 				name: drive?.device?.name,
+				eui: (ids[drive?.device?.name] || null),
 				model: drive?.model_name,
 				serialNumber: drive?.serial_number,
 				capacity: drive?.user_capacity,
