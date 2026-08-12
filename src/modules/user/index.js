@@ -75,8 +75,14 @@ class UserModule extends BaseModule {
 
 	async #loadUsers() {
 		try {
-			const fileContents = await fs.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
-			let autheliaUsersConfig = yaml.load(fileContents);
+			// Authelia lives on the pool and is installed during setup, so its user file is missing on a
+			// fresh node — and unreadable whenever the pool is not mounted. The system accounts are the
+			// truth about who exists either way, so a missing file costs the enrichment, not the list.
+			let autheliaUsersConfig = null;
+			try {
+				const fileContents = await fs.readFile(this.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+				autheliaUsersConfig = yaml.load(fileContents);
+			} catch (error) {}
 			let users = await linuxUser.getUsers();
 			let groups = await linuxUser.getGroups();
 			users = users
@@ -88,10 +94,11 @@ class UserModule extends BaseModule {
 					user.isDisabled = false;
 					user.groups = groups.filter((group) => { return group.gid === user.gid });
 					user.email = null;
-					if (autheliaUsersConfig.users && autheliaUsersConfig.users[user.username]) {
-						user.isDisabled = autheliaUsersConfig.users[user.username].disabled;
-						user.groups = [...user.groups, ...autheliaUsersConfig.users[user.username].groups];
-						user.email = autheliaUsersConfig.users[user.username].email;
+					const autheliaUser = autheliaUsersConfig?.users?.[user.username];
+					if (autheliaUser) {
+						user.isDisabled = autheliaUser.disabled;
+						user.groups = [...user.groups, ...(autheliaUser.groups || [])];
+						user.email = autheliaUser.email;
 					}
 					return user;
 				});

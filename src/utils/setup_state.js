@@ -38,6 +38,15 @@ const read = async () => {
 	return completed;
 };
 
+/** Marks first-run setup as done. The cache moves first so the socket asking for it loses its setup
+ * privileges immediately, rather than waiting for the watcher to notice the file. */
+const complete = async () => {
+	await fs.mkdir(path.dirname(COMPLETED_FILE), { recursive: true });
+	await fs.writeFile(COMPLETED_FILE, '', 'utf8');
+	completed = true;
+	notify();
+};
+
 const notify = () => {
 	for (const listener of listeners) {
 		listener(completed);
@@ -78,5 +87,6 @@ const watchCompleted = async (onChange) => {
 
 export {
 	isCompleted,
-	watchCompleted
+	watchCompleted,
+	complete
 };
