@@ -5,13 +5,13 @@ import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import pkg from '../../../package.json' with { type: 'json' };
 import BaseModule from '../base.js';
+import * as setup from '../../utils/setup_state.js';
 
 const { version } = pkg;
 
 class HostModule extends BaseModule {
 	#etcHostsFile = '/etc/hosts';
 	#rebootRequiredFile = '/run/reboot-required';
-	#setupCompletedFile = '/var/www/virgo-api/setup_completed';
 	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
 	#updateProgressFile = '/var/www/virgo-api/update_progress';
 	#updateFile = '/var/www/virgo-api/update.log';
@@ -72,10 +72,6 @@ class HostModule extends BaseModule {
 				await this.#loadNetworkInterfaces();
 				this.nsp.emit('host:system', this.getState('system'));
 			});
-	}
-
-	get setupCompletedFile() {
-		return this.#setupCompletedFile;
 	}
 
 	get etcHosts() {
@@ -174,6 +170,9 @@ class HostModule extends BaseModule {
 		}
 		if (this.getState('storage')) {
 			socket.emit('host:storage', this.getState('storage'));
+		}
+		if (this.getState('importable')) {
+			socket.emit('host:storage:importable', this.getState('importable'));
 		}
 		if (this.getState('snapshots')) {
 			socket.emit('host:storage:snapshots', this.getState('snapshots'));
@@ -435,13 +434,7 @@ class HostModule extends BaseModule {
 	}
 
 	#loadSetupCompleted() {
-		try {
-			if (fsSync.existsSync(this.#setupCompletedFile)) { // Check if it exists, if it exists, setup is compelted
-				this.setState('setupCompleted', true);
-			}
-		} catch (error) {
-			this.setState('setupCompleted', false);
-		}
+		this.setState('setupCompleted', setup.isCompleted());
 	}
 
 	async #loadUpdate() {

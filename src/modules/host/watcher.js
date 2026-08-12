@@ -1,9 +1,8 @@
 import fs from 'fs/promises';
-import path from 'path';
 import touch from 'touch';
 import FileWatcher from '../../utils/file_watcher.js';
+import * as setup from '../../utils/setup_state.js';
 
-let setupCompletedWatcher;
 let updateLogsWatcher;
 let updateProgressWatcher;
 
@@ -24,38 +23,6 @@ const parseAptProgress = (data) => {
 		};
 	}
 	return null;
-};
-
-const watchSetupCompleted = async (module) => {
-	if (setupCompletedWatcher) {
-		return setupCompletedWatcher;
-	}
-
-	const setupCompletedDir = path.dirname(module.setupCompletedFile);
-	setupCompletedWatcher = new FileWatcher(setupCompletedDir);
-	setupCompletedWatcher.onChange(async (event, changedPath) => {
-		if (changedPath !== module.setupCompletedFile) {
-			return;
-		}
-
-		if (event === 'add' || event === 'unlink') {
-			await syncSetupCompletedState();
-		}
-	});
-
-	await syncSetupCompletedState();
-	return setupCompletedWatcher;
-
-	async function syncSetupCompletedState() {
-		let setupCompleted = false;
-		try {
-			await fs.access(module.setupCompletedFile);
-			setupCompleted = true;
-		} catch (error) {}
-
-		module.setState('setupCompleted', setupCompleted);
-		module.nsp.emit('host:setupCompleted', module.getState('setupCompleted'));
-	}
 };
 
 const watchUpdateLog = async (module) => {
@@ -128,7 +95,10 @@ const watchUpdateLog = async (module) => {
 };
 
 const register = (module) => {
-	watchSetupCompleted(module);
+	setup.watchCompleted((setupCompleted) => {
+		module.setState('setupCompleted', setupCompleted);
+		module.nsp.emit('host:setupCompleted', module.getState('setupCompleted'));
+	});
 };
 
 export default {
