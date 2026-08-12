@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import * as yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
 import linuxSysUser from 'linux-sys-user';
+import * as setup from '../../utils/setup_state.js';
 
 const linuxUser = linuxSysUser.promise();
 const changePassword = async (job, module) => {
@@ -11,9 +12,18 @@ const changePassword = async (job, module) => {
 		throw new Error(`User ${config.username} not found.`);
 	}
 
-	const authenticatedUser = module.toArray(module.getState('users')).find((user) => { return user.username === job.data.username; });
-	if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
-		throw new Error(`Only the owner can change his own password.`);
+	// First-run setup acts as no account at all, so there is no owner to compare against — changing
+	// the default user's password is the whole point of that step. Everywhere else the owner's
+	// password stays the owner's to change.
+	if (setup.isCompleted()) {
+		const authenticatedUser = module.toArray(module.getState('users')).find((user) => { return user.username === job.data.username; });
+		if (!authenticatedUser) {
+			throw new Error(`User ${job.data.username} not found.`);
+		}
+
+		if (authenticatedUser.uid !== user.uid && user.uid === 1000) {
+			throw new Error(`Only the owner can change his own password.`);
+		}
 	}
 
 	await module.updateJobProgress(job, `Changing system user password for ${config.username}...`);
