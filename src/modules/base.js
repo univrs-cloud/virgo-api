@@ -7,6 +7,7 @@ import eventEmitter from '../utils/event_emitter.js';
 import { digest } from '../utils/state_digest.js';
 import * as socket from '../socket.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
+import * as setup from '../utils/setup_state.js';
 import * as nlp from '../utils/nlp.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
@@ -145,9 +146,23 @@ class BaseModule {
 			const isTrusted = trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress);
 			const remoteUser = isTrusted ? (socket.handshake.headers['remote-user'] ?? socket.handshake.auth?.['remote-user']) : undefined;
 			const remoteGroups = isTrusted ? (socket.handshake.headers['remote-groups'] ?? socket.handshake.auth?.['remote-groups']) : undefined;
-			socket.isAuthenticated = (remoteUser !== undefined);
-			socket.isAdmin = (socket.isAuthenticated && remoteGroups?.split(',')?.includes('admins')) || false;
-			socket.username = (socket.isAuthenticated ? remoteUser : 'guest');
+			const isAuthenticated = (remoteUser !== undefined);
+			const isAdmin = (isAuthenticated && remoteGroups?.split(',')?.includes('admins')) || false;
+			// First-run setup has no account to authenticate against, so the wizard's sockets act as an
+			// admin. Resolved on every read rather than frozen at connect, so sockets opened during setup
+			// lose the elevation the moment it completes instead of keeping it for their whole lifetime.
+			Object.defineProperty(socket, 'isAuthenticated', {
+				get: () => { return isAuthenticated || !setup.isCompleted(); },
+				configurable: true
+			});
+			Object.defineProperty(socket, 'isAdmin', {
+				get: () => { return isAdmin || !setup.isCompleted(); },
+				configurable: true
+			});
+			Object.defineProperty(socket, 'username', {
+				get: () => { return (isAuthenticated ? remoteUser : (setup.isCompleted() ? 'guest' : 'setup')); },
+				configurable: true
+			});
 			next();
 		});
 	}
