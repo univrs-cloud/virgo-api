@@ -35,9 +35,17 @@ const changePassword = async (job, module) => {
 	return `${config.username} password changed.`;
 
 	async function setAutheliaUserPassword() {
-		const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
-		let autheliaUsersConfig = yaml.load(fileContents);
-		if (autheliaUsersConfig.users && autheliaUsersConfig.users[config.username]) {
+		let autheliaUsersConfig = null;
+		try {
+			const fileContents = await fs.readFile(module.autheliaUsersFile, { encoding: 'utf8', flag: 'r' });
+			autheliaUsersConfig = yaml.load(fileContents);
+		} catch (error) {
+			// Authelia is installed onto the pool during setup, so until then there is no file to write
+			// to — and no Authelia account whose password could be out of step with the system one.
+			return;
+		}
+
+		if (autheliaUsersConfig?.users?.[config.username]) {
 			autheliaUsersConfig.users[config.username].password = bcrypt.hashSync(config.password, module.cost);
 			const updatedYaml = yaml.dump(autheliaUsersConfig, { indent: 2 });
 			await fs.writeFile(module.autheliaUsersFile, updatedYaml, 'utf8');
