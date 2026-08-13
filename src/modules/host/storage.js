@@ -271,6 +271,7 @@ const prepare = async (job, module) => {
 	// Everything these modules read lives on the pool and was unreachable when they started, so they
 	// are told to look again: an imported pool arrives with apps, bookmarks, shares and an enrolment
 	// already in it, and samba was configured before its share files existed.
+	module.eventEmitter.emit('host:storage:fetch');
 	module.eventEmitter.emit('configuration:updated');
 	module.eventEmitter.emit('configuration:location:updated');
 	module.eventEmitter.emit('configured:updated');
