@@ -268,9 +268,16 @@ const prepare = async (job, module) => {
 	await module.updateJobProgress(job, 'Opening the database...');
 	await openDatabase();
 	await DataService.initialize();
-	// Whatever the pool carries was unreadable when these modules started, so they are told to look
-	// again — an imported pool can arrive with apps, bookmarks and a fleet enrolment already in it.
+	// Everything these modules read lives on the pool and was unreachable when they started, so they
+	// are told to look again: an imported pool arrives with apps, bookmarks, shares and an enrolment
+	// already in it, and samba was configured before its share files existed.
 	module.eventEmitter.emit('configuration:updated');
+	module.eventEmitter.emit('configuration:location:updated');
+	module.eventEmitter.emit('configured:updated');
+	// TODO: install authelia + traefik, should use virgo command
+	module.eventEmitter.emit('users:updated');
+	await execa('smbcontrol', ['all', 'reload-config'], { reject: false });
+	module.eventEmitter.emit('shares:updated');
 	await scanImportablePools(module);
 };
 
