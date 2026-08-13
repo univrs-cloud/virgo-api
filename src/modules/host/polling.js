@@ -197,6 +197,10 @@ const getTime = (module) => {
 };
 
 const register = (module) => {
+	module.eventEmitter.on('host:storage:fetch', () => {
+		getStorage(module);
+	});
+
 	polls.push(new Poller(module, getNetworkStats, 2000));
 	polls.push(new Poller(module, getCpuStats, 5000));
 	polls.push(new Poller(module, getMemory, 10000));
