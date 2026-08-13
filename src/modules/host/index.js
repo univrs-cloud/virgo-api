@@ -497,8 +497,8 @@ class HostModule extends BaseModule {
 		try {
 			const { stdout: addrOutput } = await execa('ip', ['-j', 'addr', 'show']);
 			const { stdout: defaultRoutesOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
-			const networkInterfaces = camelcaseKeys(JSON.parse(addrOutput), { deep: true });
-			const defaultRoutes = JSON.parse(defaultRoutesOutput);
+			const networkInterfaces = camelcaseKeys(JSON.parse(addrOutput || '[]'), { deep: true });
+			const defaultRoutes = JSON.parse(defaultRoutesOutput || '[]');
 			let defaultDev = null;
 			let defaultGateway = null;
 			if (defaultRoutes.length > 0 && defaultRoutes[0].dev) {

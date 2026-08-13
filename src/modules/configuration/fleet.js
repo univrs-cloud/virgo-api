@@ -256,9 +256,10 @@ const startIfEnabled = async () => {
 			// Jitter only the boot-time auto-connect; user-initiated register/enable stay immediate.
 			const delay = randomStartupDelay();
 			setTimeout(() => {
-				connect({ token: fleet.token, nodeId: fleet.nodeId }).catch((error) => {
-					console.error('Error starting fleet connection:', error);
-				});
+				connect({ token: fleet.token, nodeId: fleet.nodeId })
+					.catch((error) => {
+						console.error('Error starting fleet connection:', error);
+					});
 			}, delay);
 		}
 	} catch (error) {

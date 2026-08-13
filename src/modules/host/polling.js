@@ -89,8 +89,8 @@ const getDrives = async (module) => {
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
 			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
 		]);
-		let drives = JSON.parse(smartctl);
-		let nvme = JSON.parse(nvmeList);
+		let drives = JSON.parse(smartctl || '[]');
+		let nvme = JSON.parse(nvmeList || '[]');
 		module.setState('drives', drives.map((drive, index) => {
 			return {
 				name: drive?.device?.name,
@@ -117,9 +117,9 @@ const getStorage = async (module) => {
 			execa('zpool', ['status', '-j', '--json-int']).catch(() => ({ stdout: '{"pools":{}}' })),
 			execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', '-j', '--json-int']).catch(() => ({ stdout: '{"datasets":{}}' }))
 		]);
-		const pools = JSON.parse(zpoolList)?.pools || {};
-		const statuses = JSON.parse(zpoolStatus)?.pools || {};
-		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const pools = JSON.parse(zpoolList || '{}')?.pools || {};
+		const statuses = JSON.parse(zpoolStatus || '{}')?.pools || {};
+		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		let storage = [];
 		for (const pool of Object.values(pools)) {
 			const poolDatasets = Object.values(datasets).filter((dataset) => {
@@ -173,7 +173,7 @@ const getStorage = async (module) => {
 const getSnapshots = async (module) => {
 	try {
 		const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-r', '-j', '--json-int']);
-		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		const snapshots = camelcaseKeys(datasets, { deep: true });
 		module.setState('snapshots', snapshots);
 	} catch (error) {
