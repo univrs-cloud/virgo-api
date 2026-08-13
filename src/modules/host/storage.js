@@ -46,8 +46,8 @@ const OWNER = 'voyager:users';
 const SSL_RESOLVER = 'le';
 const SSL_EMAIL = 'voyager@univrs.cloud';
 const CORE_APPS = [
-	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER, EMAIL: SSL_EMAIL }; } },
-	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER }; } }
+	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER }; } },
+	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER, EMAIL: SSL_EMAIL }; } }
 ];
 
 let scanning = null;
