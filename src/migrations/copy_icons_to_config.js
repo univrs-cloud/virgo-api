@@ -45,10 +45,11 @@ const copyIconsToConfig = async () => {
 };
 
 if (isMainModule) {
-	copyIconsToConfig().catch((error) => {
-		console.error('Icons copy failed:', error);
-		process.exit(1);
-	});
+	copyIconsToConfig()
+		.catch((error) => {
+			console.error('Icons copy failed:', error);
+			process.exit(1);
+		});
 }
 
 export default copyIconsToConfig;

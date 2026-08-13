@@ -90,7 +90,7 @@ class ShareModule extends BaseModule {
 		}
 		
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint', '-j']);
-		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		for (const dataset of Object.values(datasets)) {
 			if (sharePath === dataset?.properties?.mountpoint?.value) {
 				return dataset.name;
@@ -143,7 +143,7 @@ class ShareModule extends BaseModule {
 
 	async #getZfsDatasets() {
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint,used,available,referenced,refquota', '-j', '--json-int']);
-		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		return Object.values(datasets).map((dataset) => {
 			const props = dataset.properties || {};
 			return {

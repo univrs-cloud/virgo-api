@@ -145,7 +145,7 @@ function cleanupStaleTempFiles() {
 
 function zfsJson(subcmd, ...args) {
 	const { stdout } = execaSync('zfs', [subcmd, '-j', '--json-int', ...args]);
-	return JSON.parse(stdout);
+	return JSON.parse(stdout || '{}');
 }
 
 function prop(properties, key) {

@@ -17,7 +17,7 @@ const normalizeDataset = (dataset) => {
 const zfsDatasetExists = async (name) => {
 	try {
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name', '-j', name]);
-		const datasets = JSON.parse(zfsList)?.datasets || {};
+		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		return Object.hasOwn(datasets, name);
 	} catch {
 		return false;

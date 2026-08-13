@@ -6,8 +6,8 @@ const loadServices = async (module) => {
 			execa('systemctl', ['list-units', '--type=service,target,socket,timer,path', '--all', '--output=json']),
 			execa('systemctl', ['list-unit-files', '--type=service,target,socket,timer,path', '--output=json'])
 		]);
-		const serviceUnits = JSON.parse(serviceUnitsList);
-		const serviceUnitFiles = JSON.parse(serviceUnitFilesList);
+		const serviceUnits = JSON.parse(serviceUnitsList || '[]');
+		const serviceUnitFiles = JSON.parse(serviceUnitFilesList || '[]');
 		const loadedUnitNames = new Set(serviceUnits.map((unit) => { return unit.unit; }));
 		const totalMemory = module.getState('memory')?.total;
 

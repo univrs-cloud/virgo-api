@@ -49,7 +49,7 @@ class IndexerModule extends BaseModule {
 			const datasets = (configuration.indexer ?? []);
 			this.setState('datasets', datasets);
 		} catch (error) {
-			console.error('indexer datasets load failed:', error);
+			console.warn(`Could not load indexer datasets: ${error.shortMessage || error.message}`);
 		}
 	}
 
@@ -58,7 +58,7 @@ class IndexerModule extends BaseModule {
 			const { stdout: stats } = await execa('virgo', ['indexer', 'stats', '--json']);
 			this.setState('stats', camelcaseKeys(JSON.parse(stats), { deep: true }));
 		} catch (error) {
-			console.error('indexer stats failed:', error);
+			console.warn(`Could not load indexer stats: ${error.shortMessage || error.message}`);
 		}
 	}
 }

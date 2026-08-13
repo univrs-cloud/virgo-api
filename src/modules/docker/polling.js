@@ -28,8 +28,14 @@ const getAppsStorageResouceMetrics = async (module) => {
 		acc[`${module.appsDataset}/${app.name}`] = app.name;
 		return acc;
 	}, {});
-	const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int']);
-	const datasets = JSON.parse(zfsList)?.datasets || {};
+	let datasets = {};
+	try {
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int']);
+		datasets = JSON.parse(zfsList || '{}')?.datasets || {};
+	} catch (error) {
+		console.warn(`Could not read app storage metrics: ${error.message}`);
+		return;
+	}
 	const appsStorageResourceMetrics = {};
 
 	for (const dataset of Object.values(datasets)) {
@@ -55,7 +61,7 @@ const getAppsComputeResourceMetrics = async (module) => {
 	}
 	
 	const containers = module.getState('containers');
-	if (containers.length === 0) {
+	if (!Array.isArray(containers) || containers.length === 0) {
 		setTimeout(() => { getAppsComputeResourceMetrics(module); }, 100);
 		return;
 	}

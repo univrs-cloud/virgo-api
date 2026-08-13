@@ -110,8 +110,8 @@ const scanImportablePools = async (module) => {
 		try {
 			// Having nothing to offer is a success: zpool exits 0 and reports it in prose, which parses
 			// to an empty list. A throw here is a real failure — no zpool, not root, unreadable devices.
-			const { stdout } = await execa('zpool', ['import']);
-			module.setState('importable', parseImportablePools(stdout));
+			const { stdout: zpoolImport } = await execa('zpool', ['import']);
+			module.setState('importable', parseImportablePools(zpoolImport));
 		} catch (error) {
 			console.error('scanImportablePools:', error);
 			module.setState('importable', false);
@@ -122,15 +122,6 @@ const scanImportablePools = async (module) => {
 	})();
 
 	await scanning;
-};
-
-const execJson = async (command, args) => {
-	try {
-		const { stdout } = await execa(command, args);
-		return JSON.parse(stdout);
-	} catch (error) {
-		return null;
-	}
 };
 
 const exists = async (path) => {
@@ -151,15 +142,18 @@ const hasContent = async (path) => {
 };
 
 const listPools = async () => {
-	return Object.keys((await execJson('zpool', ['list', '-j']))?.pools || {});
+	const { stdout: zpoolList } = await execa('zpool', ['list', '-j']);
+	return Object.keys(JSON.parse(zpoolList || '{}')?.pools || {});
 };
 
 const listDatasets = async () => {
-	return Object.keys((await execJson('zfs', ['list', '-j', '-o', 'name']))?.datasets || {});
+	const { stdout: zfsList } = await execa('zfs', ['list', '-j', '-o', 'name']);
+	return Object.keys(JSON.parse(zfsList || '{}')?.datasets || {});
 };
 
 const isDatasetMounted = async (name) => {
-	return (await execJson('zfs', ['get', '-j', 'mounted', name]))?.datasets?.[name]?.properties?.mounted?.value === 'yes';
+	const { stdout: zfsMounted } = await execa('zfs', ['get', '-j', 'mounted', name], { reject: false });
+	return JSON.parse(zfsMounted || '{}')?.datasets?.[name]?.properties?.mounted?.value === 'yes';
 };
 
 // One transaction per direction: systemd orders the units by their dependencies, where separate
@@ -221,7 +215,9 @@ const createDatasets = async () => {
 };
 
 const createDockerNetwork = async () => {
-	const network = await execJson('docker', ['network', 'inspect', 'virgo', '--format', 'json']);
+	// Inspecting a network that is not there exits non-zero, which is the answer, not a failure.
+	const { stdout: dockerNetwork } = await execa('docker', ['network', 'inspect', 'virgo', '--format', 'json'], { reject: false });
+	const network = JSON.parse(dockerNetwork || '[]');
 	if (Array.isArray(network) && network.length > 0) {
 		return;
 	}
@@ -342,7 +338,8 @@ const createPool = async (job, module) => {
 };
 
 const register = (module) => {
-	scanImportablePools(module);
+	scanImportablePools(module)
+		.catch((error) => { console.error('scanImportablePools:', error); });
 };
 
 const onConnection = (socket, module) => {

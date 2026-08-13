@@ -42,13 +42,13 @@ const getConnectionProperty = async (connectionName, property) => {
 const getCurrentIPv4Address = async () => {
 	try {
 		const { stdout: routeOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
-		const routes = JSON.parse(routeOutput);
+		const routes = JSON.parse(routeOutput || '[]');
 		const defaultDev = routes[0]?.dev;
 		if (!defaultDev) {
 			return null;
 		}
 		const { stdout: addrOutput } = await execa('ip', ['-j', 'addr', 'show', defaultDev]);
-		const addresses = JSON.parse(addrOutput);
+		const addresses = JSON.parse(addrOutput || '[]');
 		const ipv4Info = addresses[0]?.addr_info?.find((info) => { return info.family === 'inet'; });
 		return ipv4Info?.local || null;
 	} catch (error) {

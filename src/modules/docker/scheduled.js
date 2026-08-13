@@ -142,10 +142,17 @@ const toUpdate = ({ id, labels }) => {
 
 const checkForUpdates = async (module) => {
 	const updates = [];
-	let images = await docker.listImages({ all: true, digests: true });
-	images = camelcaseKeys(images, { deep: true });
-	let containers = await docker.listContainers({ all: true });
-	containers = camelcaseKeys(containers, { deep: true });
+	let images;
+	let containers;
+	try {
+		images = camelcaseKeys(await docker.listImages({ all: true, digests: true }), { deep: true });
+		containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
+	} catch (error) {
+		// Docker is down until setup prepares the pool it stores its data on, and it is stopped again
+		// during any later pool work. Nothing is installed then, so there is nothing to check.
+		console.warn(`Could not check for app updates: ${error.message}`);
+		return;
+	}
 
 	// Map of imageId -> { imageName, localDigests, imageContainers[] }
 	// Keyed by imageId so containers running different pulled versions of the same image
@@ -294,7 +301,8 @@ const fetchStackFiles = async (module) => {
 };
 
 const register = (module) => {
-	checkForUpdates(module);
+	checkForUpdates(module)
+		.catch((error) => { console.error('checkForUpdates:', error); });
 
 	// Schedule updates checker to run daily at midnight
 	module.addJobSchedule(
