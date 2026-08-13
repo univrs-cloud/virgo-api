@@ -1,5 +1,26 @@
 import * as database from '../indexer/db.js';
 
+/** Runs a query against the index and prints it. Without an index there is nothing to query and the
+ * empty answer is the true one, so every command reports it the same way instead of failing. */
+const query = async (options, empty, run) => {
+	const db = database.open();
+	if (!db) {
+		if (options.json) {
+			console.log(JSON.stringify(empty, null, 2));
+		}
+		return;
+	}
+
+	try {
+		const result = run(await import('../indexer/query.js'), db);
+		if (options.json) {
+			console.log(JSON.stringify(result, null, 2));
+		}
+	} finally {
+		db.close();
+	}
+};
+
 const register = (program) => {
 	const indexerCmd = program
 		.command('indexer')
@@ -25,13 +46,7 @@ const register = (program) => {
 		.description('Clear indexed data and force a full re-crawl on next run')
 		.option('--dataset <names>', 'Dataset root(s), comma-separated; reset each root and its children')
 		.action(async (options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				query.reindex(db, options);
-			} finally {
-				db.close();
-			}
+			await query(options, null, (indexer, db) => { return indexer.reindex(db, options); });
 		});
 
 	// ─── search ─────────────────────────────────────────────────────────────
@@ -50,14 +65,7 @@ const register = (program) => {
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
 		.action(async (term, options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.search(db, term, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, [], (indexer, db) => { return indexer.search(db, term, options); });
 		});
 
 	// ─── history ────────────────────────────────────────────────────────────
@@ -68,14 +76,7 @@ const register = (program) => {
 		.option('--dataset <names>', 'Limit to dataset root(s), comma-separated (each matches that dataset and children)')
 		.option('--json', 'Output as JSON')
 		.action(async (path, options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.history(db, path, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, [], (indexer, db) => { return indexer.history(db, path, options); });
 		});
 
 	// ─── deleted ──────────────────────────────────────────────────────────
@@ -89,14 +90,7 @@ const register = (program) => {
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
 		.action(async (options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.deleted(db, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, [], (indexer, db) => { return indexer.deleted(db, options); });
 		});
 
 	// ─── changes ────────────────────────────────────────────────────────────
@@ -110,14 +104,7 @@ const register = (program) => {
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
 		.action(async (snapshot, options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.changes(db, snapshot, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, [], (indexer, db) => { return indexer.changes(db, snapshot, options); });
 		});
 
 	// ─── diff ───────────────────────────────────────────────────────────────
@@ -129,14 +116,7 @@ const register = (program) => {
 		.option('--offset <n>', 'Skip first N results', parseInt)
 		.option('--json', 'Output as JSON')
 		.action(async (snapA, snapB, options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.diff(db, snapA, snapB, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, [], (indexer, db) => { return indexer.diff(db, snapA, snapB, options); });
 		});
 
 	// ─── stats ──────────────────────────────────────────────────────────────
@@ -146,14 +126,7 @@ const register = (program) => {
 		.description('Index statistics')
 		.option('--json', 'Output as JSON')
 		.action(async (options) => {
-			const query = await import('../indexer/query.js');
-			const db = database.open();
-			try {
-				const result = query.stats(db, options);
-				if (options.json) console.log(JSON.stringify(result, null, 2));
-			} finally {
-				db.close();
-			}
+			await query(options, {}, (indexer, db) => { return indexer.stats(db, options); });
 		});
 };
 

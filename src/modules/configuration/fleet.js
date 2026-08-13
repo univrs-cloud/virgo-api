@@ -256,6 +256,11 @@ const startIfEnabled = async () => {
 			// Jitter only the boot-time auto-connect; user-initiated register/enable stay immediate.
 			const delay = randomStartupDelay();
 			setTimeout(() => {
+				// A registration during the wait already opened the socket; leave it alone.
+				if (fleetSocket) {
+					return;
+				}
+
 				connect({ token: fleet.token, nodeId: fleet.nodeId })
 					.catch((error) => {
 						console.error('Error starting fleet connection:', error);
@@ -290,6 +295,9 @@ const register = (module) => {
 		lastStorage = storage;
 		reportStorageToFleet();
 	});
+	// A node that boots before its pool reads no configuration at all, so an enrolment carried by a
+	// pool imported afterwards is only discovered when the configuration becomes readable.
+	module.eventEmitter.on('configuration:updated', startIfEnabled);
 	startIfEnabled();
 };
 

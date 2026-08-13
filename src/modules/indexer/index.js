@@ -56,7 +56,7 @@ class IndexerModule extends BaseModule {
 	async #loadStats() {
 		try {
 			const { stdout: stats } = await execa('virgo', ['indexer', 'stats', '--json']);
-			this.setState('stats', camelcaseKeys(JSON.parse(stats), { deep: true }));
+			this.setState('stats', camelcaseKeys(JSON.parse(stats || '{}'), { deep: true }));
 		} catch (error) {
 			console.warn(`Could not load indexer stats: ${error.shortMessage || error.message}`);
 		}

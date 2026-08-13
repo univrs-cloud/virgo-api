@@ -1,18 +1,27 @@
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync } from 'fs';
-import { dirname, join } from 'path';
+import { statSync } from 'fs';
+import path from 'path';
 
 const INDEX_DB_DIR = '/messier/.config';
 const INDEX_DB_NAME = 'index.db';
-const INDEX_DB_PATH = join(INDEX_DB_DIR, INDEX_DB_NAME);
+const INDEX_DB_PATH = path.join(INDEX_DB_DIR, INDEX_DB_NAME);
+const POOL_MOUNT = path.dirname(INDEX_DB_DIR);
 
-function open() {
-	const root = dirname(INDEX_DB_DIR);
-	if (!existsSync(root)) {
-		throw new Error(`Fatal: ${root} does not exist. Is the ZFS pool mounted?`);
+// A file of the right name would satisfy a plain existence check and then fail inside SQLite, so what
+// is asked is whether the path is a directory at all.
+const isDirectory = (target) => {
+	try {
+		return statSync(target).isDirectory();
+	} catch (error) {
+		return false;
 	}
-	if (!existsSync(INDEX_DB_DIR)) {
-		throw new Error(`Fatal: ${INDEX_DB_DIR} does not exist. Create it first: mkdir -p ${INDEX_DB_DIR}`);
+};
+
+/** Returns null when there is nowhere to keep an index — no pool, or a pool setup has not prepared
+ * yet. Nothing has been indexed in that state, so callers report that rather than failing. */
+function open() {
+	if (!isDirectory(POOL_MOUNT) || !isDirectory(INDEX_DB_DIR)) {
+		return null;
 	}
 
 	const db = new DatabaseSync(INDEX_DB_PATH);

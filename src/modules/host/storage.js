@@ -1,5 +1,8 @@
+import path from 'path';
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
+import { open as openDatabase } from '../../database/index.js';
+import DataService from '../../database/data_service.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -261,6 +264,13 @@ const prepare = async (job, module) => {
 	await createDockerNetwork();
 	await module.updateJobProgress(job, 'Creating directories...');
 	await createDirectories();
+	// The service booted without a pool to keep its database on, so it takes the one just prepared.
+	await module.updateJobProgress(job, 'Opening the database...');
+	await openDatabase();
+	await DataService.initialize();
+	// Whatever the pool carries was unreadable when these modules started, so they are told to look
+	// again — an imported pool can arrive with apps, bookmarks and a fleet enrolment already in it.
+	module.eventEmitter.emit('configuration:updated');
 	await scanImportablePools(module);
 };
 
