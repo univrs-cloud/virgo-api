@@ -253,7 +253,8 @@ const queueAppInstall = async (name, options) => {
 		{
 			config: {
 				name,
-				env
+				env,
+				force: Boolean(options.force)
 			},
 			username: process.env.USER || 'cli'
 		},
@@ -323,6 +324,7 @@ const register = (program) => {
 			pairs.push(parseEnvPair(value));
 			return pairs;
 		}, [])
+		.option('--force', 'Reinstall an app that is already installed: its project files are rewritten and the stack brought back up, its stored data is kept')
 		.action(queueAppInstall);
 
 	function parseEnvPair(value) {

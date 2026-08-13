@@ -15,8 +15,11 @@ const installApp = async (job, module) => {
 		throw new Error(`App template not found.`);
 	}
 
+	// An imported pool arrives with its apps already in the registry, still configured for the name the
+	// node had before. Forcing rewrites the project files and brings the stack back up on the current
+	// one; the app's dataset, and everything it keeps there, is left alone.
 	const existingApp = await DataService.getApplication(template?.name);
-	if (existingApp) {
+	if (existingApp && !config?.force) {
 		throw new Error(`App already installed.`);
 	}
 

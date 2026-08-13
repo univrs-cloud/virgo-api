@@ -263,7 +263,8 @@ const createDirectories = async () => {
 };
 
 /** Queues the apps the node cannot be used without, through the same command an operator would run.
- * The command returns once the work is queued; the installs themselves report their own progress. */
+ * The command returns once the work is queued; the installs themselves report their own progress.
+ * Forced, because an imported pool already lists them: they are reconfigured for this node's name. */
 const installCoreApps = async (job, module) => {
 	const fqdn = module.getState('system')?.osInfo?.fqdn;
 	if (!fqdn) {
@@ -273,7 +274,7 @@ const installCoreApps = async (job, module) => {
 
 	for (const app of CORE_APPS) {
 		await module.updateJobProgress(job, `Installing ${app.name}...`);
-		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', app.name, '--env-json', JSON.stringify(app.env(fqdn))], { reject: false });
+		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', app.name, '--force', '--env-json', JSON.stringify(app.env(fqdn))], { reject: false });
 		if (exitCode !== 0) {
 			console.error(`Could not install ${app.name}: ${stderr}`);
 		}
