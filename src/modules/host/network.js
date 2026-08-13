@@ -39,11 +39,38 @@ const getConnectionProperty = async (connectionName, property) => {
 	}
 };
 
-const getCurrentIPv4Address = async () => {
+const getDefaultInterfaceName = async () => {
 	try {
 		const { stdout: routeOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
-		const routes = JSON.parse(routeOutput || '[]');
-		const defaultDev = routes[0]?.dev;
+		return JSON.parse(routeOutput || '[]')[0]?.dev || null;
+	} catch (error) {
+		return null;
+	}
+};
+
+/** Whether another host already answers for an address, asked the way a host asks before claiming one:
+ * an ARP probe sent from 0.0.0.0, so a reply can only come from something that already owns it. Being
+ * link-layer, this reaches the address whatever subnet it is in. Exit 1 is that reply. Any other
+ * failure answers nothing — a node with no lease has no interface to probe from, which is exactly
+ * the node that needs a static address — so that case is `null`: unknown, not free. */
+const isAddressInUse = async (ipAddress) => {
+	const device = await getDefaultInterfaceName() || BOND_NAME;
+	try {
+		await execa('arping', ['-D', '-q', '-c', '2', '-w', '3', '-I', device, ipAddress]);
+		return false;
+	} catch (error) {
+		if (error.exitCode === 1) {
+			return true;
+		}
+
+		console.warn(`Could not check whether ${ipAddress} is in use: ${error.shortMessage || error.message}`);
+		return null;
+	}
+};
+
+const getCurrentIPv4Address = async () => {
+	try {
+		const defaultDev = await getDefaultInterfaceName();
 		if (!defaultDev) {
 			return null;
 		}
@@ -158,6 +185,20 @@ const addBondSlave = async (interfaceName) => {
 const updateInterface = async (job, module) => {
 	const { config } = job.data;
 	const system = module.getState('system');
+	// Moving onto an address another host already holds takes the node off the network the moment the
+	// new configuration comes up, with no way left to reach it and undo.
+	if (config.method === 'manual' && config.ipAddress !== await getCurrentIPv4Address()) {
+		await module.updateJobProgress(job, `Checking ${config.ipAddress}...`);
+		const addressInUse = await isAddressInUse(config.ipAddress);
+		if (addressInUse === true) {
+			throw new Error(`${config.ipAddress} is already in use on the network.`);
+		}
+
+		if (addressInUse === null) {
+			await module.updateJobProgress(job, `Could not check whether ${config.ipAddress} is in use, continuing...`);
+		}
+	}
+
 	await module.updateJobProgress(job, `Network interface updating...`);
 	try {
 		const bondExists = await connectionExists(BOND_NAME);
