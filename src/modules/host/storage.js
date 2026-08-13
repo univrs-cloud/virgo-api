@@ -38,6 +38,17 @@ const SHARES_DIR = `/${POOL_NAME}/.shares`;
 const CONFIG_DIR = `/${POOL_NAME}/.config`;
 const SHARE_FILES = ['downloads.conf', 'folders.conf', 'time_machines.conf'];
 const OWNER = 'voyager:users';
+// Nothing can be signed into until these exist: traefik answers on the node's name, authelia owns the
+// accounts and the file the password step writes to. DOMAIN is the node's own name, which each
+// template prefixes itself, routing to traefik.<fqdn> and auth.<fqdn>. Certificates come from Let's
+// Encrypt, with expiry notices going to us rather than the customer — they never asked for one, and
+// it is obtained on their node's behalf.
+const SSL_RESOLVER = 'le';
+const SSL_EMAIL = 'voyager@univrs.cloud';
+const CORE_APPS = [
+	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER, EMAIL: SSL_EMAIL }; } },
+	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER }; } }
+];
 
 let scanning = null;
 
@@ -251,6 +262,24 @@ const createDirectories = async () => {
 	}
 };
 
+/** Queues the apps the node cannot be used without, through the same command an operator would run.
+ * The command returns once the work is queued; the installs themselves report their own progress. */
+const installCoreApps = async (job, module) => {
+	const fqdn = module.getState('system')?.osInfo?.fqdn;
+	if (!fqdn) {
+		console.warn('Could not install core apps: this node has no name yet.');
+		return;
+	}
+
+	for (const app of CORE_APPS) {
+		await module.updateJobProgress(job, `Installing ${app.name}...`);
+		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', app.name, '--env-json', JSON.stringify(app.env(fqdn))], { reject: false });
+		if (exitCode !== 0) {
+			console.error(`Could not install ${app.name}: ${stderr}`);
+		}
+	}
+};
+
 /** Everything the pool needs before anything can be installed on it. Each part checks its own work
  * first, so a job that failed halfway can be run again. */
 const prepare = async (job, module) => {
@@ -275,10 +304,10 @@ const prepare = async (job, module) => {
 	module.eventEmitter.emit('configuration:updated');
 	module.eventEmitter.emit('configuration:location:updated');
 	module.eventEmitter.emit('configured:updated');
-	// TODO: install authelia + traefik, should use virgo command
 	module.eventEmitter.emit('users:updated');
 	await execa('smbcontrol', ['all', 'reload-config'], { reject: false });
 	module.eventEmitter.emit('shares:updated');
+	await installCoreApps(job, module);
 	await scanImportablePools(module);
 };
 
