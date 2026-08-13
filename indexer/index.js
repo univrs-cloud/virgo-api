@@ -183,6 +183,14 @@ function normalizeIndexerDatasets(configuration) {
 }
 
 async function run(_opts = {}) {
+	// Nowhere to keep an index means nothing to index: no pool, or one setup has not prepared yet.
+	const index = database.open();
+	if (!index) {
+		return;
+	}
+	
+	index.close();
+
 	const staleTemps = zfs.cleanupStaleTempFiles();
 	if (staleTemps > 0) {
 		console.log(`🧹 Cleaned up ${staleTemps} stale zfs-diff temp file(s) from previous run(s).`);
