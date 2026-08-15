@@ -6,15 +6,32 @@ import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
 import { digest } from '../utils/state_digest.js';
 import * as socket from '../socket.js';
+import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as identity from '../utils/identity.js';
-import * as setup from '../utils/setup_state.js';
 import * as nlp from '../utils/nlp.js';
+import { isPrivateAddress } from '../utils/private_address.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // How long a socket goes on trusting the identity it resolved before checking it again.
 const IDENTITY_TTL = 30000;
+// What a socket is told before anyone knows who is holding it: the three answers the shell reads to
+// decide which app to build — including the login screen it builds for a stranger. Everything else
+// waits until the node knows the socket belongs to somebody, or to somewhere it lets in unasked.
+const PUBLIC_EVENTS = ['role', 'host:setupCompleted', 'host:update'];
+
+const isVisible = (socket, event) => {
+	return (PUBLIC_EVENTS.includes(event) || socket.isAuthenticated || socket.isLocal);
+};
+
+/** The client, as opposed to whatever forwarded it. The last hop a trusted proxy recorded is the one
+ * it accepted the connection from; anything to the left of that the client wrote itself. */
+const clientAddress = (socket) => {
+	const forwarded = (trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress) ? socket.handshake.headers['x-forwarded-for'] : undefined);
+	const hops = (forwarded || '').split(',').map((hop) => { return hop.trim(); }).filter(Boolean);
+	return (hops.length > 0 ? hops[hops.length - 1] : socket.conn?.remoteAddress);
+};
 
 class BaseModule {
 	#name;
@@ -33,6 +50,14 @@ class BaseModule {
 		this.#name = name;
 		this.#io = socket.getIO();
 		this.#nsp = this.#io.of(`/${this.#name}`);
+		// Namespace-wide sends are delivered socket by socket, so they pass through the same wrapper as
+		// everything else: the adapter would carry them past the only place that knows who is listening.
+		this.#nsp.emit = (event, ...args) => {
+			for (const socket of this.#nsp.sockets.values()) {
+				socket.emit(event, ...args);
+			}
+			return true;
+		};
 		this.#eventEmitter = eventEmitter;
 
 		this.#setupMiddleware();
@@ -131,13 +156,8 @@ class BaseModule {
 		}
 
 		this.#digests.set(key, next);
-		if (!filter) {
-			this.#nsp.emit(event, payload);
-			return true;
-		}
-
 		for (const socket of this.#nsp.sockets.values()) {
-			if (filter(socket)) {
+			if (!filter || filter(socket)) {
 				socket.emit(event, payload);
 			}
 		}
@@ -162,9 +182,18 @@ class BaseModule {
 				};
 			};
 
+			// One question answers both: who is holding this socket, and whether the network it came from
+			// is let in without anybody holding it. Setup is not asked at all — an appliance being set up
+			// answers on an address and a port of its own, with nothing installed to ask and nothing yet
+			// to keep from anyone; the elevation below covers it, and ends when setup does.
+			const address = clientAddress(socket);
 			const resolve = async () => {
-				const session = await identity.getIdentity({ cookie, fqdn });
-				return (session.isAuthenticated ? session : fromHeaders());
+				if (!setup.isCompleted()) {
+					return identity.ANONYMOUS;
+				}
+
+				const account = await identity.getIdentity({ cookie, fqdn, clientAddress: address });
+				return (account.isAuthenticated ? account : { ...fromHeaders(), isLocal: account.isLocal || isPrivateAddress(address) });
 			};
 
 			let account = await resolve();
@@ -192,6 +221,10 @@ class BaseModule {
 				get: () => { renew(); return account.isAdmin || !setup.isCompleted(); },
 				configurable: true
 			});
+			Object.defineProperty(socket, 'isLocal', {
+				get: () => { renew(); return account.isLocal || !setup.isCompleted(); },
+				configurable: true
+			});
 			Object.defineProperty(socket, 'username', {
 				get: () => { renew(); return (account.isAuthenticated ? account.username : (setup.isCompleted() ? 'guest' : 'setup')); },
 				configurable: true
@@ -202,6 +235,13 @@ class BaseModule {
 
 	#setupConnectionHandlers() {
 		this.#nsp.on('connection', (socket) => {
+			// The one place what a socket may hear is decided. Modules emit as they always have; a socket
+			// belonging to nobody, from a network the node does not let in unasked, is simply not told.
+			const emit = socket.emit.bind(socket);
+			socket.emit = (event, ...args) => {
+				return (isVisible(socket, event) ? emit(event, ...args) : false);
+			};
+
 			if (typeof this.onConnection === 'function') {
 				this.onConnection(socket);
 			}
