@@ -1,3 +1,4 @@
+import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as authelia from '../utils/authelia.js';
 import * as identity from '../utils/identity.js';
@@ -17,7 +18,9 @@ const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
  * outside it, an address rather than a name, gets a cookie of its own: the browser would refuse one
  * scoped to a domain it is not visiting. */
 const cookieDomain = async (req) => {
-	const domain = await authelia.getCookieDomain({ fqdn: req.hostname });
+	// Nothing to ask before Authelia is installed, and nothing it could answer: the wizard is reached
+	// by address, so the name being asked for is all there is to scope a cookie to.
+	const domain = (setup.isCompleted() ? await authelia.getCookieDomain({ fqdn: req.hostname }) : undefined);
 	const isWithin = (domain && (req.hostname === domain || req.hostname.endsWith(`.${domain}`)));
 	return (isWithin ? domain : req.hostname);
 };
@@ -49,6 +52,15 @@ const clearAccount = async (req, res) => {
 };
 
 export default async (req, res, next) => {
+	// Nobody is signed in to an appliance still being set up, and there is nothing installed to ask
+	// about it: the wizard reaches the node by address, before any of this exists.
+	if (!setup.isCompleted()) {
+		await clearAccount(req, res);
+		res.header('Access-Control-Allow-Origin', '*');
+		next();
+		return;
+	}
+
 	const account = await identity.getIdentity({ cookie: req.headers.cookie, fqdn: req.hostname, clientAddress: req.ip });
 	// Node’s HTTP API calls the TCP connection “socket” (not WebSocket). We need that connection’s
 	// peer address so we can tell proxy (loopback) from direct clients.
