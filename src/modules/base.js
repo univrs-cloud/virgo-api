@@ -7,11 +7,14 @@ import eventEmitter from '../utils/event_emitter.js';
 import { digest } from '../utils/state_digest.js';
 import * as socket from '../socket.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
+import * as identity from '../utils/identity.js';
 import * as setup from '../utils/setup_state.js';
 import * as nlp from '../utils/nlp.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// How long a socket goes on trusting the identity it resolved before checking it again.
+const IDENTITY_TTL = 30000;
 
 class BaseModule {
 	#name;
@@ -142,25 +145,55 @@ class BaseModule {
 	}
 
 	#setupMiddleware() {
-		this.#nsp.use((socket, next) => {
-			const isTrusted = trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress);
-			const remoteUser = isTrusted ? (socket.handshake.headers['remote-user'] ?? socket.handshake.auth?.['remote-user']) : undefined;
-			const remoteGroups = isTrusted ? (socket.handshake.headers['remote-groups'] ?? socket.handshake.auth?.['remote-groups']) : undefined;
-			const isAuthenticated = (remoteUser !== undefined);
-			const isAdmin = (isAuthenticated && remoteGroups?.split(',')?.includes('admins')) || false;
+		this.#nsp.use(async (socket, next) => {
+			const cookie = socket.handshake.headers.cookie;
+			const fqdn = socket.handshake.headers['x-forwarded-host'] ?? socket.handshake.headers.host;
+			// How a node identified users before the login screen moved into this app: the proxy asked
+			// Authelia and passed the answer down. A session cookie outranks it, and where the proxy no
+			// longer asks, it is all that is left.
+			const fromHeaders = () => {
+				const isTrusted = trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress);
+				const remoteUser = isTrusted ? (socket.handshake.headers['remote-user'] ?? socket.handshake.auth?.['remote-user']) : undefined;
+				const remoteGroups = isTrusted ? (socket.handshake.headers['remote-groups'] ?? socket.handshake.auth?.['remote-groups']) : undefined;
+				return {
+					isAuthenticated: (remoteUser !== undefined),
+					isAdmin: (remoteUser !== undefined && remoteGroups?.split(',')?.includes('admins')) || false,
+					username: remoteUser
+				};
+			};
+
+			const resolve = async () => {
+				const session = await identity.getIdentity({ cookie, fqdn });
+				return (session.isAuthenticated ? session : fromHeaders());
+			};
+
+			let account = await resolve();
+			// A session ends on the node's clock, not this connection's, and a socket outlives both. So
+			// the answer is renewed as the socket is used: a read past its age starts the next check and
+			// keeps going with what it has, since nothing here can wait.
+			let resolvedAt = Date.now();
+			const renew = () => {
+				if ((Date.now() - resolvedAt) < IDENTITY_TTL) {
+					return;
+				}
+
+				resolvedAt = Date.now();
+				resolve().then((current) => { account = current; }).catch(() => {});
+			};
+
 			// First-run setup has no account to authenticate against, so the wizard's sockets act as an
 			// admin. Resolved on every read rather than frozen at connect, so sockets opened during setup
 			// lose the elevation the moment it completes instead of keeping it for their whole lifetime.
 			Object.defineProperty(socket, 'isAuthenticated', {
-				get: () => { return isAuthenticated || !setup.isCompleted(); },
+				get: () => { renew(); return account.isAuthenticated || !setup.isCompleted(); },
 				configurable: true
 			});
 			Object.defineProperty(socket, 'isAdmin', {
-				get: () => { return isAdmin || !setup.isCompleted(); },
+				get: () => { renew(); return account.isAdmin || !setup.isCompleted(); },
 				configurable: true
 			});
 			Object.defineProperty(socket, 'username', {
-				get: () => { return (isAuthenticated ? remoteUser : (setup.isCompleted() ? 'guest' : 'setup')); },
+				get: () => { renew(); return (account.isAuthenticated ? account.username : (setup.isCompleted() ? 'guest' : 'setup')); },
 				configurable: true
 			});
 			next();
