@@ -1,5 +1,6 @@
-import * as authelia from '../utils/authelia.js';
 import * as setup from '../utils/setup_state.js';
+import * as authelia from '../utils/authelia.js';
+import { isPrivateAddress } from '../utils/private_address.js';
 
 /**
  * Turns an unauthorized visitor away from the node's pages, the way the proxy does for every app it
@@ -10,22 +11,6 @@ import * as setup from '../utils/setup_state.js';
 
 // The pages that have to answer whoever asks: the login screen, and the routes it signs in through.
 const OPEN_PATHS = ['/login', '/session'];
-const PRIVATE_PATTERNS = [
-	/^127\./,
-	/^10\./,
-	/^192\.168\./,
-	/^172\.(1[6-9]|2\d|3[01])\./,
-	/^169\.254\./,
-	/^::1$/,
-	/^f[cd]/i,
-	/^fe80:/i
-];
-
-/** Whether the client is on the same premises as the node — the networks it is administered from. */
-const isPrivateAddress = (address) => {
-	const normalized = (address || '').replace(/^::ffff:/i, '');
-	return PRIVATE_PATTERNS.some((pattern) => { return pattern.test(normalized); });
-};
 
 const requestedUrl = (req) => {
 	return `${req.protocol}://${req.hostname}${req.originalUrl}`;

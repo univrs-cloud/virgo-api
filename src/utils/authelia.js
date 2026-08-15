@@ -57,11 +57,28 @@ const sessionCookies = (response) => {
 	return cookies;
 };
 
+/** Whoever the session belongs to, as Authelia describes them: it authenticates before it weighs any
+ * rule, so a request it lets through unasked still names the person holding it. */
+const identity = (response) => {
+	const username = response.headers.get('remote-user');
+	if (!username) {
+		return undefined;
+	}
+
+	return {
+		username,
+		name: response.headers.get('remote-name') || undefined,
+		email: response.headers.get('remote-email') || undefined,
+		groups: (response.headers.get('remote-groups') || '').split(',').filter(Boolean)
+	};
+};
+
 /** The question the proxy asks on behalf of every app it gates, asked here about the node's own pages.
  * Authelia weighs the session against its rules — including the networks it lets through without one —
- * and either allows the request or answers with where to send the visitor, which is this node's login
- * screen because that is the portal it is told to name. */
-const authorize = async ({ fqdn, uri, clientAddress, cookie }) => {
+ * and answers with all three things worth knowing: whether the request may proceed, where to send the
+ * visitor otherwise (this node's login screen, because that is the portal it is told to name), and who
+ * the request is from. Allowed with nobody named is the shape of a network let through unasked. */
+const authorize = async ({ fqdn, uri = '/', clientAddress, cookie }) => {
 	const autheliaUrl = encodeURIComponent(`https://${fqdn}/login`);
 	const response = await fetch(`${BASE_URL}/api/authz/forward-auth?authelia_url=${autheliaUrl}`, {
 		redirect: 'manual',
@@ -74,7 +91,8 @@ const authorize = async ({ fqdn, uri, clientAddress, cookie }) => {
 	});
 	return {
 		isAllowed: response.ok,
-		location: response.headers.get('location')
+		location: response.headers.get('location'),
+		identity: identity(response)
 	};
 };
 
@@ -89,30 +107,6 @@ const login = async ({ username, password, keepMeLoggedIn = false, fqdn, clientA
 	return {
 		isAuthenticated: response.ok,
 		cookies: sessionCookies(response)
-	};
-};
-
-/** Who the browser's cookie belongs to, or undefined when it carries no session. This asks about the
- * session itself rather than about access to a resource, so it answers the same on a network Authelia
- * lets through unauthenticated: bypassed clients are anonymous until they choose to sign in. */
-const getSession = async ({ fqdn, cookie }) => {
-	if (!cookie) {
-		return undefined;
-	}
-
-	const response = await request('/api/state', { fqdn, cookie });
-	if (!response.ok) {
-		return undefined;
-	}
-
-	const { data } = await response.json();
-	if (!data?.username || data?.authentication_level < 1) {
-		return undefined;
-	}
-
-	return {
-		username: data.username,
-		authenticationLevel: data.authentication_level
 	};
 };
 
@@ -149,7 +143,6 @@ const logout = async ({ fqdn, cookie }) => {
 export {
 	getCookieDomain,
 	authorize,
-	getSession,
 	login,
 	logout
 };

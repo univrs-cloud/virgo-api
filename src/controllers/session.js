@@ -24,7 +24,7 @@ const asCookieHeader = (cookies) => {
 
 router.get('/session', async (req, res, next) => {
 	try {
-		res.json(await identity.getIdentity({ cookie: req.headers.cookie, fqdn: requestFqdn(req) }));
+		res.json(await identity.getIdentity({ cookie: req.headers.cookie, fqdn: requestFqdn(req), clientAddress: req.ip }));
 	} catch (error) {
 		next(error);
 	}
@@ -52,7 +52,7 @@ router.post('/session', async (req, res, next) => {
 		}
 
 		res.setHeader('set-cookie', cookies);
-		res.json(await identity.getIdentity({ cookie: asCookieHeader(cookies), fqdn: requestFqdn(req) }));
+		res.json(await identity.getIdentity({ cookie: asCookieHeader(cookies), fqdn: requestFqdn(req), clientAddress: req.ip }));
 	} catch (error) {
 		next(error);
 	}
@@ -61,7 +61,7 @@ router.post('/session', async (req, res, next) => {
 router.delete('/session', async (req, res, next) => {
 	try {
 		const { isEnded, status, cookies } = await authelia.logout({ cookie: req.headers.cookie, fqdn: requestFqdn(req) });
-		identity.forget({ cookie: req.headers.cookie, fqdn: requestFqdn(req) });
+		identity.forget({ cookie: req.headers.cookie, fqdn: requestFqdn(req), clientAddress: req.ip });
 		if (!isEnded) {
 			console.error(`Could not end the session: Authelia answered ${status}.`);
 			res.status(502).json({ message: 'Could not sign out.' });

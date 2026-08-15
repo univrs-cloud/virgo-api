@@ -49,7 +49,7 @@ const clearAccount = async (req, res) => {
 };
 
 export default async (req, res, next) => {
-	const account = await identity.getIdentity({ cookie: req.headers.cookie, fqdn: req.hostname });
+	const account = await identity.getIdentity({ cookie: req.headers.cookie, fqdn: req.hostname, clientAddress: req.ip });
 	// Node’s HTTP API calls the TCP connection “socket” (not WebSocket). We need that connection’s
 	// peer address so we can tell proxy (loopback) from direct clients.
 	const isTrusted = trustedProxy.isFromTrustedProxy(req.socket?.remoteAddress);
