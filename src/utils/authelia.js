@@ -57,6 +57,27 @@ const sessionCookies = (response) => {
 	return cookies;
 };
 
+/** The question the proxy asks on behalf of every app it gates, asked here about the node's own pages.
+ * Authelia weighs the session against its rules — including the networks it lets through without one —
+ * and either allows the request or answers with where to send the visitor, which is this node's login
+ * screen because that is the portal it is told to name. */
+const authorize = async ({ fqdn, uri, clientAddress, cookie }) => {
+	const autheliaUrl = encodeURIComponent(`https://${fqdn}/login`);
+	const response = await fetch(`${BASE_URL}/api/authz/forward-auth?authelia_url=${autheliaUrl}`, {
+		redirect: 'manual',
+		headers: {
+			...forwardedHeaders(fqdn, clientAddress),
+			'x-forwarded-uri': uri,
+			'x-forwarded-method': 'GET',
+			...(cookie ? { cookie } : {})
+		}
+	});
+	return {
+		isAllowed: response.ok,
+		location: response.headers.get('location')
+	};
+};
+
 /** Trades credentials for a session. A rejection is reported as one thing — Authelia distinguishes an
  * unknown user from a wrong password, and the login screen should not. */
 const login = async ({ username, password, keepMeLoggedIn = false, fqdn, clientAddress }) => {
@@ -127,6 +148,7 @@ const logout = async ({ fqdn, cookie }) => {
 
 export {
 	getCookieDomain,
+	authorize,
 	getSession,
 	login,
 	logout
