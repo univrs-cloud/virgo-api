@@ -1,5 +1,4 @@
 import express from 'express';
-import authCookieHandler from './middleware/auth_cookie_handler.js';
 import authorizationHandler from './middleware/authorization_handler.js';
 import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
@@ -14,7 +13,6 @@ function createApp() {
 	// what its network rules match.
 	app.set('trust proxy', (address) => { return trustedProxy.isFromTrustedProxy(address); });
 	app.use(express.json());
-	app.use(authCookieHandler);
 	app.use(authorizationHandler);
 	app.use(controllers);
 	app.use(error404Handler);

@@ -11,6 +11,8 @@ import config from '../../config.js';
 /** Authelia answers on the node's own loopback: virgo-api runs on the host, not on the docker network
  * the container is attached to, and the traffic never leaves the machine. */
 const BASE_URL = config.authelia.url;
+// The one thing this node concludes for itself from what Authelia reports: which of its groups runs it.
+const ADMIN_GROUP = 'admins';
 // How long to wait before asking again, when Authelia had nothing to say about its cookie — it has
 // nothing to say until it is installed.
 const DOMAIN_RETRY = 60000;
@@ -65,11 +67,13 @@ const identity = (response) => {
 		return undefined;
 	}
 
+	const groups = (response.headers.get('remote-groups') || '').split(',').filter(Boolean);
 	return {
 		username,
 		name: response.headers.get('remote-name') || undefined,
 		email: response.headers.get('remote-email') || undefined,
-		groups: (response.headers.get('remote-groups') || '').split(',').filter(Boolean)
+		isAdmin: groups.includes(ADMIN_GROUP),
+		groups
 	};
 };
 
