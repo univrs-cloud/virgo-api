@@ -15,11 +15,20 @@ const PRIVATE_PATTERNS = [
 	/^fe80:/i
 ];
 
+const normalize = (address) => {
+	return (address || '').replace(/^::ffff:/i, '');
+};
+
 const isPrivateAddress = (address) => {
-	const normalized = (address || '').replace(/^::ffff:/i, '');
-	return PRIVATE_PATTERNS.some((pattern) => { return pattern.test(normalized); });
+	return PRIVATE_PATTERNS.some((pattern) => { return pattern.test(normalize(address)); });
+};
+
+/** The node itself, as opposed to anything else on its network — including the containers it runs. */
+const isLoopbackAddress = (address) => {
+	return (/^127\./.test(normalize(address)) || normalize(address) === '::1');
 };
 
 export {
-	isPrivateAddress
+	isPrivateAddress,
+	isLoopbackAddress
 };
