@@ -10,6 +10,7 @@ import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as authelia from '../utils/authelia.js';
 import * as nlp from '../utils/nlp.js';
+import * as proxyCredential from '../utils/proxy_credential.js';
 import { isPrivateAddress, isLoopbackAddress } from '../utils/private_address.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
@@ -169,11 +170,11 @@ class BaseModule {
 		this.#nsp.use(async (socket, next) => {
 			const cookie = socket.handshake.headers.cookie;
 			const fqdn = socket.handshake.headers['x-forwarded-host'] ?? socket.handshake.headers.host;
-			// The account the fleet's proxy is acting for, which it states when it opens the connection.
-			// Only from the node itself: the proxy reaches these namespaces over loopback, and taking it
-			// from anywhere else would let a container this node runs name whoever it liked.
+			// The account the fleet's proxy is acting for, which it states when it opens the connection —
+			// believed only when it proves to be that proxy. Loopback alone would not do it: a container
+			// run on the host's network shares this address, and one of the apps in the catalogue is.
 			const vouched = () => {
-				if (!isLoopbackAddress(socket.conn?.remoteAddress)) {
+				if (!isLoopbackAddress(socket.conn?.remoteAddress) || !proxyCredential.matches(socket.handshake.auth?.secret)) {
 					return {};
 				}
 
@@ -181,7 +182,7 @@ class BaseModule {
 				const groups = socket.handshake.auth?.['remote-groups'];
 				return {
 					isAuthenticated: (username !== undefined),
-					isAdmin: (username !== undefined && groups?.split(',')?.includes(ADMIN_GROUP)) || false,
+					isAdmin: (username !== undefined && Array.isArray(groups) && groups.includes(ADMIN_GROUP)),
 					username
 				};
 			};

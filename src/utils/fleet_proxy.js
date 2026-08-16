@@ -2,6 +2,7 @@ import path from 'path';
 import { Agent } from 'undici';
 import { io as ioClient } from 'socket.io-client';
 import serverConfig from '../../config.js';
+import * as proxyCredential from './proxy_credential.js';
 import { folderPath as distFolder } from '../controllers/static.js';
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -197,8 +198,11 @@ const openInternalSocket = ({ namespace, user }) => {
 		reconnection: false,
 		...localTlsOptions,
 		auth: {
+			// Proof that this connection is the node's own proxy rather than something else that can
+			// reach the port; the account beside it is only believed on the strength of it.
+			secret: proxyCredential.getSecret(),
 			'remote-user': 'voyager',
-			'remote-groups': 'admins'
+			'remote-groups': ['admins']
 		}
 	});
 };
