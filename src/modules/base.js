@@ -8,7 +8,7 @@ import { digest } from '../utils/state_digest.js';
 import * as socket from '../socket.js';
 import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
-import * as identity from '../utils/identity.js';
+import * as authelia from '../utils/authelia.js';
 import * as nlp from '../utils/nlp.js';
 import { isPrivateAddress } from '../utils/private_address.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
@@ -189,11 +189,17 @@ class BaseModule {
 			const address = clientAddress(socket);
 			const resolve = async () => {
 				if (!setup.isCompleted()) {
-					return identity.ANONYMOUS;
+					return undefined;
 				}
 
-				const account = await identity.getIdentity({ cookie, fqdn, clientAddress: address });
-				return (account.isAuthenticated ? account : { ...fromHeaders(), isLocal: account.isLocal || isPrivateAddress(address) });
+				try {
+					const { isAllowed, identity } = await authelia.authorize({ fqdn, clientAddress: address, cookie });
+					return (identity ? { ...identity, isAuthenticated: true, isLocal: isAllowed } : { ...fromHeaders(), isLocal: isAllowed });
+				} catch (error) {
+					// A node that cannot ask has nobody signed in rather than everybody, and only the
+					// premises to fall back on.
+					return { isLocal: isPrivateAddress(address) };
+				}
 			};
 
 			let account = await resolve();
@@ -214,19 +220,19 @@ class BaseModule {
 			// admin. Resolved on every read rather than frozen at connect, so sockets opened during setup
 			// lose the elevation the moment it completes instead of keeping it for their whole lifetime.
 			Object.defineProperty(socket, 'isAuthenticated', {
-				get: () => { renew(); return account.isAuthenticated || !setup.isCompleted(); },
+				get: () => { renew(); return account?.isAuthenticated || !setup.isCompleted(); },
 				configurable: true
 			});
 			Object.defineProperty(socket, 'isAdmin', {
-				get: () => { renew(); return account.isAdmin || !setup.isCompleted(); },
+				get: () => { renew(); return account?.isAdmin || !setup.isCompleted(); },
 				configurable: true
 			});
 			Object.defineProperty(socket, 'isLocal', {
-				get: () => { renew(); return account.isLocal || !setup.isCompleted(); },
+				get: () => { renew(); return account?.isLocal || !setup.isCompleted(); },
 				configurable: true
 			});
 			Object.defineProperty(socket, 'username', {
-				get: () => { renew(); return (account.isAuthenticated ? account.username : (setup.isCompleted() ? 'guest' : 'setup')); },
+				get: () => { renew(); return (account?.isAuthenticated ? account.username : (setup.isCompleted() ? 'guest' : 'setup')); },
 				configurable: true
 			});
 			next();
