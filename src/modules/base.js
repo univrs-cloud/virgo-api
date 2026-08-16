@@ -10,7 +10,7 @@ import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as authelia from '../utils/authelia.js';
 import * as nlp from '../utils/nlp.js';
-import { isPrivateAddress } from '../utils/private_address.js';
+import { isPrivateAddress, isLoopbackAddress } from '../utils/private_address.js';
 import { getQueueName, getScheduledQueueName } from '../queues.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +20,7 @@ const IDENTITY_TTL = 30000;
 // decide which app to build — including the login screen it builds for a stranger. Everything else
 // waits until the node knows the socket belongs to somebody, or to somewhere it lets in unasked.
 const PUBLIC_EVENTS = ['role', 'host:setupCompleted', 'host:update'];
+const ADMIN_GROUP = 'admins';
 
 const isVisible = (socket, event) => {
 	return (PUBLIC_EVENTS.includes(event) || socket.isAuthenticated || socket.isLocal);
@@ -168,17 +169,20 @@ class BaseModule {
 		this.#nsp.use(async (socket, next) => {
 			const cookie = socket.handshake.headers.cookie;
 			const fqdn = socket.handshake.headers['x-forwarded-host'] ?? socket.handshake.headers.host;
-			// How a node identified users before the login screen moved into this app: the proxy asked
-			// Authelia and passed the answer down. A session cookie outranks it, and where the proxy no
-			// longer asks, it is all that is left.
-			const fromHeaders = () => {
-				const isTrusted = trustedProxy.isFromTrustedProxy(socket.conn?.remoteAddress);
-				const remoteUser = isTrusted ? (socket.handshake.headers['remote-user'] ?? socket.handshake.auth?.['remote-user']) : undefined;
-				const remoteGroups = isTrusted ? (socket.handshake.headers['remote-groups'] ?? socket.handshake.auth?.['remote-groups']) : undefined;
+			// The account the fleet's proxy is acting for, which it states when it opens the connection.
+			// Only from the node itself: the proxy reaches these namespaces over loopback, and taking it
+			// from anywhere else would let a container this node runs name whoever it liked.
+			const vouched = () => {
+				if (!isLoopbackAddress(socket.conn?.remoteAddress)) {
+					return {};
+				}
+
+				const username = socket.handshake.auth?.['remote-user'];
+				const groups = socket.handshake.auth?.['remote-groups'];
 				return {
-					isAuthenticated: (remoteUser !== undefined),
-					isAdmin: (remoteUser !== undefined && remoteGroups?.split(',')?.includes('admins')) || false,
-					username: remoteUser
+					isAuthenticated: (username !== undefined),
+					isAdmin: (username !== undefined && groups?.split(',')?.includes(ADMIN_GROUP)) || false,
+					username
 				};
 			};
 
@@ -192,9 +196,17 @@ class BaseModule {
 					return undefined;
 				}
 
+				// A socket the proxy vouched for never came from a browser and carries no session for
+				// Authelia to weigh: the fleet authenticated whoever is acting, on its own side, and opened
+				// this connection on their behalf. Asking again would answer about nobody.
+				const proxied = vouched();
+				if (proxied.isAuthenticated) {
+					return { ...proxied, isLocal: true };
+				}
+
 				try {
 					const { isAllowed, identity } = await authelia.authorize({ fqdn, clientAddress: address, cookie });
-					return (identity ? { ...identity, isAuthenticated: true, isLocal: isAllowed } : { ...fromHeaders(), isLocal: isAllowed });
+					return (identity ? { ...identity, isAuthenticated: true, isLocal: isAllowed } : { isLocal: isAllowed });
 				} catch (error) {
 					// A node that cannot ask has nobody signed in rather than everybody, and only the
 					// premises to fall back on.
