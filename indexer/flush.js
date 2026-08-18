@@ -80,7 +80,28 @@ async function prepareIncrementalFlushContext(batch, snap, snapPath, mountpoint,
 	assertBatchStatHealthy(snap, snapPath, statFailures, statTotal);
 	const paths = resolveBatchPaths(batch, mountpoint);
 	const fileByPath = bulkLoadFileMap(stmt, perf, datasetId, paths.lookup);
-	return { statMap, ...paths, fileByPath };
+	return { statMap, ...paths, fileByPath, presentPaths: presentPathsIn(batch, statMap, paths) };
+}
+
+/**
+ * Paths this batch proves exist in the new snapshot, because we stat'ed them there.
+ *
+ * A path deleted and recreated between two snapshots produces BOTH a `removed`
+ * and an `added` event for the same name — the removal describes the old object,
+ * the addition the new one. `files` is keyed by path, so both land on one row and
+ * whichever event `zfs diff` happened to emit last decided the outcome. When the
+ * removal won, a file that is plainly there got marked deleted.
+ */
+function presentPathsIn(batch, statMap, paths) {
+	const present = new Set();
+	for (let i = 0; i < batch.length; i++) {
+		if (batch[i].changeType === 'removed' || !statMap.get(i)) {
+			continue;
+		}
+		// For a rename it is the destination that exists.
+		present.add(paths.relNewPaths[i] ?? paths.relPaths[i]);
+	}
+	return present;
 }
 
 async function statBatch(batch, mountpoint, snapPath) {
@@ -388,7 +409,7 @@ function reportSnapshotAnomalies(perf, orphans0, statFails0) {
 // ─── Batch flush: incremental only ─────────────────────────────────────────
 
 async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
+	const { statMap, relPaths, relNewPaths, fileByPath, presentPaths } = await prepareIncrementalFlushContext(
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
 
@@ -412,7 +433,9 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				}
 			} else if (c.changeType === 'removed') {
 				const fileRow = fileByPath.get(relPath);
-				if (fileRow) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
+				// Recreated in this same snapshot — the path is still there, so the
+				// removal applies to an object that a new one already replaced.
+				if (fileRow && !presentPaths.has(relPath)) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
 			} else if (c.changeType === 'modified') {
 				const st = statMap.get(i);
 				if (st) {
@@ -445,7 +468,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 // ─── Batch flush: unified incremental + diff ────────────────────────────────
 
 async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
-	const { statMap, relPaths, relNewPaths, fileByPath } = await prepareIncrementalFlushContext(
+	const { statMap, relPaths, relNewPaths, fileByPath, presentPaths } = await prepareIncrementalFlushContext(
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
 
@@ -478,8 +501,14 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 				if (fileRow) {
 					fileId = fileRow.id;
 					oldSize = fileRow.latestSize;
-					stmt.markDeleted.run(snap.id, fileId);
-					perf.sqlUpdates++;
+					// See presentPathsIn: a delete-and-recreate in one snapshot emits
+					// both events for the same path; the file is not gone.
+					if (!presentPaths.has(relPath)) {
+						stmt.markDeleted.run(snap.id, fileId);
+						perf.sqlUpdates++;
+					} else {
+						perf.recreatedPaths = (perf.recreatedPaths ?? 0) + 1;
+					}
 				}
 			} else if (c.changeType === 'modified') {
 				if (st) {
