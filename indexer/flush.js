@@ -222,7 +222,7 @@ function overwrittenPath(relNewPath, snapId) {
  * rename onto an empty directory, so anything there is stale index state, and
  * leaving it would collide with UNIQUE(dataset_id, path).
  */
-function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath) {
+function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath) {
 	const oldPrefix = likeEscape(relOldPath) + '/%';
 	const newPrefix = likeEscape(relNewPath) + '/%';
 
@@ -233,6 +233,40 @@ function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath) {
 	const { changes } = stmt.renameSubtree.run(relNewPath, relOldPath.length + 1, datasetId, oldPrefix);
 	perf.sqlUpdates++;
 	perf.renamedSubtreePaths = (perf.renamedSubtreePaths ?? 0) + Number(changes ?? 0);
+
+	syncMapForSubtreeRename(fileByPath, relOldPath, relNewPath);
+}
+
+/**
+ * Bring the batch's prefetched `fileByPath` map back in line with what
+ * `renameSubtree` just did to the database.
+ *
+ * The map is loaded once per batch. A directory rename deletes every row under
+ * the destination and repaths every row under the source, so without this a
+ * later event in the same batch can hand a deleted row id to insertVersion —
+ * and foreign keys are enforced (node:sqlite turns them on by default), so that
+ * aborts the entire batch and skips the snapshot.
+ */
+function syncMapForSubtreeRename(fileByPath, relOldPath, relNewPath) {
+	if (!fileByPath) {
+		return;
+	}
+	const oldPrefix = relOldPath + '/';
+	const newPrefix = relNewPath + '/';
+	const moved = [];
+	for (const key of fileByPath.keys()) {
+		if (key.startsWith(newPrefix)) {
+			fileByPath.delete(key);
+		} else if (key.startsWith(oldPrefix)) {
+			moved.push(key);
+		}
+	}
+	// Re-key in a second pass: inserting during Map iteration would revisit.
+	for (const key of moved) {
+		const row = fileByPath.get(key);
+		fileByPath.delete(key);
+		fileByPath.set(relNewPath + key.slice(relOldPath.length), row);
+	}
 }
 
 /**
@@ -246,7 +280,7 @@ function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath) {
  *
  * @returns {{ fileId: number | null, oldSize: number | null }}
  */
-function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim) {
+function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim, fileByPath) {
 	const type = typeFromStat(st);
 
 	if (oldFile === undefined) {
@@ -254,17 +288,21 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 		perf.sqlSelects++;
 	}
 
-	if (!oldFile) {
+	// Children can be indexed even when the directory's own row is missing.
+	const createAtNewPath = () => {
 		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
 		perf.sqlUpserts++;
-		// Children can be indexed even when the directory's own row is missing.
 		if (type === 'dir') {
-			renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath);
+			renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath);
 		}
 		if (fileRow) {
 			insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
 		}
 		return { fileId: fileRow?.id ?? null, oldSize: null };
+	};
+
+	if (!oldFile) {
+		return createAtNewPath();
 	}
 
 	const oldSize = oldFile.latestSize ?? null;
@@ -283,10 +321,16 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 		perf.overwrittenFiles = (perf.overwrittenFiles ?? 0) + 1;
 	}
 
-	stmt.updateFileRename.run(relNewPath, st.ino, type, snapId, oldFile.id, datasetId);
+	const renamed = stmt.updateFileRename.run(relNewPath, st.ino, type, snapId, oldFile.id, datasetId);
 	perf.sqlUpdates++;
+	// Zero rows updated means the prefetched row is gone — an earlier subtree
+	// rename in this batch removed it. Referencing its id now would trip the
+	// foreign key and take the whole batch down, so build a fresh row instead.
+	if (Number(renamed.changes ?? 0) === 0) {
+		return createAtNewPath();
+	}
 	if (type === 'dir') {
-		renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath);
+		renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath);
 	}
 	insertVersionFromStat(stmt, perf, oldFile.id, snapId, st);
 	return { fileId: oldFile.id, oldSize };
@@ -383,7 +427,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					const relNewPath = relNewPaths[i];
 					const oldFile = fileByPath.get(relPath) ?? null;
 					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
+					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim, fileByPath);
 					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, sizeFromStat(st));
 				}
 			}
@@ -455,7 +499,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					newSize = sizeFromStat(st);
 					const oldFile = fileByPath.get(relPath) ?? null;
 					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim);
+					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim, fileByPath);
 					fileId = rid;
 					oldSize = rold;
 					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, newSize);
@@ -464,7 +508,12 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 			if (fileId === null) {
 				perf.orphanedChanges++;
-				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, st === null, 'unified');
+				// `removed` events are never stat'ed (statBatch skips them), so a null
+				// stat there means "not attempted", not "failed" — reporting it as a
+				// stat failure sends you looking at the snapshot mount instead of at
+				// the missing files row that actually caused the drop.
+				const statFailed = c.changeType !== 'removed' && st === null;
+				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, statFailed, 'unified');
 				continue;
 			}
 
