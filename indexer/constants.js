@@ -5,11 +5,19 @@
 export const BATCH_SIZE = 4096;
 export const STAT_CONCURRENCY = 64;
 
-// If more than STAT_FAILURE_ABORT_RATIO of stat() calls in a batch of at least
-// STAT_FAILURE_MIN_SAMPLE entries return null, treat it as a wholesale
-// snapshot-mount failure and abort the snapshot rather than silently dropping
-// files. The threshold is high because some real changes are legitimately
-// ENOENT on the snapshot mount (file deleted between zfs diff and our stat) —
-// but losing >50% of a non-trivial batch is unambiguously a mount problem.
+// When stat() starts returning null wholesale, the ZFS snapshot automount almost
+// certainly didn't take, and continuing would silently drop files. Two rules,
+// because aborting is expensive — it restarts the entire run:
+//
+//   - every stat in a batch of at least STAT_FAILURE_TOTAL_SAMPLE failed. A clean
+//     sweep needs little evidence; nothing else looks like that.
+//   - at least STAT_FAILURE_ABORT_RATIO of a batch of at least
+//     STAT_FAILURE_MIN_SAMPLE failed.
+//
+// MIN_SAMPLE is deliberately large. Individual ENOENTs are legitimate (dangling
+// symlinks, objects on the ZFS delete queue), and a batch that happens to contain
+// only a handful of stattable entries used to trip the ratio on ~17 failures and
+// take the whole run down with it.
 export const STAT_FAILURE_ABORT_RATIO = 0.5;
-export const STAT_FAILURE_MIN_SAMPLE = 32;
+export const STAT_FAILURE_MIN_SAMPLE = 256;
+export const STAT_FAILURE_TOTAL_SAMPLE = 32;

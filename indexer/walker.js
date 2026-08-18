@@ -1,7 +1,10 @@
-import { opendir, stat } from 'fs/promises';
+// lstat, not stat: following a symlink records the target's size and inode, and a
+// dangling link throws — dropping the entry and inflating the stat-failure count
+// that aborts the snapshot.
+import { opendir, lstat } from 'fs/promises';
 import { isNoisePath } from './scope.js';
-import { BATCH_SIZE, STAT_CONCURRENCY, STAT_FAILURE_ABORT_RATIO, STAT_FAILURE_MIN_SAMPLE } from './constants.js';
-import { primeMountReadable } from './snapshot_util.js';
+import { BATCH_SIZE, STAT_CONCURRENCY } from './constants.js';
+import { primeMountReadable, isWholesaleStatFailure } from './snapshot_util.js';
 
 function makeMountError(snapshotPath, detail) {
 	const e = new Error(`Snapshot mount unreadable for ${snapshotPath}: ${detail}`);
@@ -45,7 +48,7 @@ async function walkSnapshot(snapshotPath, onBatch) {
 		for (let i = 0; i < entries.length; i += STAT_CONCURRENCY) {
 			const slice = entries.slice(i, i + STAT_CONCURRENCY);
 			const stats = await Promise.all(slice.map(e =>
-				stat(e.fullPath).catch(() => {
+				lstat(e.fullPath).catch(() => {
 					localFailures++;
 					statFailures++;
 					return null;
@@ -65,7 +68,7 @@ async function walkSnapshot(snapshotPath, onBatch) {
 		const chunk = pending.splice(0, pending.length);
 
 		const { results, localFailures } = await statBatch(chunk);
-		if (chunk.length >= STAT_FAILURE_MIN_SAMPLE && localFailures / chunk.length >= STAT_FAILURE_ABORT_RATIO) {
+		if (isWholesaleStatFailure(localFailures, chunk.length)) {
 			throw makeMountError(
 				snapshotPath,
 				`${localFailures}/${chunk.length} stat() calls failed mid-crawl (${(localFailures / chunk.length * 100).toFixed(0)}%). Mount likely went away.`

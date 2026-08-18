@@ -1,11 +1,15 @@
-import { stat } from 'fs/promises';
+import { lstat } from 'fs/promises';
+import { STAT_FAILURE_ABORT_RATIO, STAT_FAILURE_MIN_SAMPLE, STAT_FAILURE_TOTAL_SAMPLE } from './constants.js';
 
 // Low-level snapshot-mount primitives shared by the walker, the incremental
 // flush paths, and the orchestrator. Pure helpers with no DB dependency.
 
+// lstat, not stat: `typeFromStat` can only ever report 'link' for an unfollowed
+// stat, and following would record the target's size and inode instead of the
+// link's — disagreeing with the walker, which types from the dirent.
 export async function safeStatAsync(path) {
 	try {
-		return await stat(path);
+		return await lstat(path);
 	} catch {
 		return null;
 	}
@@ -27,6 +31,17 @@ export function makeSnapshotStatError(snap, snapPath, failures, total) {
 
 export function isSnapshotStatFailure(e) {
 	return Boolean(e && e.code === 'SNAPSHOT_STAT_FAILED');
+}
+
+/** Shared by the walker and the incremental flush so the two can't drift. */
+export function isWholesaleStatFailure(failures, total) {
+	if (!total || !failures) {
+		return false;
+	}
+	if (failures === total && total >= STAT_FAILURE_TOTAL_SAMPLE) {
+		return true;
+	}
+	return total >= STAT_FAILURE_MIN_SAMPLE && failures / total >= STAT_FAILURE_ABORT_RATIO;
 }
 
 export function resolveRelPath(path, mountpoint) {
