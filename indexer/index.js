@@ -46,6 +46,10 @@ function restartIndexerFromBeginning(message) {
  */
 function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
 	let recoverable = zfs.isZfsDiffFailure(e) || isSnapshotStatFailure(e);
+	// Retention taking a snapshot away is routine on a node that snapshots hourly
+	// and indexes for half an hour. Counting it as a failed snapshot put it in the
+	// failures list and the "not an error" line at the same time.
+	let wasVanished = false;
 	const transition = prevSnap ? `${prevSnap.name} → ${snap.name}` : snap.name;
 
 	// Snapshot retention running against a long pass is the common cause of a
@@ -59,7 +63,9 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 		if (vanished) {
 			console.warn(`  ⚠  ${vanished} no longer exists — retention removed it mid-run; skipping this pair rather than restarting.`);
 			perf.vanishedSnapshots = (perf.vanishedSnapshots ?? 0) + 1;
+			(perf.vanishedList ??= []).push({ fullName: vanished, datasetId });
 			recoverable = false;
+			wasVanished = true;
 		}
 	}
 	if (zfs.isZfsDiffFailure(e)) {
@@ -72,7 +78,7 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 			console.warn(e.stack);
 		}
 	}
-	if (perf && Array.isArray(perf.failedSnapshots)) {
+	if (!wasVanished && perf && Array.isArray(perf.failedSnapshots)) {
 		perf.failedSnapshots.push({
 			name: snap.full_name ?? snap.name,
 			reason: e.code ?? 'UNEXPECTED',
@@ -223,17 +229,7 @@ function pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullN
 			}
 			const survivor = dsSnaps.slice(i + 1).find(s => liveFullNames.has(s.full_name)) ?? null;
 			console.log(`  🗑  Pruning: ${snap.full_name}${survivor ? ` (versions re-anchored to ${survivor.name})` : ''}`);
-			database.transaction(db, () => {
-				stmt.deleteChangesBySnapshot.run(snap.id);
-				if (survivor) {
-					stmt.reanchorVersions.run(survivor.id, snap.id);
-				}
-				stmt.deleteVersionsBySnapshot.run(snap.id);
-				stmt.clearFirstSeen.run(snap.id);
-				stmt.clearLastSeen.run(snap.id);
-				stmt.clearDeletedAt.run(snap.id);
-				stmt.deleteSnapshot.run(snap.id);
-			});
+			pruneSnapshotRow(db, stmt, snap, survivor);
 			pruned++;
 		}
 	}
@@ -279,6 +275,50 @@ function purgeNoiseRows(db, stmt, filteredDatasets, datasetIds) {
 		flush();
 	}
 	return removed;
+}
+
+/** Drop one snapshot row, moving its versions onto `survivor` first (see above). */
+function pruneSnapshotRow(db, stmt, snap, survivor) {
+	database.transaction(db, () => {
+		stmt.deleteChangesBySnapshot.run(snap.id);
+		if (survivor) {
+			stmt.reanchorVersions.run(survivor.id, snap.id);
+		}
+		stmt.deleteVersionsBySnapshot.run(snap.id);
+		stmt.clearFirstSeen.run(snap.id);
+		stmt.clearLastSeen.run(snap.id);
+		stmt.clearDeletedAt.run(snap.id);
+		stmt.deleteSnapshot.run(snap.id);
+	});
+}
+
+/**
+ * Remove rows for snapshots retention destroyed while the pass was running.
+ *
+ * Without this they linger as unindexed rows until the next pass rediscovers
+ * them, so a completed run still reports "233 snapshots, 231 indexed" — the
+ * dashboard reads that as work outstanding when there is none.
+ */
+function pruneVanishedSnapshots(db, stmt, perf) {
+	const pending = perf.vanishedList ?? [];
+	let pruned = 0;
+	// Survivors come from the vanished set, not from re-probing ZFS: a probe that
+	// fails for any reason would report "no survivor", and no survivor means the
+	// versions get deleted instead of re-anchored.
+	const vanishedNames = new Set(pending.map(p => p.fullName));
+	for (const { fullName, datasetId } of pending) {
+		const dsSnaps = stmt.getSnapshotsForDataset.all(datasetId);
+		const idx = dsSnaps.findIndex(s => s.full_name === fullName);
+		if (idx === -1) {
+			continue;
+		}
+		const survivor = dsSnaps.slice(idx + 1).find(s => !vanishedNames.has(s.full_name)) ?? null;
+		console.log(`  🗑  Removing ${fullName} (destroyed mid-run)${survivor ? ` — versions re-anchored to ${survivor.name}` : ''}`);
+		pruneSnapshotRow(db, stmt, dsSnaps[idx], survivor);
+		pruned++;
+	}
+	perf.vanishedList = [];
+	return pruned;
 }
 
 /**
@@ -871,6 +911,17 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			}
 		}
 
+		if (pruneVanishedSnapshots(db, stmt, perf) > 0) {
+			database.transaction(db, () => {
+				for (const { dsId } of datasetWork) {
+					stmt.repairLastSeenNull.run(dsId);
+					stmt.repairFirstSeenNull.run(dsId);
+				}
+				stmt.deleteChangesForOrphanedFiles.run();
+				stmt.deleteOrphanedFiles.run();
+			});
+		}
+
 		if (inBulkMode) {
 			database.disableBulkMode(db);
 			inBulkMode = false;
@@ -1127,4 +1178,4 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 
 // Exported for tests: these two carry the snapshot-retention invariants and are
 // the only parts of a pass that can be exercised without a live ZFS pool.
-export { run, pruneDeletedSnapshots, forceBaselineRecrawl, prepareIndexerStatements };
+export { run, pruneDeletedSnapshots, pruneVanishedSnapshots, forceBaselineRecrawl, prepareIndexerStatements, handleSnapshotError };

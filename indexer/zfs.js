@@ -364,8 +364,11 @@ function snapshotExists(fullName) {
 	try {
 		execaSync('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', fullName]);
 		return true;
-	} catch {
-		return false;
+	} catch (e) {
+		// Only a clean "does not exist" answers the question. If zfs could not run
+		// at all, assume the snapshot is still there — reporting it as vanished
+		// would make us drop a snapshot that may be perfectly healthy.
+		return e?.exitCode === undefined;
 	}
 }
 
