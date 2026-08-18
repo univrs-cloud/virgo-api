@@ -5,6 +5,7 @@ import * as walker from './walker.js';
 import * as utils from './utils.js';
 import { execaSync } from 'execa';
 import { BATCH_SIZE } from './constants.js';
+import { isNoisePath, NOISE_SCOPE_VERSION } from './scope.js';
 import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
 import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies } from './flush.js';
 import { logBatchProgress, endProgressLine } from './progress.js';
@@ -69,10 +70,20 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 	} catch (cleanupErr) {
 		console.warn(`  ⚠  Cleanup also failed: ${cleanupErr.message}`);
 	}
-	if (recoverable) {
+	// A restart only helps when the cause was a race (retention, a lagging
+	// automount). If the same snapshot fails again the cause is deterministic, and
+	// restarting just burns whole passes until the attempt budget runs out — so
+	// skip it instead and let the rest of the run finish.
+	const key = snap.full_name ?? snap.name;
+	const alreadyRestarted = perf?.restartedSnapshots?.has(key);
+	if (recoverable && !alreadyRestarted) {
+		perf?.restartedSnapshots?.add(key);
 		restartIndexerFromBeginning(
 			`${e.code} on ${snap.name}; restarting from beginning so retention/deleted snapshots are re-discovered.`
 		);
+	}
+	if (recoverable) {
+		console.warn(`  ⚠  ${snap.name} failed again after a restart; skipping it for this run.`);
 	}
 	const skip = new Error(`Skipping snapshot ${snap.full_name ?? snap.name}: ${e.message}`);
 	skip.code = 'SNAPSHOT_SKIPPED';
@@ -113,23 +124,51 @@ function prepareDatasetPruneStatements(db) {
 		deleteFilesForDataset: db.prepare(`DELETE FROM files WHERE dataset_id = ?`),
 		deleteSnapshotsForDataset: db.prepare(`DELETE FROM snapshots WHERE dataset_id = ?`),
 		deleteDatasetById: db.prepare(`DELETE FROM datasets WHERE id = ?`),
+		getMeta: db.prepare(`SELECT value FROM meta WHERE key = ?`),
+		setMeta: db.prepare(`
+			INSERT INTO meta(key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		`),
+		deleteMeta: db.prepare(`DELETE FROM meta WHERE key = ?`),
 	};
 }
 
+// How many consecutive runs a dataset may be missing from `zfs list` before its
+// index is dropped. An exported pool, an unmounted dataset or a transient zfs
+// hiccup should not cost a full re-crawl; a real destroy still clears within a
+// few hours on the hourly schedule.
+const MISSING_RUNS_BEFORE_DROP = 3;
+
 /**
  * Remove SQLite rows for datasets that are no longer indexed:
- * - name not under current Configuration `indexer` list, or
- * - still in scope but not returned by ZFS this run (dataset destroyed / renamed away).
+ * - name not under current Configuration `indexer` list — dropped immediately,
+ *   because that is a deliberate user action, or
+ * - still in scope but not returned by ZFS for several consecutive runs.
  */
 function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 	const rows = db.prepare('SELECT id, name FROM datasets').all();
 	for (const { id, name } of rows) {
 		const inScope = datasetInIncludeScope(name, includeDatasets);
 		const onZfs = liveNames.has(name);
+		const missingKey = `missing_runs:${name}`;
+
 		if (inScope && onZfs) {
+			stmt.deleteMeta.run(missingKey);
 			continue;
 		}
-		const reason = !inScope ? 'removed from indexer configuration' : 'no longer present on ZFS';
+
+		if (inScope && !onZfs) {
+			const misses = Number(stmt.getMeta.get(missingKey)?.value ?? 0) + 1;
+			if (misses < MISSING_RUNS_BEFORE_DROP) {
+				console.log(`  ⏳ ${name} not reported by ZFS (${misses}/${MISSING_RUNS_BEFORE_DROP}); keeping its index for now.`);
+				database.transaction(db, () => {
+					stmt.setMeta.run(missingKey, String(misses));
+				});
+				continue;
+			}
+		}
+
+		const reason = !inScope ? 'removed from indexer configuration' : `absent from ZFS for ${MISSING_RUNS_BEFORE_DROP} runs`;
 		console.log(`  🗑  Dropping index data for ${name} (${reason})`);
 		database.transaction(db, () => {
 			stmt.deleteChangesForDataset.run(id);
@@ -137,7 +176,114 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 			stmt.deleteFilesForDataset.run(id);
 			stmt.deleteSnapshotsForDataset.run(id);
 			stmt.deleteDatasetById.run(id);
+			stmt.deleteMeta.run(missingKey);
 		});
+	}
+}
+
+/**
+ * Drop snapshots ZFS no longer reports.
+ *
+ * A file that hasn't changed since the baseline crawl has exactly one
+ * `file_versions` row — the baseline one. Deleting a pruned snapshot's versions
+ * outright would orphan every such file, `deleteOrphanedFiles` would remove it,
+ * and nothing would rebuild it: only a dataset's *first* snapshot takes the
+ * full-crawl path. Retention expiring the baseline would silently empty the
+ * index for good.
+ *
+ * So re-anchor onto the next surviving snapshot instead — a file live at the
+ * pruned snapshot was still live there. Files deleted in between are left to
+ * orphan out: their last remaining evidence is going away, so there is nothing
+ * left to recover and nothing worth listing.
+ */
+function pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullNames) {
+	let pruned = 0;
+	for (const d of filteredDatasets) {
+		const dsId = datasetIds[d.name];
+		const dsSnaps = stmt.getSnapshotsForDataset.all(dsId);
+		for (let i = 0; i < dsSnaps.length; i++) {
+			const snap = dsSnaps[i];
+			if (liveFullNames.has(snap.full_name)) {
+				continue;
+			}
+			const survivor = dsSnaps.slice(i + 1).find(s => liveFullNames.has(s.full_name)) ?? null;
+			console.log(`  🗑  Pruning: ${snap.full_name}${survivor ? ` (versions re-anchored to ${survivor.name})` : ''}`);
+			database.transaction(db, () => {
+				stmt.deleteChangesBySnapshot.run(snap.id);
+				if (survivor) {
+					stmt.reanchorVersions.run(survivor.id, snap.id);
+				}
+				stmt.deleteVersionsBySnapshot.run(snap.id);
+				stmt.clearFirstSeen.run(snap.id);
+				stmt.clearLastSeen.run(snap.id);
+				stmt.clearDeletedAt.run(snap.id);
+				stmt.deleteSnapshot.run(snap.id);
+			});
+			pruned++;
+		}
+	}
+	return pruned;
+}
+
+/**
+ * Delete rows for paths the current noise patterns exclude.
+ *
+ * The walker and the diff filter only stop noise from being *added*; anything
+ * indexed under an older, narrower pattern stays forever. Runs only when the
+ * stored NOISE_SCOPE_VERSION differs, because it is a full scan of `files`.
+ *
+ * Matching happens in JS rather than SQL: the patterns allow a subtree at any
+ * depth, which no single LIKE expresses without over-matching real user paths.
+ */
+function purgeNoiseRows(db, stmt, filteredDatasets, datasetIds) {
+	let removed = 0;
+	for (const d of filteredDatasets) {
+		const dsId = datasetIds[d.name];
+		let batch = [];
+		const flush = () => {
+			if (!batch.length) {
+				return;
+			}
+			const list = JSON.stringify(batch);
+			database.transaction(db, () => {
+				stmt.deleteChangesByFileIds.run(list);
+				stmt.deleteVersionsByFileIds.run(list);
+				stmt.deleteFilesByIds.run(list);
+			});
+			removed += batch.length;
+			batch = [];
+		};
+		for (const row of stmt.iterateFilePaths.iterate(dsId)) {
+			if (isNoisePath(row.path)) {
+				batch.push(row.id);
+				if (batch.length >= BATCH_SIZE) {
+					flush();
+				}
+			}
+		}
+		flush();
+	}
+	return removed;
+}
+
+/**
+ * A dataset with snapshots but no files can only be refilled by a full crawl,
+ * and that path is reachable only for its first snapshot — so without this the
+ * index could settle into a permanently empty state. Clearing `indexed_at` on
+ * the oldest survivor makes the next pass rebuild the baseline.
+ */
+function forceBaselineRecrawl(db, stmt, filteredDatasets, datasetIds) {
+	for (const d of filteredDatasets) {
+		const dsId = datasetIds[d.name];
+		if (stmt.datasetHasFiles.get(dsId)) {
+			continue;
+		}
+		const oldest = stmt.oldestSnapshotForDataset.get(dsId);
+		if (!oldest || !oldest.indexed_at) {
+			continue;
+		}
+		console.log(`  ♻  ${d.name} has snapshots but no indexed files; forcing a fresh baseline crawl of ${oldest.name}.`);
+		stmt.resetSnapshotIndexState.run(oldest.id);
 	}
 }
 
@@ -150,7 +296,38 @@ function persistLastRunMeta(db, stmt, perf, restartCount) {
 		stmt.setMeta.run('last_run_failed_snapshots', JSON.stringify(perf.failedSnapshots));
 		stmt.setMeta.run('last_run_orphan_samples', JSON.stringify(perf.orphanSamplesAll ?? []));
 		stmt.setMeta.run('last_run_backfilled_files', String(perf.backfilledFiles ?? 0));
+		stmt.setMeta.run('last_run_renamed_subtree_paths', String(perf.renamedSubtreePaths ?? 0));
+		stmt.setMeta.run('last_run_overwritten_files', String(perf.overwrittenFiles ?? 0));
 	});
+}
+
+/**
+ * A run that exhausts its restart budget never reaches finishIndexerRun, so
+ * without this the dashboard would keep showing the previous run as the latest —
+ * healthy-looking, hours after the indexer gave up.
+ */
+function recordFailedSession(session, restartCount) {
+	const perf = session.lastPerf;
+	if (!perf) {
+		return;
+	}
+	const db = database.open();
+	if (!db) {
+		return;
+	}
+	try {
+		const stmt = {
+			setMeta: db.prepare(`
+				INSERT INTO meta(key, value) VALUES (?, ?)
+				ON CONFLICT(key) DO UPDATE SET value = excluded.value
+			`),
+		};
+		persistLastRunMeta(db, stmt, perf, restartCount);
+	} catch (e) {
+		console.warn(`  ⚠  Could not record the failed run: ${e.message}`);
+	} finally {
+		db.close();
+	}
 }
 
 function finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, message) {
@@ -171,13 +348,19 @@ async function processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dataset
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Returns the configured dataset roots, or `null` if the key is present but not
+ * an array. An empty result means "index nothing" and clears the database, so a
+ * malformed value must be distinguishable — otherwise a config typo silently
+ * costs a full re-crawl.
+ */
 function normalizeIndexerDatasets(configuration) {
 	const raw = configuration?.indexer;
 	if (raw === null || raw === undefined) {
 		return [];
 	}
 	if (!Array.isArray(raw)) {
-		return [];
+		return null;
 	}
 	return raw.map(s => String(s).trim()).filter(Boolean);
 }
@@ -199,9 +382,17 @@ async function run(_opts = {}) {
 	const configuration = await DataService.getConfiguration();
 	const includeDatasets = normalizeIndexerDatasets(configuration);
 
+	if (includeDatasets === null) {
+		console.error(
+			'Indexer: Configuration key `indexer` is present but not a JSON array (virgo.db). Refusing to run — fix the value rather than lose the index to a typo.'
+		);
+		process.exitCode = 1;
+		return;
+	}
+
 	if (!includeDatasets.length) {
 		console.log(
-			'Indexer: Configuration key `indexer` is missing, empty, or not a JSON array (virgo.db); clearing the index database.'
+			'Indexer: Configuration key `indexer` is missing or empty (virgo.db); clearing the index database.'
 		);
 		const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
 		try {
@@ -237,13 +428,16 @@ async function run(_opts = {}) {
 		const maxRestarts = Number.parseInt(process.env.INDEXER_MAX_DIFF_RESTARTS ?? '10', 10);
 		const maxAttempts = Math.max(1, maxRestarts + 1);
 		const sessionWallT0 = Date.now();
+		// Survives restarts: which snapshots have already cost us a full pass, and
+		// the last pass's counters so a fatal exit still records what happened.
+		const session = { restartedSnapshots: new Set(), lastPerf: null };
 
 		for (let attempt = 0; attempt < maxAttempts; attempt++) {
 			if (attempt > 0) {
 				console.log(`\n↻ Restarting indexer from the beginning (attempt ${attempt + 1}/${maxAttempts})…\n`);
 			}
 			try {
-				await runIndexerPass(includeDatasets, sessionWallT0, attempt, lockPath);
+				await runIndexerPass(includeDatasets, sessionWallT0, attempt, lockPath, session);
 				return;
 			} catch (e) {
 				if (e.code !== 'INDEXER_RESTART_FROM_BEGINNING') {
@@ -251,6 +445,7 @@ async function run(_opts = {}) {
 				}
 				if (attempt + 1 >= maxAttempts) {
 					console.error(`Fatal: zfs diff still failing after ${maxAttempts} full restarts.`);
+					recordFailedSession(session, attempt);
 					process.exitCode = 1;
 					throw e;
 				}
@@ -261,36 +456,12 @@ async function run(_opts = {}) {
 	}
 }
 
-async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCount = 0, lockPath = null) {
-	const pool = includeDatasets[0].split('/')[0];
-
-	const db = database.open();
-
-	const perf = {
-		t0: Date.now(), snapsCrawled: 0, snapsIncremental: 0, snapsSkipped: 0,
-		diffsDone: 0, filesCrawled: 0, crawlMs: 0, diffMs: 0,
-		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
-		diffChanges: 0, statMs: 0,
-		statFailures: 0, orphanedChanges: 0,
-		// Count of `files` rows created on the fly because `zfs diff` reported a
-		// change for a path we hadn't indexed yet. A small steady number is fine
-		// (logs/caches appearing post-baseline); a sudden spike hints at gaps in
-		// the walker output.
-		backfilledFiles: 0,
-		// Per-snapshot samples reset by reportSnapshotAnomalies; per-run samples
-		// accumulate across the entire pass and get persisted to meta so the
-		// dashboard + CLI summary can show actual offending paths after a run.
-		orphanSamples: [],
-		orphanSamplesAll: [],
-		failedSnapshots: [],
-	};
-
-	// ── Prepared statements ──
-	const stmt = {
+/** Every prepared statement a pass uses. Split out so tests can drive the real ones. */
+function prepareIndexerStatements(db) {
+	return {
 		upsertDataset: db.prepare(`INSERT INTO datasets(name, pool, mountpoint, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET mountpoint=excluded.mountpoint RETURNING id`),
 		upsertSnapshot: db.prepare(`INSERT INTO snapshots(dataset_id, name, full_name, created_at, used_bytes, referenced_bytes) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(full_name) DO UPDATE SET used_bytes=excluded.used_bytes, referenced_bytes=excluded.referenced_bytes RETURNING id`),
-		getSnapshotByFullName: db.prepare(`SELECT id FROM snapshots WHERE full_name=?`),
-		getSnapshotsForDataset: db.prepare(`SELECT id, name, full_name, created_at, indexed_at, diff_done FROM snapshots WHERE dataset_id=? ORDER BY created_at ASC`),
+		getSnapshotsForDataset: db.prepare(`SELECT id, name, full_name, created_at, indexed_at, diff_done FROM snapshots WHERE dataset_id=? ORDER BY created_at ASC, id ASC`),
 		markIndexed: db.prepare(`UPDATE snapshots SET indexed_at=? WHERE id=?`),
 		markDiffDone: db.prepare(`UPDATE snapshots SET diff_done=1 WHERE id=?`),
 		upsertFile: db.prepare(`INSERT INTO files(dataset_id, path, inode, type, first_seen_snap_id, last_seen_snap_id) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(dataset_id, path) DO UPDATE SET inode=excluded.inode, type=excluded.type, last_seen_snap_id=excluded.last_seen_snap_id, deleted_at_snap_id=NULL RETURNING id`),
@@ -320,10 +491,25 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			UPDATE files SET path = ?, inode = ?, type = ?, last_seen_snap_id = ?, deleted_at_snap_id = NULL
 			WHERE id = ? AND dataset_id = ?
 		`),
-		deleteChangesByFileId: db.prepare(`DELETE FROM changes WHERE file_id = ?`),
-		deleteVersionsByFileId: db.prepare(`DELETE FROM file_versions WHERE file_id = ?`),
-		deleteFileById: db.prepare(`DELETE FROM files WHERE id = ?`),
-		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`),
+		// `zfs diff` emits a single R line for a renamed directory — the children are
+		// untouched objects and produce no lines at all — so the subtree has to be
+		// rewritten by hand or every descendant path goes stale for good.
+		renameSubtree: db.prepare(`
+			UPDATE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\'
+		`),
+		deleteChangesUnderPath: db.prepare(`
+			DELETE FROM changes WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\')
+		`),
+		deleteVersionsUnderPath: db.prepare(`
+			DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\')
+		`),
+		deleteFilesUnderPath: db.prepare(`
+			DELETE FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\'
+		`),
+		tombstoneOverwrittenFile: db.prepare(`
+			UPDATE files SET path = ?1, deleted_at_snap_id = ?2 WHERE id = ?3
+		`),
+		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes, changed_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
 		deleteChangesBySnapshot: db.prepare(`DELETE FROM changes WHERE snapshot_id = ?`),
 		deleteVersionsBySnapshot: db.prepare(`DELETE FROM file_versions WHERE snapshot_id = ?`),
@@ -331,6 +517,24 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		clearLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = NULL WHERE last_seen_snap_id = ?`),
 		clearDeletedAt: db.prepare(`UPDATE files SET deleted_at_snap_id = NULL WHERE deleted_at_snap_id = ?`),
 		deleteSnapshot: db.prepare(`DELETE FROM snapshots WHERE id = ?`),
+		// OR IGNORE skips rows that collide with a version the file already has at
+		// the survivor — those are redundant; deleteVersionsBySnapshot sweeps them.
+		reanchorVersions: db.prepare(`
+			UPDATE OR IGNORE file_versions SET snapshot_id = ?1
+			WHERE snapshot_id = ?2
+			AND EXISTS (
+				SELECT 1 FROM files f WHERE f.id = file_versions.file_id AND f.deleted_at_snap_id IS NULL
+			)
+		`),
+		datasetHasFiles: db.prepare(`SELECT 1 AS present FROM files WHERE dataset_id = ? LIMIT 1`),
+		iterateFilePaths: db.prepare(`SELECT id, path FROM files WHERE dataset_id = ?`),
+		deleteChangesByFileIds: db.prepare(`DELETE FROM changes WHERE file_id IN (SELECT value FROM json_each(?1))`),
+		deleteVersionsByFileIds: db.prepare(`DELETE FROM file_versions WHERE file_id IN (SELECT value FROM json_each(?1))`),
+		deleteFilesByIds: db.prepare(`DELETE FROM files WHERE id IN (SELECT value FROM json_each(?1))`),
+		oldestSnapshotForDataset: db.prepare(`
+			SELECT id, name, indexed_at FROM snapshots WHERE dataset_id = ? ORDER BY created_at ASC, id ASC LIMIT 1
+		`),
+		resetSnapshotIndexState: db.prepare(`UPDATE snapshots SET indexed_at = NULL, diff_done = 0 WHERE id = ?`),
 		...prepareDatasetPruneStatements(db),
 		deleteChangesForOrphanedFiles: db.prepare(`
 			DELETE FROM changes WHERE file_id IN (
@@ -360,11 +564,50 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			AND first_seen_snap_id IS NULL
 			AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
 		`),
-		setMeta: db.prepare(`
-			INSERT INTO meta(key, value) VALUES (?, ?)
-			ON CONFLICT(key) DO UPDATE SET value = excluded.value
-		`),
 	};
+}
+
+async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCount = 0, lockPath = null, session = null) {
+	// Every distinct pool the configured roots live in. Discovering only the first
+	// one left datasets on any other pool invisible — never indexed, and dropped
+	// from the index as "no longer present on ZFS" on every pass.
+	const pools = [...new Set(includeDatasets.map(name => name.split('/')[0]))];
+
+	const db = database.open();
+
+	const perf = {
+		t0: Date.now(), snapsCrawled: 0, snapsIncremental: 0, snapsSkipped: 0,
+		diffsDone: 0, filesCrawled: 0, crawlMs: 0, diffMs: 0,
+		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
+		diffChanges: 0, statMs: 0,
+		statFailures: 0, orphanedChanges: 0,
+		// Count of `files` rows created on the fly because `zfs diff` reported a
+		// change for a path we hadn't indexed yet. A small steady number is fine
+		// (logs/caches appearing post-baseline); a sudden spike hints at gaps in
+		// the walker output.
+		backfilledFiles: 0,
+		// Descendant paths rewritten because zfs diff reported a directory rename;
+		// the children produce no diff lines of their own.
+		renamedSubtreePaths: 0,
+		purgedNoiseRows: 0,
+		// Files destroyed by a rename landing on top of them; tombstoned, not dropped.
+		overwrittenFiles: 0,
+		crawlSkippedDirs: 0,
+		// Per-snapshot samples reset by reportSnapshotAnomalies; per-run samples
+		// accumulate across the entire pass and get persisted to meta so the
+		// dashboard + CLI summary can show actual offending paths after a run.
+		orphanSamples: [],
+		orphanSamplesAll: [],
+		failedSnapshots: [],
+		// Shared across restarts so a snapshot that fails deterministically only
+		// costs one pass. See handleSnapshotError.
+		restartedSnapshots: session?.restartedSnapshots ?? new Set(),
+	};
+	if (session) {
+		session.lastPerf = perf;
+	}
+
+	const stmt = prepareIndexerStatements(db);
 
 	let inBulkMode = false;
 	const onSignal = (sig) => {
@@ -396,10 +639,17 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 	try {
 		console.log('🔍 Discovering ZFS datasets and snapshots...');
-		console.log(`   Pool: ${pool}`);
+		console.log(`   Pool${pools.length === 1 ? '' : 's'}: ${pools.join(', ')}`);
 		console.log(`   Include: ${includeDatasets.join(', ')}`);
 
-		const { datasets, snapshots } = zfs.discoverAll({ pool });
+		const datasets = [];
+		const snapshots = [];
+		for (const pool of pools) {
+			const found = zfs.discoverAll({ pool });
+			datasets.push(...found.datasets);
+			snapshots.push(...found.snapshots);
+		}
+		snapshots.sort((a, b) => a.created_at - b.created_at);
 		// Pool-wide discovery; keep only configured roots and their descendants.
 		const filteredDatasets = datasets.filter(d => datasetInIncludeScope(d.name, includeDatasets));
 		const liveDatasetNames = new Set(filteredDatasets.map(d => d.name));
@@ -418,49 +668,47 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			console.log(`  Dataset: ${d.name} (id=${row.id})`);
 		}
 
-		const snapshotIds = {};
 		for (const s of snapshots) {
 			const dsId = datasetIds[s.dataset_name];
 			if (!dsId) {
 				continue;
 			}
-			const row = stmt.upsertSnapshot.get(dsId, s.name, s.full_name, s.created_at, s.used_bytes, s.referenced_bytes);
-			if (row) { snapshotIds[s.full_name] = row.id; }
-			else {
-				const existing = stmt.getSnapshotByFullName.get(s.full_name);
-				if (existing) {
-					snapshotIds[s.full_name] = existing.id;
-				}
-			}
+			stmt.upsertSnapshot.run(dsId, s.name, s.full_name, s.created_at, s.used_bytes, s.referenced_bytes);
 		}
 
 		// Prune deleted snapshots
 		const liveFullNames = new Set(snapshots.map(s => s.full_name));
-		for (const d of filteredDatasets) {
-			const dsId = datasetIds[d.name];
-			for (const snap of stmt.getSnapshotsForDataset.all(dsId)) {
-				if (!liveFullNames.has(snap.full_name)) {
-					console.log(`  🗑  Pruning: ${snap.full_name}`);
-					database.transaction(db, () => {
-						stmt.deleteChangesBySnapshot.run(snap.id);
-						stmt.deleteVersionsBySnapshot.run(snap.id);
-						stmt.clearFirstSeen.run(snap.id);
-						stmt.clearLastSeen.run(snap.id);
-						stmt.clearDeletedAt.run(snap.id);
-						stmt.deleteSnapshot.run(snap.id);
-					});
+		const prunedSnapshots = pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullNames);
+		// Two full scans of `files` with a NOT EXISTS probe each. Only pruning can
+		// orphan a row, so a steady-state pass has nothing to find.
+		if (prunedSnapshots > 0) {
+			database.transaction(db, () => {
+				for (const d of filteredDatasets) {
+					const dsId = datasetIds[d.name];
+					stmt.repairLastSeenNull.run(dsId);
+					stmt.repairFirstSeenNull.run(dsId);
 				}
+				stmt.deleteChangesForOrphanedFiles.run();
+				stmt.deleteOrphanedFiles.run();
+			});
+			database.vacuumIfBloated(db);
+		}
+		forceBaselineRecrawl(db, stmt, filteredDatasets, datasetIds);
+
+		const storedScope = Number(stmt.getMeta.get('noise_scope_version')?.value ?? 0);
+		let purgedNoise = 0;
+		if (storedScope !== NOISE_SCOPE_VERSION) {
+			console.log(`  🧹 Noise patterns changed (v${storedScope} → v${NOISE_SCOPE_VERSION}); sweeping rows they now exclude…`);
+			purgedNoise = purgeNoiseRows(db, stmt, filteredDatasets, datasetIds);
+			perf.purgedNoiseRows = purgedNoise;
+			console.log(`     Removed ${purgedNoise.toLocaleString()} row(s).`);
+			database.transaction(db, () => {
+				stmt.setMeta.run('noise_scope_version', String(NOISE_SCOPE_VERSION));
+			});
+			if (purgedNoise > 0) {
+				database.vacuumIfBloated(db);
 			}
 		}
-		database.transaction(db, () => {
-			for (const d of filteredDatasets) {
-				const dsId = datasetIds[d.name];
-				stmt.repairLastSeenNull.run(dsId);
-				stmt.repairFirstSeenNull.run(dsId);
-			}
-			stmt.deleteChangesForOrphanedFiles.run();
-			stmt.deleteOrphanedFiles.run();
-		});
 
 		// Precompute each dataset's snapshot list so we can decide whether this
 		// pass will do any full crawl before touching FTS trigger state.
@@ -475,7 +723,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		// steady-state pass that only ingests a small incremental diff. Only pay
 		// it when a full crawl is actually going to run (or when the triggers are
 		// missing, e.g. a previous run was SIGKILLed before restoring them).
+		// A noise purge deletes a lot of `files` rows; letting the FTS triggers fire
+		// per row costs far more than one rebuild at the end.
 		const needBulkMode = !ftsTriggersPresent(db)
+			|| purgedNoise > 0
 			|| datasetWork.some(({ d, dsSnaps }) => willDoFullCrawl(dsSnaps, d.mountpoint));
 		if (needBulkMode) {
 			database.enableBulkMode(db);
@@ -492,18 +743,27 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			const lastIncrSnapId = findLastIncrementalSnapId(dsSnaps);
 
 			let prevSnap = null;
+			// `changes` rows must describe the delta from a snapshot's *immediate*
+			// predecessor. When one is skipped, prevSnap deliberately stays on the
+			// last good snapshot so indexing can continue — but any diff written
+			// from there would span the gap and then overlap the skipped snapshot's
+			// own rows once it is retried. So index across the gap, record no
+			// changes, and leave diff_done clear for a later pass to fill in.
+			let prevSnapIsImmediate = true;
 			let snapIdx = 0;
 			for (const snap of dsSnaps) {
 				try {
 					const snapPath = zfs.snapshotMountPath(d.mountpoint, snap.name);
 
 					const needIndex = !snap.indexed_at;
-					const needDiff = prevSnap && !snap.diff_done;
+					const needDiff = prevSnap && prevSnapIsImmediate && !snap.diff_done;
 					const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
+					let diffDone = false;
 
 					if (needIndex) {
 						if (!snapPath) {
 							prevSnap = snap;
+							prevSnapIsImmediate = false;
 							continue;
 						}
 
@@ -514,7 +774,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 							perf.crawlMs += ms;
 							perf.snapsIncremental++;
 							perf.diffsDone++;
-							stmt.markDiffDone.run(snap.id);
+							diffDone = true;
 						} else if (canIncremental) {
 							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
 								doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
@@ -530,7 +790,15 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 							perf.snapsCrawled++;
 						}
 
-						stmt.markIndexed.run(Date.now() / 1000 | 0, snap.id);
+						// One transaction: a crash between the two flags would leave the
+						// snapshot indexed but its diff pending (or the reverse), and the
+						// next pass would re-derive it from the wrong branch.
+						database.transaction(db, () => {
+							if (diffDone) {
+								stmt.markDiffDone.run(snap.id);
+							}
+							stmt.markIndexed.run(Math.floor(Date.now() / 1000), snap.id);
+						});
 						snap.indexed_at = 1;
 						umountSnapshot(snapPath);
 					} else {
@@ -551,6 +819,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 					}
 
 					prevSnap = snap;
+					prevSnapIsImmediate = true;
 					snapIdx++;
 
 					if (snapIdx % 10 === 0) {
@@ -567,6 +836,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 					// Leave `prevSnap` pointing at the last *successful* snapshot so
 					// the next iteration's incremental/diff has clean data to work
 					// against. Snapshot stays unindexed → retried on next run.
+					prevSnapIsImmediate = false;
 				}
 			}
 
@@ -692,7 +962,7 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 	});
 
 	perf.statFailures += result.statFailures;
-	perf.crawlSkippedDirs = (perf.crawlSkippedDirs ?? 0) + result.skippedDirs;
+	perf.crawlSkippedDirs += result.skippedDirs;
 
 	if (count && process.stdout.isTTY) {
 		endProgressLine();
@@ -796,6 +1066,11 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
 
 async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
+	// A previous run may have written changes for this snapshot and died before
+	// marking it done; clear them so a replay can't double up.
+	database.transaction(db, () => {
+		stmt.deleteChangesBySnapshot.run(snap.id);
+	});
 	await runDiffStream({
 		prevSnap,
 		snap,
@@ -813,6 +1088,9 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
 async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
+	database.transaction(db, () => {
+		stmt.deleteChangesBySnapshot.run(snap.id);
+	});
 	await runDiffStream({
 		prevSnap,
 		snap,
@@ -824,4 +1102,6 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 	});
 }
 
-export { run };
+// Exported for tests: these two carry the snapshot-retention invariants and are
+// the only parts of a pass that can be exercised without a live ZFS pool.
+export { run, pruneDeletedSnapshots, forceBaselineRecrawl, prepareIndexerStatements };

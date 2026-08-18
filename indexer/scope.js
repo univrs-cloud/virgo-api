@@ -31,21 +31,37 @@
  */
 const NOISE_DIR_NAMES = new Set(['db', 'redis']);
 const NOISE_DIR_GLOBS = [
-	'data/appdata_*/preview',
-	'config/www/nextcloud/apps',
+	'**/appdata_*/preview',
+	'**/www/nextcloud/apps',
 ];
+
+// Bump whenever the patterns above change. A pass whose stored version differs
+// sweeps rows indexed under the older, narrower patterns — otherwise content we
+// now exclude would sit in the index forever.
+//
+// v2: appdata/preview and the Nextcloud app bundles were anchored at `data/` and
+// `config/`, which only matches a dataset mounted above the Nextcloud data dir.
+// A dataset mounted at the data dir itself puts them at the root, so the preview
+// pyramid was indexed in full — on one production node, 73% of every row.
+const NOISE_SCOPE_VERSION = 2;
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
 }
 
-/**
- * Convert a `*`-glob to an ERE fragment.
- * `*` → `[^/]*` (single path segment); every other regex metachar is escaped.
- */
+// Convert a glob to an ERE fragment. A single `*` matches within one path
+// segment. A leading double-star segment matches any number of leading
+// segments, so a pattern applies wherever that subtree sits relative to the
+// dataset mountpoint. Every other regex metachar is escaped. The group is
+// capturing, not non-capturing, because POSIX ERE (grep -E) has no "(?:".
 function globToERE(glob) {
 	let out = '';
-	for (let i = 0; i < glob.length; i++) {
+	let start = 0;
+	if (glob.startsWith('**/')) {
+		out += '([^/]+/)*';
+		start = 3;
+	}
+	for (let i = start; i < glob.length; i++) {
 		const c = glob[i];
 		if (c === '*') {
 			out += '[^/]*';
@@ -116,4 +132,4 @@ function noiseGrepPattern(mountpoint) {
 	return `${TAB}${anchor}/(${alt})(${TAB}|/|$)`;
 }
 
-export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, isNoisePath, noisePrefixes, noiseGrepPattern };
+export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, NOISE_SCOPE_VERSION, isNoisePath, noisePrefixes, noiseGrepPattern };

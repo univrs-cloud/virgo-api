@@ -49,6 +49,15 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	if (backfilled > 0) {
 		console.log(`\n♻  Self-repaired this run: ${backfilled.toLocaleString()} file row(s) backfilled (paths zfs-diff reported but we had no row for; usually files born after the baseline crawl).`);
 	}
+	if (perf.renamedSubtreePaths > 0) {
+		console.log(`\n📁 Directory renames: ${perf.renamedSubtreePaths.toLocaleString()} descendant path(s) rewritten.`);
+	}
+	if (perf.overwrittenFiles > 0) {
+		console.log(`\n🪦 Overwritten by rename: ${perf.overwrittenFiles.toLocaleString()} file(s) tombstoned (history kept, still recoverable from their snapshots).`);
+	}
+	if (perf.crawlSkippedDirs > 0) {
+		console.log(`\n⚠  ${perf.crawlSkippedDirs.toLocaleString()} director${perf.crawlSkippedDirs === 1 ? 'y' : 'ies'} skipped during crawl (permission denied or gone).`);
+	}
 
 	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0;
 	if (anyFailures) {

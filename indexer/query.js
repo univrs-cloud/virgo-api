@@ -75,8 +75,13 @@ function search(db, pattern, opts = {}) {
 		|| (maxSize !== null && maxSize !== undefined)
 		|| (since !== null && since !== undefined)
 		|| (until !== null && until !== undefined);
+	// Join the file's newest version, not the version at `last_seen_snap_id`:
+	// incremental passes bump `last_seen_snap_id` to the newest snapshot for every
+	// live file, but only files that actually changed have a row there.
 	const VER_JOIN = needVersionJoin
-		? `JOIN file_versions fv ON fv.file_id = f.id AND fv.snapshot_id = f.last_seen_snap_id`
+		? `JOIN file_versions fv ON fv.id = (
+				SELECT id FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1
+			)`
 		: '';
 	const SIZE_MIN = (minSize !== null && minSize !== undefined) ? `AND fv.size >= ?` : '';
 	const SIZE_MAX = (maxSize !== null && maxSize !== undefined) ? `AND fv.size <= ?` : '';
@@ -85,6 +90,18 @@ function search(db, pattern, opts = {}) {
 	const filterParams = [minSize, maxSize, since, until].filter((v) => {
 		return v !== null && v !== undefined;
 	});
+
+	const ORDER = `ORDER BY f.dataset_id, f.path`;
+	// dataset_id/path are selected because SQLite only lets a DISTINCT query order
+	// by columns in its select list. Without a deterministic order, paging returns
+	// overlapping or missing rows.
+	const likeSearch = (needle) => db.prepare(`
+		SELECT DISTINCT f.id, f.dataset_id, f.path FROM files f
+		JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
+		WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
+		${ORDER}
+		LIMIT ? OFFSET ?
+	`).all(needle, ...baseParams, ...filterParams, ...pathParams, limit, offset);
 
 	let fileIds;
 	if (pattern.includes('*') || pattern.includes('?')) {
@@ -95,33 +112,29 @@ function search(db, pattern, opts = {}) {
 		if (!glob.endsWith('%')) {
 			glob = glob + '%';
 		}
-		fileIds = db.prepare(`
-			SELECT DISTINCT f.id FROM files f
-			JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-			WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
-			LIMIT ? OFFSET ?
-		`).all(glob, ...baseParams, ...filterParams, ...pathParams, limit, offset);
+		fileIds = likeSearch(glob);
 	} else {
-		const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"';
+		// Trailing `*` makes it a prefix query, so `invoice` matches the `invoice`
+		// token in `/data/invoices/q1.pdf` as well as `invoice.pdf`.
+		const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"*';
 		try {
 			fileIds = db.prepare(`
-				SELECT DISTINCT f.id FROM fts_paths fp
+				SELECT DISTINCT f.id, f.dataset_id, f.path FROM fts_paths fp
 				JOIN files f ON f.id = fp.rowid
 				JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
 				WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
+				${ORDER}
 				LIMIT ? OFFSET ?
 			`).all(ftsQuery, ...baseParams, ...filterParams, ...pathParams, limit, offset);
 		} catch {
 			fileIds = [];
 		}
 
-		if (!fileIds.length && offset === 0) {
-			fileIds = db.prepare(`
-				SELECT DISTINCT f.id FROM files f
-				JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-				WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
-				LIMIT ? OFFSET ?
-			`).all('%' + pattern + '%', ...baseParams, ...filterParams, ...pathParams, limit, offset);
+		// FTS matches whole tokens only, so fall back to a substring scan for
+		// things like `voice` inside `invoice.pdf`. Runs at any offset — gating
+		// this on offset === 0 made page 2 of a fallback result set come back empty.
+		if (!fileIds.length) {
+			fileIds = likeSearch('%' + pattern + '%');
 		}
 	}
 
@@ -264,7 +277,8 @@ function history(db, path, opts = {}) {
 			c.new_path,
 			c.old_size,
 			c.new_size,
-			c.delta_bytes
+			c.delta_bytes,
+			strftime('%Y-%m-%dT%H:%M:%SZ', c.changed_at, 'unixepoch') AS changed_on
 		FROM changes c
 		JOIN snapshots s ON s.id = c.snapshot_id
 		JOIN datasets d ON d.id = s.dataset_id
@@ -436,17 +450,24 @@ function changes(db, snapshotName, opts = {}) {
 	}
 
 	const rows = db.prepare(`
-		SELECT c.change_type, c.old_path, c.new_path, c.old_size, c.new_size, c.delta_bytes
+		SELECT c.change_type, c.old_path, c.new_path, c.old_size, c.new_size, c.delta_bytes,
+			strftime('%Y-%m-%dT%H:%M:%SZ', c.changed_at, 'unixepoch') AS changed_on
 		FROM changes c
 		WHERE c.snapshot_id = ? ${PATH_FILTER}
 		ORDER BY c.change_type, c.new_path, c.old_path
 		LIMIT ? OFFSET ?
 	`).all(snap.id, ...pathParams, limit, offset);
 
+	// Counted separately: `rows.length` is the page size, so a snapshot with more
+	// changes than the limit reported its total as exactly the limit.
+	const { n: total } = db.prepare(`
+		SELECT COUNT(*) AS n FROM changes c WHERE c.snapshot_id = ? ${PATH_FILTER}
+	`).get(snap.id, ...pathParams);
+
 	const result = {
 		snapshot: snap.full_name,
 		created_at: new Date(snap.created_at * 1000).toISOString(),
-		total: rows.length,
+		total,
 		changes: rows,
 	};
 
@@ -457,7 +478,7 @@ function changes(db, snapshotName, opts = {}) {
 
 	if (!json) {
 		console.log(`\n↔️  Changes in ${snap.full_name} (${result.created_at}):`);
-		console.log(`   Total: ${rows.length}\n`);
+		console.log(`   Total: ${total}${total > rows.length ? ` (showing ${rows.length})` : ''}\n`);
 
 		const byType = {};
 		for (const r of rows) {
@@ -488,6 +509,14 @@ function changes(db, snapshotName, opts = {}) {
 
 // ─── Diff ───────────────────────────────────────────────────────────────────
 
+/**
+ * Net change between two snapshots, derived from the `changes` log.
+ *
+ * Not from `file_versions`: after the baseline crawl a version row exists only
+ * for snapshots in which the file actually changed, so "has a row at A but not
+ * at B" means "changed at A, not at B" — not "present at A, absent at B". Reading
+ * presence out of it reported every unchanged file as removed.
+ */
 function diff(db, snapA, snapB, opts = {}) {
 	if (!snapA || !snapB) {
 		console.log('Usage: virgo indexer diff <snap_a> <snap_b>');
@@ -498,8 +527,9 @@ function diff(db, snapA, snapB, opts = {}) {
 	const limit = opts.limit || 5000;
 	const offset = opts.offset || 0;
 
-	const sA = db.prepare(`SELECT id FROM snapshots WHERE full_name=? OR name=? LIMIT 1`).get(snapA, snapA);
-	const sB = db.prepare(`SELECT id FROM snapshots WHERE full_name=? OR name=? LIMIT 1`).get(snapB, snapB);
+	const lookup = db.prepare(`SELECT id, dataset_id, full_name, created_at FROM snapshots WHERE full_name=? OR name=? LIMIT 1`);
+	const sA = lookup.get(snapA, snapA);
+	const sB = lookup.get(snapB, snapB);
 	if (!sA) {
 		console.log(`Snapshot '${snapA}' not found.`);
 		return null;
@@ -508,72 +538,85 @@ function diff(db, snapA, snapB, opts = {}) {
 		console.log(`Snapshot '${snapB}' not found.`);
 		return null;
 	}
-	const idA = sA.id;
-	const idB = sB.id;
+	if (sA.dataset_id !== sB.dataset_id) {
+		console.log('Both snapshots must belong to the same dataset.');
+		return null;
+	}
+
+	// Tolerate the two being given newest-first.
+	const [from, to] = sA.created_at <= sB.created_at ? [sA, sB] : [sB, sA];
+	if (from.id === to.id) {
+		console.log('Both names resolve to the same snapshot.');
+		return { from: snapA, to: snapB, total: 0, files: [] };
+	}
+
+	// Every change event in (from, to], collapsed to one row per file: the state
+	// it was in entering the span and the state it left in.
+	const SPAN = `
+		WITH span AS (
+			SELECT c.file_id, c.change_type, c.old_path, c.new_path, c.old_size, c.new_size, s.created_at
+			FROM changes c
+			JOIN snapshots s ON s.id = c.snapshot_id
+			WHERE s.dataset_id = ?1 AND s.created_at > ?2 AND s.created_at <= ?3
+		),
+		collapsed AS (
+			SELECT
+				file_id,
+				FIRST_VALUE(change_type) OVER w AS first_type,
+				LAST_VALUE(change_type)  OVER w AS last_type,
+				FIRST_VALUE(old_size)    OVER w AS size_a,
+				LAST_VALUE(new_size)     OVER w AS size_b,
+				FIRST_VALUE(old_path)    OVER w AS from_path,
+				LAST_VALUE(new_path)     OVER w AS to_path,
+				ROW_NUMBER()             OVER w AS rn
+			FROM span
+			WINDOW w AS (
+				PARTITION BY file_id ORDER BY created_at
+				ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+			)
+		)
+	`;
+	const spanParams = [from.dataset_id, from.created_at, to.created_at];
+
+	const { n: total } = db.prepare(`${SPAN} SELECT COUNT(*) AS n FROM collapsed WHERE rn = 1
+		AND NOT (first_type = 'added' AND last_type = 'removed')`).get(...spanParams);
 
 	const rows = db.prepare(`
-		SELECT path, size_a, size_b, delta, status FROM (
-			-- Files present in both snapshots (modified or unchanged)
-			SELECT
-				f.path,
-				fv_a.size AS size_a,
-				fv_b.size AS size_b,
-				(fv_b.size - fv_a.size) AS delta,
-				CASE
-					WHEN fv_b.mtime != fv_a.mtime THEN 'modified'
-					ELSE 'unchanged'
-				END AS status
-			FROM file_versions fv_b
-			JOIN file_versions fv_a ON fv_a.file_id = fv_b.file_id AND fv_a.snapshot_id = ?
-			JOIN files f ON f.id = fv_b.file_id
-			WHERE fv_b.snapshot_id = ?
+		${SPAN}
+		SELECT c.file_id, c.first_type, c.last_type, c.size_a, c.size_b, c.from_path, c.to_path, f.path AS current_path
+		FROM collapsed c
+		LEFT JOIN files f ON f.id = c.file_id
+		WHERE c.rn = 1 AND NOT (c.first_type = 'added' AND c.last_type = 'removed')
+		ORDER BY COALESCE(f.path, c.to_path, c.from_path)
+		LIMIT ?4 OFFSET ?5
+	`).all(...spanParams, limit, offset);
 
-			UNION ALL
+	const files = rows.map((r) => {
+		const status = r.last_type === 'removed' ? 'removed'
+			: r.first_type === 'added' ? 'added'
+			: (r.first_type === 'renamed' || r.last_type === 'renamed') ? 'renamed'
+			: 'modified';
+		const sizeA = status === 'added' ? null : r.size_a;
+		const sizeB = status === 'removed' ? null : r.size_b;
+		return {
+			path: r.current_path ?? r.to_path ?? r.from_path,
+			size_a: sizeA,
+			size_b: sizeB,
+			delta: (sizeB ?? 0) - (sizeA ?? 0),
+			status,
+		};
+	});
 
-			-- Files only in snapshot B (added)
-			SELECT
-				f.path,
-				NULL AS size_a,
-				fv_b.size AS size_b,
-				fv_b.size AS delta,
-				'added' AS status
-			FROM file_versions fv_b
-			JOIN files f ON f.id = fv_b.file_id
-			WHERE fv_b.snapshot_id = ?
-				AND NOT EXISTS (
-					SELECT 1 FROM file_versions fv_a
-					WHERE fv_a.file_id = fv_b.file_id AND fv_a.snapshot_id = ?
-				)
-
-			UNION ALL
-
-			-- Files only in snapshot A (removed)
-			SELECT
-				f.path,
-				fv_a.size AS size_a,
-				NULL AS size_b,
-				-fv_a.size AS delta,
-				'removed' AS status
-			FROM file_versions fv_a
-			JOIN files f ON f.id = fv_a.file_id
-			WHERE fv_a.snapshot_id = ?
-				AND NOT EXISTS (
-					SELECT 1 FROM file_versions fv_b
-					WHERE fv_b.file_id = fv_a.file_id AND fv_b.snapshot_id = ?
-				)
-		)
-		WHERE status != 'unchanged'
-		ORDER BY status, path
-		LIMIT ? OFFSET ?
-	`).all(idA, idB, idB, idA, idA, idB, limit, offset);
-
-	const result = { from: snapA, to: snapB, total: rows.length, files: rows };
+	const result = { from: from.full_name, to: to.full_name, total, files };
 
 	if (!json) {
-		console.log(`\n Diff ${snapA} → ${snapB}: ${rows.length} changed files\n`);
-		for (const r of rows) {
+		console.log(`\n Diff ${from.full_name} → ${to.full_name}: ${total} changed files\n`);
+		for (const r of files) {
 			const delta = r.delta >= 0 ? `+${utils.formatSize(r.delta)}` : utils.formatSize(r.delta);
 			console.log(`  [${r.status.toUpperCase().padEnd(8)}] ${r.path}  (${delta})`);
+		}
+		if (total > files.length) {
+			console.log(`\n  …and ${total - files.length} more (use --limit / --offset)`);
 		}
 	}
 
@@ -602,23 +645,38 @@ function reindex(db, opts = {}) {
 			return;
 		}
 
-		database.transaction(db, () => {
-			for (const id of ids) {
-				db.prepare('DELETE FROM changes WHERE snapshot_id IN (SELECT id FROM snapshots WHERE dataset_id = ?)').run(id);
-				db.prepare('DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?)').run(id);
-				db.prepare('DELETE FROM files WHERE dataset_id = ?').run(id);
-				db.prepare('UPDATE snapshots SET indexed_at = NULL, diff_done = 0 WHERE dataset_id = ?').run(id);
-			}
-		});
+		// Drop the FTS triggers first: they fire per deleted row, which turns a
+		// reindex of a multi-million-row dataset into an hours-long crawl of its
+		// own. One rebuild at the end replaces all of it.
+		database.enableBulkMode(db);
+		try {
+			database.transaction(db, () => {
+				for (const id of ids) {
+					db.prepare('DELETE FROM changes WHERE snapshot_id IN (SELECT id FROM snapshots WHERE dataset_id = ?)').run(id);
+					db.prepare('DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?)').run(id);
+					db.prepare('DELETE FROM files WHERE dataset_id = ?').run(id);
+					db.prepare('UPDATE snapshots SET indexed_at = NULL, diff_done = 0 WHERE dataset_id = ?').run(id);
+				}
+			});
+		} finally {
+			database.disableBulkMode(db);
+		}
+		database.vacuumIfBloated(db);
 
 		console.log(`Reset indexing state for ${ids.length} dataset(s). Run 'virgo indexer index' to rebuild.`);
 	} else {
-		database.transaction(db, () => {
-			db.exec('DELETE FROM changes');
-			db.exec('DELETE FROM file_versions');
-			db.exec('DELETE FROM files');
-			db.exec('UPDATE snapshots SET indexed_at = NULL, diff_done = 0');
-		});
+		database.enableBulkMode(db);
+		try {
+			database.transaction(db, () => {
+				db.exec('DELETE FROM changes');
+				db.exec('DELETE FROM file_versions');
+				db.exec('DELETE FROM files');
+				db.exec('UPDATE snapshots SET indexed_at = NULL, diff_done = 0');
+			});
+		} finally {
+			database.disableBulkMode(db);
+		}
+		database.vacuumIfBloated(db);
 
 		console.log("Reset all indexing state. Run 'virgo indexer index' to rebuild.");
 	}
@@ -646,6 +704,8 @@ function stats(db, opts = {}) {
 			(SELECT value FROM meta WHERE key = 'last_run_failed_snapshots') AS last_run_failed_snapshots,
 			(SELECT value FROM meta WHERE key = 'last_run_orphan_samples') AS last_run_orphan_samples,
 			(SELECT value FROM meta WHERE key = 'last_run_backfilled_files') AS last_run_backfilled_files,
+			(SELECT value FROM meta WHERE key = 'last_run_renamed_subtree_paths') AS last_run_renamed_subtree_paths,
+			(SELECT value FROM meta WHERE key = 'last_run_overwritten_files') AS last_run_overwritten_files,
 			(SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
 	`).get();
 
@@ -665,6 +725,8 @@ function stats(db, opts = {}) {
 		stat_failures:    Number(statsRow.last_run_stat_failures    ?? 0),
 		restart_count:    Number(statsRow.last_run_restart_count    ?? 0),
 		backfilled_files: Number(statsRow.last_run_backfilled_files ?? 0),
+		renamed_subtree_paths: Number(statsRow.last_run_renamed_subtree_paths ?? 0),
+		overwritten_files:     Number(statsRow.last_run_overwritten_files     ?? 0),
 		failed_snapshots: parseFailedSnapshots(statsRow.last_run_failed_snapshots),
 		orphan_samples:   parseJsonArray(statsRow.last_run_orphan_samples),
 	};
@@ -682,6 +744,8 @@ function stats(db, opts = {}) {
 	delete result.last_run_failed_snapshots;
 	delete result.last_run_orphan_samples;
 	delete result.last_run_backfilled_files;
+	delete result.last_run_renamed_subtree_paths;
+	delete result.last_run_overwritten_files;
 
 	if (!json) {
 		console.log('\n📊 ZFS Index Statistics\n');
