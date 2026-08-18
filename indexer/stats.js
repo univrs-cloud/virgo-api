@@ -59,7 +59,7 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 		console.log(`\n⚠  ${perf.crawlSkippedDirs.toLocaleString()} director${perf.crawlSkippedDirs === 1 ? 'y' : 'ies'} skipped during crawl (permission denied or gone).`);
 	}
 
-	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0;
+	const anyFailures = perf.orphanedChanges > 0 || perf.statFailures > 0 || perf.failedSnapshots.length > 0 || restartCount > 0 || (perf.vanishedSnapshots ?? 0) > 0;
 	if (anyFailures) {
 		console.log('\n⚠  Failures (this run):');
 		console.log(`Orphan changes skipped: ${perf.orphanedChanges.toLocaleString()}`);
