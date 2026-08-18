@@ -97,10 +97,15 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	console.log(`Total runtime: ${utils.formatDuration(totalMs)}`);
 	if (restartCount > 0) {
 		console.log(`Restarts: ${restartCount}`);
-		console.log('Note: Crawl/diff/SQL counters below are for the last completed pass only.');
+		console.log('Note: counters below cover every pass, including work redone after a restart.');
 	}
-	console.log(`Crawl time: ${utils.formatDuration(perf.crawlMs)}`);
-	console.log(`Diff time: ${utils.formatDuration(perf.diffMs)}`);
+	console.log(`Full-crawl time: ${utils.formatDuration(perf.crawlMs)}`);
+	console.log(`Incremental time: ${utils.formatDuration(perf.incrMs ?? 0)}`);
+	console.log(`Standalone diff time: ${utils.formatDuration(perf.diffMs)}`);
+	const accounted = perf.crawlMs + (perf.incrMs ?? 0) + perf.diffMs;
+	if (totalMs > 0 && accounted > 0) {
+		console.log(`Unaccounted: ${utils.formatDuration(Math.max(0, totalMs - accounted))} (discovery, pruning, FTS rebuild, checkpoints)`);
+	}
 	console.log(`Stat time: ${utils.formatDuration(perf.statMs)}`);
 	console.log(`Full crawls: ${perf.snapsCrawled}`);
 	console.log(`Incremental: ${perf.snapsIncremental}`);
@@ -109,7 +114,8 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 	console.log(`Diff changes: ${perf.diffChanges.toLocaleString()}`);
 	console.log(`Files crawled: ${perf.filesCrawled.toLocaleString()}`);
 	if (perf.crawlMs > 0 && perf.filesCrawled > 0) {
-		console.log(`Crawl rate: ${(perf.filesCrawled / (perf.crawlMs / 1000)).toFixed(0)} files/s`);
+		const rate = perf.filesCrawled / (perf.crawlMs / 1000);
+		console.log(`Crawl rate: ${rate >= 10 ? rate.toFixed(0) : rate.toFixed(1)} files/s`);
 	}
 
 	const totalOps = perf.sqlInserts + perf.sqlUpserts + perf.sqlSelects + perf.sqlUpdates;
