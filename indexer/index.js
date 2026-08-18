@@ -430,7 +430,7 @@ async function run(_opts = {}) {
 		const sessionWallT0 = Date.now();
 		// Survives restarts: which snapshots have already cost us a full pass, and
 		// the last pass's counters so a fatal exit still records what happened.
-		const session = { restartedSnapshots: new Set(), lastPerf: null };
+		const session = { restartedSnapshots: new Set(), perf: null, lastPerf: null };
 
 		for (let attempt = 0; attempt < maxAttempts; attempt++) {
 			if (attempt > 0) {
@@ -575,9 +575,12 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 
 	const db = database.open();
 
-	const perf = {
+	// Reused across restarts: a pass that fails late has still done real work, and
+	// discarding its counters made the summary describe seconds of a run that took
+	// half an hour.
+	const perf = session?.perf ?? {
 		t0: Date.now(), snapsCrawled: 0, snapsIncremental: 0, snapsSkipped: 0,
-		diffsDone: 0, filesCrawled: 0, crawlMs: 0, diffMs: 0,
+		diffsDone: 0, filesCrawled: 0, crawlMs: 0, incrMs: 0, diffMs: 0,
 		sqlInserts: 0, sqlUpserts: 0, sqlSelects: 0, sqlUpdates: 0, sqlTxns: 0, sqlMs: 0,
 		diffChanges: 0, statMs: 0,
 		statFailures: 0, orphanedChanges: 0,
@@ -604,8 +607,11 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		restartedSnapshots: session?.restartedSnapshots ?? new Set(),
 	};
 	if (session) {
+		session.perf = perf;
 		session.lastPerf = perf;
 	}
+	// Per-snapshot sample buffer must not carry over between passes.
+	perf.orphanSamples = [];
 
 	const stmt = prepareIndexerStatements(db);
 
@@ -771,7 +777,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
 								doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
 							);
-							perf.crawlMs += ms;
+							perf.incrMs += ms;
 							perf.snapsIncremental++;
 							perf.diffsDone++;
 							diffDone = true;
@@ -779,7 +785,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
 								doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
 							);
-							perf.crawlMs += ms;
+							perf.incrMs += ms;
 							perf.snapsIncremental++;
 						} else {
 							const { ms, result: count } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
