@@ -316,7 +316,7 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 	// and that is exactly what someone looking for the overwritten file needs.
 	// The path has to move aside so the rename can take it (UNIQUE dataset+path).
 	if (victim && victim.id !== oldFile.id) {
-		stmt.tombstoneOverwrittenFile.run(overwrittenPath(relNewPath, snapId), snapId, victim.id);
+		stmt.tombstoneOverwrittenFile.run(overwrittenPath(relNewPath, snapId), snapId, victim.id, relNewPath);
 		perf.sqlUpdates++;
 		perf.overwrittenFiles = (perf.overwrittenFiles ?? 0) + 1;
 	}

@@ -45,8 +45,23 @@ function restartIndexerFromBeginning(message) {
  * @returns {never}
  */
 function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
-	const recoverable = zfs.isZfsDiffFailure(e) || isSnapshotStatFailure(e);
+	let recoverable = zfs.isZfsDiffFailure(e) || isSnapshotStatFailure(e);
 	const transition = prevSnap ? `${prevSnap.name} → ${snap.name}` : snap.name;
+
+	// Snapshot retention running against a long pass is the common cause of a
+	// failed diff, and a full restart is the wrong answer for it: the pair is
+	// simply gone. Skip it and let the next pass prune it during discovery,
+	// instead of throwing away every snapshot already done this pass.
+	if (zfs.isZfsDiffFailure(e)) {
+		const vanished = [prevSnap?.full_name, snap.full_name]
+			.filter(Boolean)
+			.find(name => !zfs.snapshotExists(name));
+		if (vanished) {
+			console.warn(`  ⚠  ${vanished} no longer exists — retention removed it mid-run; skipping this pair rather than restarting.`);
+			perf.vanishedSnapshots = (perf.vanishedSnapshots ?? 0) + 1;
+			recoverable = false;
+		}
+	}
 	if (zfs.isZfsDiffFailure(e)) {
 		console.warn(`  ⚠  zfs diff failed (${transition}): ${e.message}`);
 	} else if (isSnapshotStatFailure(e)) {
@@ -507,7 +522,7 @@ function prepareIndexerStatements(db) {
 			DELETE FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\'
 		`),
 		tombstoneOverwrittenFile: db.prepare(`
-			UPDATE files SET path = ?1, deleted_at_snap_id = ?2 WHERE id = ?3
+			UPDATE files SET path = ?1, deleted_at_snap_id = ?2, overwritten_from = ?4 WHERE id = ?3
 		`),
 		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes, changed_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
@@ -596,6 +611,8 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		// Files destroyed by a rename landing on top of them; tombstoned, not dropped.
 		overwrittenFiles: 0,
 		crawlSkippedDirs: 0,
+		// Snapshots retention destroyed while the pass was running.
+		vanishedSnapshots: 0,
 		// Per-snapshot samples reset by reportSnapshotAnomalies; per-run samples
 		// accumulate across the entire pass and get persisted to meta so the
 		// dashboard + CLI summary can show actual offending paths after a run.

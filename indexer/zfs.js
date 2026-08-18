@@ -356,6 +356,19 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	}
 }
 
+/**
+ * Does this snapshot still exist? Retention can destroy one mid-run, which is
+ * what most `zfs diff` ENOENT failures actually are.
+ */
+function snapshotExists(fullName) {
+	try {
+		execaSync('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', fullName]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function isZfsDiffFailure(err) {
 	return Boolean(err && err.code === 'ZFS_DIFF_FAILED');
 }
@@ -414,4 +427,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
 	return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, cleanupStaleTempFiles };
+export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, snapshotExists, cleanupStaleTempFiles };
