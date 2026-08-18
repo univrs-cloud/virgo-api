@@ -565,6 +565,14 @@ function prepareIndexerStatements(db) {
 		tombstoneOverwrittenFile: db.prepare(`
 			UPDATE files SET path = ?1, deleted_at_snap_id = ?2, overwritten_from = ?4 WHERE id = ?3
 		`),
+		// An overwritten file never survived to the end of the snapshot that
+		// destroyed it, so anything recorded for it there describes its replacement.
+		deleteVersionAtSnapshot: db.prepare(`DELETE FROM file_versions WHERE file_id = ?1 AND snapshot_id = ?2`),
+		relastSeenFromVersions: db.prepare(`
+			UPDATE files SET last_seen_snap_id = (
+				SELECT snapshot_id FROM file_versions WHERE file_id = files.id ORDER BY snapshot_id DESC LIMIT 1
+			) WHERE id = ?
+		`),
 		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes, changed_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
 		deleteChangesBySnapshot: db.prepare(`DELETE FROM changes WHERE snapshot_id = ?`),
