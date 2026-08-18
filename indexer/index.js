@@ -589,6 +589,17 @@ function prepareIndexerStatements(db) {
 			AND EXISTS (
 				SELECT 1 FROM files f WHERE f.id = file_versions.file_id AND f.deleted_at_snap_id IS NULL
 			)
+			-- Live *now* does not mean present continuously. A file deleted and later
+			-- restored was absent in between, so moving its version forward would
+			-- claim it existed in a snapshot it had already been removed from.
+			AND NOT EXISTS (
+				SELECT 1 FROM changes c
+				JOIN snapshots s ON s.id = c.snapshot_id
+				WHERE c.file_id = file_versions.file_id
+				AND c.change_type = 'removed'
+				AND s.created_at >  (SELECT created_at FROM snapshots WHERE id = ?2)
+				AND s.created_at <= (SELECT created_at FROM snapshots WHERE id = ?1)
+			)
 		`),
 		datasetHasFiles: db.prepare(`SELECT 1 AS present FROM files WHERE dataset_id = ? LIMIT 1`),
 		iterateFilePaths: db.prepare(`SELECT id, path FROM files WHERE dataset_id = ?`),
