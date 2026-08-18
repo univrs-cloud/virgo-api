@@ -316,7 +316,13 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 	// and that is exactly what someone looking for the overwritten file needs.
 	// The path has to move aside so the rename can take it (UNIQUE dataset+path).
 	if (victim && victim.id !== oldFile.id) {
+		// Drop anything we recorded for the victim at this snapshot first. If an
+		// earlier rename in this same batch moved a file into the target path, we
+		// stamped it with a version and a last_seen for a snapshot it never
+		// actually reached — the snapshot only ever shows the final occupant.
+		stmt.deleteVersionAtSnapshot.run(victim.id, snapId);
 		stmt.tombstoneOverwrittenFile.run(overwrittenPath(relNewPath, snapId), snapId, victim.id, relNewPath);
+		stmt.relastSeenFromVersions.run(victim.id);
 		perf.sqlUpdates++;
 		perf.overwrittenFiles = (perf.overwrittenFiles ?? 0) + 1;
 	}
