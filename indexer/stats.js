@@ -65,6 +65,9 @@ function printStats(db, perf, sessionWallT0 = null, restartCount = 0) {
 		console.log(`Orphan changes skipped: ${perf.orphanedChanges.toLocaleString()}`);
 		console.log(`Stat failures:          ${perf.statFailures.toLocaleString()}`);
 		console.log(`Restarts:               ${restartCount}`);
+		if (perf.vanishedSnapshots > 0) {
+			console.log(`Vanished mid-run:       ${perf.vanishedSnapshots} (retention destroyed them; skipped, not an error)`);
+		}
 		console.log(`Failed snapshots:       ${perf.failedSnapshots.length}`);
 		for (const f of perf.failedSnapshots.slice(0, 5)) {
 			console.log(`  • ${f.name} (${f.reason})`);

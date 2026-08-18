@@ -56,6 +56,11 @@ const MIGRATIONS = [
 	(db) => {
 		addColumnIfMissing(db, 'changes', 'changed_at', 'INTEGER');
 	},
+	// 3 — keep the real path of a file a rename overwrote, so its snapshot
+	// recovery path does not point at the moved-aside placeholder name.
+	(db) => {
+		addColumnIfMissing(db, 'files', 'overwritten_from', 'TEXT');
+	},
 ];
 
 /**
@@ -163,6 +168,10 @@ function open(dbPath = null) {
 			first_seen_snap_id  INTEGER REFERENCES snapshots(id),
 			last_seen_snap_id   INTEGER REFERENCES snapshots(id),
 			deleted_at_snap_id  INTEGER REFERENCES snapshots(id),
+			-- Set when a rename landed on top of this file. Its path column has to
+			-- move aside (the renamed file now occupies that UNIQUE key), so the real
+			-- path is kept here — it is what recovery from a snapshot needs.
+			overwritten_from    TEXT,
 			UNIQUE(dataset_id, path)
 		);
 

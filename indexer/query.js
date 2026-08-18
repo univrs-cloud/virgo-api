@@ -149,7 +149,7 @@ function search(db, pattern, opts = {}) {
 	const rows = db.prepare(`
 		SELECT
 			f.id AS file_id,
-			d.name AS dataset, d.mountpoint, f.path, f.type, fv.size, fv.mtime,
+			d.name AS dataset, d.mountpoint, f.path, f.overwritten_from, f.type, fv.size, fv.mtime,
 			strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
 			s.name AS snapshot,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
@@ -256,6 +256,7 @@ function history(db, path, opts = {}) {
 			s.full_name,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
 			f.path,
+			f.overwritten_from,
 			fv.size,
 			strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
 			fv.mode
@@ -292,7 +293,7 @@ function history(db, path, opts = {}) {
 	}
 
 	for (const v of versions) {
-		v.snapshot_path = v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.path}` : null;
+		v.snapshot_path = v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.overwritten_from ?? v.path}` : null;
 	}
 
 	if (!json) {
@@ -351,6 +352,7 @@ function deleted(db, opts = {}) {
 			d.name AS dataset,
 			d.mountpoint,
 			f.path AS last_path,
+			f.overwritten_from,
 			f.type,
 			fv.size,
 			s_last.name AS last_seen_snap,
@@ -379,7 +381,10 @@ function deleted(db, opts = {}) {
 	}
 
 	for (const r of rows) {
-		r.snapshot_path = r.mountpoint ? `${r.mountpoint}/.zfs/snapshot/${r.last_seen_snap}${r.last_path}` : null;
+		// A file a rename overwrote lives in the snapshot under its original name;
+		// `last_path` only holds the moved-aside placeholder.
+		const recoverPath = r.overwritten_from ?? r.last_path;
+		r.snapshot_path = r.mountpoint ? `${r.mountpoint}/.zfs/snapshot/${r.last_seen_snap}${recoverPath}` : null;
 	}
 
 	if (!json) {
