@@ -353,6 +353,7 @@ function persistLastRunMeta(db, stmt, perf, restartCount) {
 		stmt.setMeta.run('last_run_backfilled_files', String(perf.backfilledFiles ?? 0));
 		stmt.setMeta.run('last_run_renamed_subtree_paths', String(perf.renamedSubtreePaths ?? 0));
 		stmt.setMeta.run('last_run_overwritten_files', String(perf.overwrittenFiles ?? 0));
+		stmt.setMeta.run('last_run_vanished_snapshots', String(perf.vanishedSnapshots ?? 0));
 	});
 }
 

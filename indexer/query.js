@@ -711,6 +711,7 @@ function stats(db, opts = {}) {
 			(SELECT value FROM meta WHERE key = 'last_run_backfilled_files') AS last_run_backfilled_files,
 			(SELECT value FROM meta WHERE key = 'last_run_renamed_subtree_paths') AS last_run_renamed_subtree_paths,
 			(SELECT value FROM meta WHERE key = 'last_run_overwritten_files') AS last_run_overwritten_files,
+			(SELECT value FROM meta WHERE key = 'last_run_vanished_snapshots') AS last_run_vanished_snapshots,
 			(SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()) AS db_bytes
 	`).get();
 
@@ -732,6 +733,7 @@ function stats(db, opts = {}) {
 		backfilled_files: Number(statsRow.last_run_backfilled_files ?? 0),
 		renamed_subtree_paths: Number(statsRow.last_run_renamed_subtree_paths ?? 0),
 		overwritten_files:     Number(statsRow.last_run_overwritten_files     ?? 0),
+		vanished_snapshots:    Number(statsRow.last_run_vanished_snapshots    ?? 0),
 		failed_snapshots: parseFailedSnapshots(statsRow.last_run_failed_snapshots),
 		orphan_samples:   parseJsonArray(statsRow.last_run_orphan_samples),
 	};
@@ -751,6 +753,7 @@ function stats(db, opts = {}) {
 	delete result.last_run_backfilled_files;
 	delete result.last_run_renamed_subtree_paths;
 	delete result.last_run_overwritten_files;
+	delete result.last_run_vanished_snapshots;
 
 	if (!json) {
 		console.log('\n📊 ZFS Index Statistics\n');
