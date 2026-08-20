@@ -23,6 +23,7 @@ let lastAppUpdates = false;
 let lastUpdate = null;
 let lastUpdateSignature = null;
 let lastStorage = false;
+let lastUps = null;
 
 const reportUpdatesToFleet = () => {
 	if (fleetSocket?.connected) {
@@ -47,6 +48,12 @@ const requestAppUpdateJobs = () => {
 const reportStorageToFleet = () => {
 	if (fleetSocket?.connected) {
 		fleetSocket.emit('node:storage', lastStorage);
+	}
+};
+
+const reportUpsToFleet = () => {
+	if (fleetSocket?.connected) {
+		fleetSocket.emit('node:ups', lastUps);
 	}
 };
 
@@ -133,6 +140,7 @@ const connect = async ({ token, nodeId }) => {
 		reportUpdatesToFleet();
 		reportUpdateToFleet();
 		reportStorageToFleet();
+		reportUpsToFleet();
 		requestAppUpdateJobs();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
@@ -294,6 +302,10 @@ const register = (module) => {
 	module.eventEmitter.on('host:storage:updated', (storage) => {
 		lastStorage = storage;
 		reportStorageToFleet();
+	});
+	module.eventEmitter.on('host:ups:updated', (ups) => {
+		lastUps = ups;
+		reportUpsToFleet();
 	});
 	// A node that boots before its pool reads no configuration at all, so an enrolment carried by a
 	// pool imported afterwards is only discovered when the configuration becomes readable.

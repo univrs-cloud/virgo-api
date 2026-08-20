@@ -24,11 +24,13 @@ const checkUps = async (module) => {
 			}
 		}
 		module.nsp.emit('host:ups', module.getState('ups'));
+		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('error', (error) => {
 		console.error('UPS socket error:', error.message);
 		module.setState('ups', 'remote i/o error');
 		module.nsp.emit('host:ups', module.getState('ups'));
+		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('close', () => {
 		console.log('UPS socket disconnected, reconnecting in 5s...');
