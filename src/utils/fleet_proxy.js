@@ -5,13 +5,14 @@ import serverConfig from '../../config.js';
 import * as proxyCredential from './proxy_credential.js';
 import { folderPath as distFolder } from '../controllers/static.js';
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const LOOPBACK_HOST = '127.0.0.1';
 const HTTP_CHUNK_SIZE = 256 * 1024;
 const activeHttpRequests = new Map();
 
 // The node's own API is served over HTTPS with a self-signed cert, so loopback calls have to skip
-// verification. Every URL built with these options goes through localBaseUrl(), which refuses any
-// host that isn't loopback — a self-signed cert must never be accepted over the network.
+// verification. Every URL built with these options goes through localBaseUrl(), which is pinned to
+// LOOPBACK_HOST — a self-signed cert must never be accepted over the network, and pinning the address
+// here means no configuration change can send these requests off the host.
 const localFetchDispatcher = new Agent({
 	connect: { rejectUnauthorized: false }
 });
@@ -21,8 +22,7 @@ const localTlsOptions = {
 };
 
 const localBaseUrl = () => {
-	const { host, port } = serverConfig.server;
-	return LOOPBACK_HOSTS.has(host) ? `https://${host}:${port}` : null;
+	return `https://${LOOPBACK_HOST}:${serverConfig.server.port}`;
 };
 
 const pickResponseHeaders = (headers) => {

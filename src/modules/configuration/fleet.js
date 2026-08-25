@@ -14,6 +14,7 @@ const AUTH_FAILED_ERROR = 'Node authentication failed';
 // SQLite write). Delay the boot-time auto-connect by a random offset in this window so the
 // reconnect load arrives smeared across time instead of as a single spike.
 const STARTUP_JITTER_MS = 30000;
+const ACME_RELAY_TIMEOUT_MS = 30000;
 let fleetSocket = null;
 let fleetModule = null;
 // Each matches its source event: system is host:updates, apps is the docker module's per-app update
@@ -101,6 +102,29 @@ const getNodeName = async () => {
 	return osInfo?.hostname || osInfo?.fqdn || null;
 };
 
+const getNodeIdentifier = async () => {
+	const osInfo = await si.osInfo();
+	const hostname = osInfo?.hostname || '';
+	const fqdn = osInfo?.fqdn || '';
+	const prefix = `${hostname}.`;
+	return {
+		hostname,
+		domainName: (hostname && fqdn.startsWith(prefix) ? fqdn.slice(prefix.length) : ''),
+		address: await getNodeAddress()
+	};
+};
+
+const getNodeAddress = async () => {
+	try {
+		const name = await si.networkInterfaceDefault();
+		const interfaces = await si.networkInterfaces();
+		const found = interfaces.find((item) => { return item.iface === name; });
+		return found?.ip4 || '';
+	} catch (error) {
+		return '';
+	}
+};
+
 /** This node's fleet identity: minted on first registration and kept for as long as the node stays
  * enrolled, so a retry after a failed attempt — or a later re-registration — lands on the same fleet
  * record instead of creating a second one. Persisted before registering for exactly that reason: if
@@ -177,7 +201,7 @@ const disconnect = () => {
 	resetFleetRuntimeState();
 };
 
-const registerNode = ({ email, password, nodeId, name }) => {
+const registerNode = ({ email, password, nodeId, name, hostname, domainName, address }) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
@@ -191,13 +215,39 @@ const registerNode = ({ email, password, nodeId, name }) => {
 			reject(new Error(error?.message || 'Failed to connect to fleet'));
 		});
 		socket.on('connect', () => {
-			socket.emit('node:register', { nodeId, name, email, password }, (response) => {
+			socket.emit('node:register', { nodeId, name, hostname, domainName, address, email, password }, (response) => {
 				socket.disconnect();
 				if (response?.status !== 'succeeded') {
 					reject(new Error(response?.message || 'Fleet registration failed'));
 					return;
 				}
 				resolve({ nodeId: response.nodeId, token: response.token });
+			});
+		});
+	});
+};
+
+const checkDomainAvailability = (label) => {
+	return new Promise((resolve, reject) => {
+		const socket = io(`${fleetUrl}/node`, {
+			path: '/api',
+			auth: { role: 'node' },
+			rejectUnauthorized: true,
+			reconnection: false,
+			timeout: 10000
+		});
+		socket.on('connect_error', (error) => {
+			socket.disconnect();
+			reject(new Error(error?.message || 'Failed to connect to fleet'));
+		});
+		socket.on('connect', () => {
+			socket.emit('node:domain:availability', { label }, (response) => {
+				socket.disconnect();
+				if (response?.status !== 'succeeded') {
+					reject(new Error(response?.message || 'Fleet availability check failed'));
+					return;
+				}
+				resolve({ available: response.available, reason: response.reason, zone: response.zone });
 			});
 		});
 	});
@@ -219,7 +269,8 @@ const registerFleet = async (job, module) => {
 		email,
 		password: config.password,
 		nodeId: await resolveNodeId(configuration),
-		name: await getNodeName()
+		name: await getNodeName(),
+		...await getNodeIdentifier()
 	});
 
 	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email });
@@ -328,12 +379,38 @@ const onConnection = (socket, module) => {
 		await module.addJob('fleet:enable', { username: socket.username });
 	});
 
+	socket.on('configuration:fleet:domain:availability', async ({ label } = {}, ack = () => {}) => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			ack({ status: 'failed', message: 'Unauthorized' });
+			return;
+		}
+
+		try {
+			ack({ status: 'succeeded', ...await checkDomainAvailability(label) });
+		} catch (error) {
+			ack({ status: 'failed', message: error.message });
+		}
+	});
+
 	socket.on('configuration:fleet:disable', async () => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}
 		await module.addJob('fleet:disable', { username: socket.username });
 	});
+};
+
+export const relayAcmeChallenge = async (action, { fqdn, value }) => {
+	if (!fleetSocket?.connected) {
+		throw new Error('Not connected to fleet');
+	}
+
+	const response = await fleetSocket.timeout(ACME_RELAY_TIMEOUT_MS).emitWithAck(`acme:${action}`, { fqdn, value });
+	if (response?.status !== 'succeeded') {
+		throw new Error(response?.message || `Fleet rejected the ACME ${action}`);
+	}
+
+	return response;
 };
 
 export default {

@@ -1,6 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
+import config from '../../../config.js';
 import { open as openDatabase } from '../../database/index.js';
 import DataService from '../../database/data_service.js';
 
@@ -43,11 +44,11 @@ const OWNER = 'voyager:users';
 // template prefixes itself, routing to traefik.<fqdn> and auth.<fqdn>. Certificates come from Let's
 // Encrypt, with expiry notices going to us rather than the customer — they never asked for one, and
 // it is obtained on their node's behalf.
-const SSL_RESOLVER = 'le';
 const SSL_EMAIL = 'voyager@univrs.cloud';
+const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
 const CORE_APPS = [
-	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER }; } },
-	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: SSL_RESOLVER, EMAIL: SSL_EMAIL }; } }
+	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; } },
+	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), EMAIL: SSL_EMAIL }; } }
 ];
 
 let scanning = null;
@@ -308,7 +309,6 @@ const prepare = async (job, module) => {
 	module.eventEmitter.emit('users:updated');
 	await execa('smbcontrol', ['all', 'reload-config'], { reject: false });
 	module.eventEmitter.emit('shares:updated');
-	await installCoreApps(job, module);
 	await scanImportablePools(module);
 };
 
@@ -401,6 +401,14 @@ const onConnection = (socket, module) => {
 		scanImportablePools(module);
 	});
 
+	socket.on('host:apps:core:install', async () => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:apps:core:install', { username: socket.username });
+	});
+
 	socket.on('host:storage:pool:import', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
@@ -424,6 +432,7 @@ export default {
 	onConnection,
 	jobs: {
 		'host:storage:pool:import': importPool,
-		'host:storage:pool:create': createPool
+		'host:storage:pool:create': createPool,
+		'host:apps:core:install': installCoreApps
 	}
 };
