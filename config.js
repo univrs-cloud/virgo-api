@@ -1,6 +1,10 @@
 export default {
-	server: {
+	acme: {
 		host: '127.0.0.1',
+		port: 2999
+	},
+	server: {
+		host: '0.0.0.0',
 		port: 3000
 	},
 	redis: {
@@ -14,6 +18,7 @@ export default {
 		templatesUrl: 'https://apps.univrs.cloud/templates.json'
 	},
 	fleet: {
-		url: 'https://fleet.univrs.cloud'
+		url: 'https://fleet.univrs.cloud',
+		zone: 'univrs.cloud'
 	}
 };

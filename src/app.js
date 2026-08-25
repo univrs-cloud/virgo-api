@@ -4,6 +4,7 @@ import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
 import errorHandler from './middleware/error_handler.js';
 import * as trustedProxy from './utils/trusted_proxy.js';
+import { relayAcmeChallenge } from './modules/configuration/fleet.js';
 
 function createApp() {
 	const app = express();
@@ -20,4 +21,32 @@ function createApp() {
 	return app;
 }
 
-export default createApp;
+function createAcmeApp() {
+	const app = express();
+	app.disable('x-powered-by');
+	app.use(express.json({ limit: '16kb' }));
+	app.post('/acme/present', challenge('present'));
+	app.post('/acme/cleanup', challenge('cleanup'));
+	app.use((request, response) => { response.status(404).json({ message: 'Not found' }); });
+	return app;
+}
+
+const challenge = (action) => {
+	return async (request, response) => {
+		const fqdn = String(request.body?.fqdn || '').trim().replace(/\.$/, '');
+		const value = String(request.body?.value || '').trim();
+		if (!fqdn || !value) {
+			response.status(400).json({ message: 'fqdn and value are required' });
+			return;
+		}
+
+		try {
+			await relayAcmeChallenge(action, { fqdn, value });
+			response.status(200).json({ status: 'succeeded' });
+		} catch (error) {
+			response.status(502).json({ message: error.message });
+		}
+	};
+};
+
+export { createApp, createAcmeApp };

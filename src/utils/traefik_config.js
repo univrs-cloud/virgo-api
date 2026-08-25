@@ -186,10 +186,10 @@ const generate = (name, options) => {
       entryPoints:
         - "https"
       service: "${name}"
-      tls: {{ if ne (env \`CERTRESOLVER\`) "" }}
-        certResolver: "{{ env \`CERTRESOLVER\` }}"
-      {{ else }}
+      tls: {{ if or (eq (env \`CERTRESOLVER\`) "") (eq (env \`CERTRESOLVER\`) "ledns") }}
         {}
+      {{ else }}
+        certResolver: "{{ env \`CERTRESOLVER\` }}"
       {{ end }}
       middlewares:${middlewares}
 
