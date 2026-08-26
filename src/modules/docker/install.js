@@ -8,6 +8,7 @@ import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js
 import DataService from '../../database/data_service.js';
 
 const streamPipeline = promisify(stream.pipeline);
+
 const installApp = async (job, module) => {
 	const { config } = job.data;
 	const template = module.toArray(module.getState('templates')).find((template) => { return template.name === config?.name; });
@@ -93,6 +94,7 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
 	module.eventEmitter.emit('configured:updated');
+	module.eventEmitter.emit('app:installed', { name: template.name });
 	return `${template.title} installed.`;
 };
 
