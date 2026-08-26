@@ -3,6 +3,7 @@ import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 import Poller from '../../utils/poller.js';
+
 const polls = [];
 let appsNetworkSnapshot = {};
 

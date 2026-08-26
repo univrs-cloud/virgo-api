@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import { Resolver } from 'dns/promises';
-import * as traefikConfig from '../../utils/traefik_config.js';
+import * as traefikConfig from './traefik_config.js';
 
 const ACME_STORE = { le: '/messier/apps/traefik/letsencrypt/acme.json', ledns: '/messier/apps/traefik/letsencrypt/acme-dns.json' };
 const PUBLIC_RESOLVERS = ['1.1.1.1', '8.8.8.8'];
@@ -51,24 +51,4 @@ const read = async () => {
 	};
 };
 
-const publish = async (module) => {
-	const certificate = await read();
-	module.setState('certificate', certificate);
-	module.nsp.emit('host:certificate', certificate);
-	return certificate;
-};
-
-const onConnection = (socket, module) => {
-	socket.on('host:certificate:fetch', async () => {
-		if (!socket.isAuthenticated) {
-			return;
-		}
-
-		socket.emit('host:certificate', await publish(module));
-	});
-};
-
-export default {
-	name: 'certificate',
-	onConnection
-};
+export { read };

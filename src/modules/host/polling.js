@@ -4,10 +4,13 @@ import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import Poller from '../../utils/poller.js';
+import * as certificate from '../../utils/certificate.js';
+import * as setup from '../../utils/setup_state.js';
 
 const BY_ID_DIR = '/dev/disk/by-id';
-
+const CERTIFICATE_INTERVAL_MS = 10000;
 const polls = [];
+let certificatePoll = null;
 
 const getNetworkStats = async (module) => {
 	try {
@@ -196,9 +199,26 @@ const getTime = (module) => {
 	module.nsp.emit('host:time', module.getState('time'));
 };
 
+const getCertificate = async (module) => {
+	const state = await certificate.read();
+	module.setState('certificate', state);
+	module.emitChanged('host:certificate', state);
+	if (state.hasCertificate || setup.isCompleted()) {
+		certificatePoll?.stop();
+	}
+};
+
 const register = (module) => {
 	module.eventEmitter.on('host:storage:fetch', () => {
 		getStorage(module);
+	});
+	module.eventEmitter.on('app:installed', ({ name } = {}) => {
+		if (name !== 'traefik' || setup.isCompleted()) {
+			return;
+		}
+
+		certificatePoll = certificatePoll || new Poller(module, getCertificate, CERTIFICATE_INTERVAL_MS);
+		certificatePoll.start();
 	});
 
 	polls.push(new Poller(module, getNetworkStats, 2000));

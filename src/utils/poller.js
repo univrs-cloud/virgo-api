@@ -24,6 +24,10 @@ class Poller {
 		this.#loop();
 	}
 
+	stop() {
+		this.#stop();
+	}
+
 	#stop() {
 		this.#isRunning = false;
 		clearTimeout(this.#idleTimeout);
