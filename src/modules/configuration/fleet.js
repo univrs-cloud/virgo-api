@@ -15,6 +15,8 @@ const AUTH_FAILED_ERROR = 'Node authentication failed';
 // reconnect load arrives smeared across time instead of as a single spike.
 const STARTUP_JITTER_MS = 30000;
 const ACME_RELAY_TIMEOUT_MS = 10000;
+const ACME_CONNECT_TIMEOUT_MS = 15000;
+const ACME_CONNECT_POLL_MS = 500;
 let fleetSocket = null;
 let fleetModule = null;
 // Each matches its source event: system is host:updates, apps is the docker module's per-app update
@@ -400,8 +402,17 @@ const onConnection = (socket, module) => {
 	});
 };
 
+const waitForFleet = async () => {
+	const deadline = Date.now() + ACME_CONNECT_TIMEOUT_MS;
+	while (!fleetSocket?.connected && Date.now() < deadline) {
+		await new Promise((resolve) => { setTimeout(resolve, ACME_CONNECT_POLL_MS); });
+	}
+
+	return Boolean(fleetSocket?.connected);
+};
+
 export const relayAcmeChallenge = async (action, { fqdn, value }) => {
-	if (!fleetSocket?.connected) {
+	if (!await waitForFleet()) {
 		throw new Error('Not connected to fleet');
 	}
 
