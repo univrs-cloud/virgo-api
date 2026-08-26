@@ -14,3 +14,20 @@ if ! ischroot; then
 		echo "Node updated."
 	fi
 fi
+
+# The ACME hook listens on the virgo bridge gateway so lego, inside the traefik container, can reach
+# it. INPUT defaults to DROP, so without this the request hangs rather than being refused and
+# certificate issuance fails with a timeout that points nowhere useful.
+if ! ischroot; then
+	rules_file="/etc/iptables/rules.v4"
+	acme_rule="-A INPUT -p tcp -m tcp --dport 2999 -j ACCEPT"
+	if [ -f "$rules_file" ] && ! grep -qF -- "--dport 2999" "$rules_file"; then
+		sed -i "/--dport 3000 -j ACCEPT/i $acme_rule" "$rules_file"
+		echo "Added ACME hook firewall rule to $rules_file."
+	fi
+
+	if ! iptables -C INPUT -p tcp --dport 2999 -j ACCEPT 2>/dev/null; then
+		iptables -I INPUT -p tcp --dport 2999 -j ACCEPT
+		echo "Opened port 2999 for the ACME hook."
+	fi
+fi
