@@ -48,7 +48,7 @@ const SSL_EMAIL = 'voyager@univrs.cloud';
 const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
 const CORE_APPS = [
 	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; } },
-	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), EMAIL: SSL_EMAIL }; } }
+	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; } }
 ];
 
 let scanning = null;
