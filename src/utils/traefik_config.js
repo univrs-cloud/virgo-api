@@ -32,6 +32,24 @@ const getDomain = () => {
 };
 
 /**
+ * Reads the CERTRESOLVER value from the Traefik .env file
+ * @returns {string}
+ */
+const getCertresolver = () => {
+	try {
+		if (!fs.existsSync(TRAEFIK_ENV_PATH)) {
+			return '';
+		}
+
+		const content = fs.readFileSync(TRAEFIK_ENV_PATH, 'utf8');
+		const match = content.match(/^CERTRESOLVER=["']?([^"'\n]*)["']?$/m);
+		return (match ? match[1].trim() : '');
+	} catch (error) {
+		return '';
+	}
+};
+
+/**
  * Reads all Traefik YAML config files from the config directory
  * @returns {Promise<Array<{name: string, config: object}>>}
  */
@@ -271,6 +289,7 @@ const enrichBookmarks = async (bookmarks) => {
 
 export {
 	getDomain,
+	getCertresolver,
 	readAll,
 	parse,
 	match,

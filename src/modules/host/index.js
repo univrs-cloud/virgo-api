@@ -156,6 +156,9 @@ class HostModule extends BaseModule {
 		if (this.getState('system')) {
 			socket.emit('host:system', this.getState('system'));
 		}
+		if (this.getState('certificate')) {
+			socket.emit('host:certificate', this.getState('certificate'));
+		}
 		if (this.getState('networkStats')) {
 			socket.emit('host:network:stats', this.getState('networkStats'));
 		}

@@ -14,7 +14,7 @@ const AUTH_FAILED_ERROR = 'Node authentication failed';
 // SQLite write). Delay the boot-time auto-connect by a random offset in this window so the
 // reconnect load arrives smeared across time instead of as a single spike.
 const STARTUP_JITTER_MS = 30000;
-const ACME_RELAY_TIMEOUT_MS = 30000;
+const ACME_RELAY_TIMEOUT_MS = 10000;
 let fleetSocket = null;
 let fleetModule = null;
 // Each matches its source event: system is host:updates, apps is the docker module's per-app update
@@ -404,6 +404,8 @@ export const relayAcmeChallenge = async (action, { fqdn, value }) => {
 	if (!fleetSocket?.connected) {
 		throw new Error('Not connected to fleet');
 	}
+
+	console.log(`[acme] relaying ${action} for ${fqdn} to fleet`);
 
 	const response = await fleetSocket.timeout(ACME_RELAY_TIMEOUT_MS).emitWithAck(`acme:${action}`, { fqdn, value });
 	if (response?.status !== 'succeeded') {

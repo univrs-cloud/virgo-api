@@ -1,6 +1,6 @@
 export default {
 	acme: {
-		host: '127.0.0.1',
+		host: '172.30.0.1',
 		port: 2999
 	},
 	server: {
