@@ -2,13 +2,14 @@ import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { execa } from 'execa';
 import pkg from '../../../package.json' with { type: 'json' };
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
+import { getOwnAddress, holdsAddress } from '../../utils/network.js';
 
 const { version } = pkg;
+
 const SERVICE_FILE = '/etc/avahi/services/univrs.service';
 const SERVICE_TYPE = '_univrs._tcp';
 const MACHINE_ID_FILE = '/etc/machine-id';
@@ -17,10 +18,7 @@ const ID_NAMESPACE = 'univrs:node-discovery';
 let cachedNodeId = null;
 let advertiseQueue = Promise.resolve();
 
-/** Stable per appliance and safe to publish. The machine id is regenerated per install — export-image
- * clears it — but systemd is explicit that it must not be exposed as-is, so what goes on the wire is
- * an application-specific hash of it. The fleet's nodeId is deliberately not reused: unregistering
- * clears it, and an identity that changes when a node leaves the fleet is no identity at all. */
+/** Stable per appliance and safe to publish. */
 const getNodeId = async () => {
 	if (cachedNodeId) {
 		return cachedNodeId;
@@ -53,20 +51,6 @@ const escapeXml = (value) => {
 	});
 };
 
-const holdsAddress = async (address) => {
-	try {
-		const { stdout } = await execa('ip', ['-j', 'addr', 'show']);
-
-		return JSON.parse(stdout || '[]').some((iface) => {
-			return iface.addr_info?.some((info) => {
-				return info.local === address;
-			});
-		});
-	} catch (error) {
-		return false;
-	}
-};
-
 const buildRecords = async () => {
 	const records = {
 		id: await getNodeId(),
@@ -76,6 +60,11 @@ const buildRecords = async () => {
 	};
 
 	const { virtualIp } = await DataService.getConfiguration();
+	const address = await getOwnAddress(virtualIp?.address);
+
+	if (address) {
+		records.address = address;
+	}
 
 	if (virtualIp?.address) {
 		records.virtualip = virtualIp.address;
@@ -113,9 +102,7 @@ const readServiceFile = async () => {
 	}
 };
 
-/** Written atomically: avahi watches the directory and republishes on any change, so a half-written
- * file would be a published half-advertisement. The temporary name deliberately does not end in
- * `.service`, which is the only pattern avahi reads. */
+/** Written atomically so Avahi never sees a partially written service file. */
 const writeServiceFile = async (document) => {
 	const temporaryFile = `${SERVICE_FILE}.tmp`;
 
@@ -124,8 +111,7 @@ const writeServiceFile = async (document) => {
 	await fs.rename(temporaryFile, SERVICE_FILE);
 };
 
-/** Advertisements are serialized because multiple events can trigger advertise() concurrently.
- * Without serialization they would all use the same temporary file and race on rename(). */
+/** Serialize advertisements so multiple events cannot race on the temporary file. */
 const advertise = () => {
 	advertiseQueue = advertiseQueue
 		.then(async () => {
