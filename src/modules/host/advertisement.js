@@ -15,6 +15,7 @@ const MACHINE_ID_FILE = '/etc/machine-id';
 const ID_NAMESPACE = 'univrs:node-discovery';
 
 let cachedNodeId = null;
+let advertiseQueue = Promise.resolve();
 
 /** Stable per appliance and safe to publish. The machine id is regenerated per install — export-image
  * clears it — but systemd is explicit that it must not be exposed as-is, so what goes on the wire is
@@ -26,25 +27,40 @@ const getNodeId = async () => {
 	}
 
 	const machineId = (await fs.readFile(MACHINE_ID_FILE, 'utf8')).trim();
+
 	if (!machineId) {
 		throw new Error(`${MACHINE_ID_FILE} is empty`);
 	}
 
-	cachedNodeId = crypto.createHash('sha256').update(`${ID_NAMESPACE}:${machineId}`).digest('hex').slice(0, 16);
+	cachedNodeId = crypto
+		.createHash('sha256')
+		.update(`${ID_NAMESPACE}:${machineId}`)
+		.digest('hex')
+		.slice(0, 16);
+
 	return cachedNodeId;
 };
 
 const escapeXml = (value) => {
 	return String(value).replace(/[<>&'"]/g, (character) => {
-		return { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[character];
+		return {
+			'<': '&lt;',
+			'>': '&gt;',
+			'&': '&amp;',
+			"'": '&apos;',
+			'"': '&quot;'
+		}[character];
 	});
 };
 
 const holdsAddress = async (address) => {
 	try {
 		const { stdout } = await execa('ip', ['-j', 'addr', 'show']);
+
 		return JSON.parse(stdout || '[]').some((iface) => {
-			return iface.addr_info?.some((info) => { return info.local === address; });
+			return iface.addr_info?.some((info) => {
+				return info.local === address;
+			});
 		});
 	} catch (error) {
 		return false;
@@ -58,7 +74,9 @@ const buildRecords = async () => {
 		setup: (setup.isCompleted() ? 'complete' : 'incomplete'),
 		ver: version
 	};
+
 	const { virtualIp } = await DataService.getConfiguration();
+
 	if (virtualIp?.address) {
 		records.virtualip = virtualIp.address;
 		records.holds = (await holdsAddress(virtualIp.address) ? '1' : '0');
@@ -68,9 +86,12 @@ const buildRecords = async () => {
 };
 
 const buildDocument = (records) => {
-	const txt = Object.entries(records).map(([key, value]) => {
-		return `    <txt-record>${escapeXml(`${key}=${value}`)}</txt-record>`;
-	}).join('\n');
+	const txt = Object.entries(records)
+		.map(([key, value]) => {
+			return `    <txt-record>${escapeXml(`${key}=${value}`)}</txt-record>`;
+		})
+		.join('\n');
+
 	return `<?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
@@ -97,34 +118,46 @@ const readServiceFile = async () => {
  * `.service`, which is the only pattern avahi reads. */
 const writeServiceFile = async (document) => {
 	const temporaryFile = `${SERVICE_FILE}.tmp`;
+
 	await fs.mkdir(path.dirname(SERVICE_FILE), { recursive: true });
 	await fs.writeFile(temporaryFile, document, 'utf8');
 	await fs.rename(temporaryFile, SERVICE_FILE);
 };
 
-/** Called on every startup rather than only on change: a node set up long before this feature existed
- * has no change to react to, and would otherwise stay unadvertised forever. The content comparison is
- * what keeps that safe — rewriting the file makes avahi withdraw and re-announce the service, so an
- * unconditional write would re-register on the network every five seconds under a restart loop. */
-const advertise = async () => {
-	try {
-		const document = buildDocument(await buildRecords());
-		if (await readServiceFile() === document) {
-			return;
-		}
+/** Advertisements are serialized because multiple events can trigger advertise() concurrently.
+ * Without serialization they would all use the same temporary file and race on rename(). */
+const advertise = () => {
+	advertiseQueue = advertiseQueue
+		.then(async () => {
+			const document = buildDocument(await buildRecords());
 
-		await writeServiceFile(document);
-	} catch (error) {
-		console.warn(`Could not publish the discovery service: ${error.shortMessage || error.message}`);
-	}
+			if (await readServiceFile() === document) {
+				return;
+			}
+
+			await writeServiceFile(document);
+		})
+		.catch((error) => {
+			console.warn(`Could not publish the discovery service: ${error.shortMessage || error.message}`);
+		});
+
+	return advertiseQueue;
 };
 
 const register = (module) => {
 	advertise();
-	setup.watchCompleted(() => { advertise(); });
+
+	setup.watchCompleted(() => {
+		advertise();
+	});
+
 	module.eventEmitter
-		.on('host:network:identifier:updated', () => { advertise(); })
-		.on('host:network:virtualIp:updated', () => { advertise(); });
+		.on('host:network:identifier:updated', () => {
+			advertise();
+		})
+		.on('host:network:virtualIp:updated', () => {
+			advertise();
+		});
 };
 
 export default {
