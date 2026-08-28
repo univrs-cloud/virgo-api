@@ -1,8 +1,9 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import { BOND_NAME, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
+import { apply as applyVirtualIp, validate as validateVirtualIp } from './virtual_ip.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
-const BOND_NAME = 'bond0';
 const PRIMARY_INTERFACE = 'eth0';
 const SECONDARY_INTERFACE = 'eth1';
 
@@ -35,35 +36,6 @@ const getConnectionProperty = async (connectionName, property) => {
 		const { stdout } = await execa('nmcli', ['-g', property, 'connection', 'show', connectionName]);
 		return stdout.trim() || null;
 	} catch (error) {
-		return null;
-	}
-};
-
-const getDefaultInterfaceName = async () => {
-	try {
-		const { stdout: routeOutput } = await execa('ip', ['-j', 'route', 'show', 'default']);
-		return JSON.parse(routeOutput || '[]')[0]?.dev || null;
-	} catch (error) {
-		return null;
-	}
-};
-
-/** Whether another host already answers for an address, asked the way a host asks before claiming one:
- * an ARP probe sent from 0.0.0.0, so a reply can only come from something that already owns it. Being
- * link-layer, this reaches the address whatever subnet it is in. Exit 1 is that reply. Any other
- * failure answers nothing — a node with no lease has no interface to probe from, which is exactly
- * the node that needs a static address — so that case is `null`: unknown, not free. */
-const isAddressInUse = async (ipAddress) => {
-	const device = await getDefaultInterfaceName() || BOND_NAME;
-	try {
-		await execa('arping', ['-D', '-q', '-c', '2', '-w', '3', '-I', device, ipAddress]);
-		return false;
-	} catch (error) {
-		if (error.exitCode === 1) {
-			return true;
-		}
-
-		console.warn(`Could not check whether ${ipAddress} is in use: ${error.shortMessage || error.message}`);
 		return null;
 	}
 };
@@ -199,6 +171,10 @@ const updateInterface = async (job, module) => {
 		}
 	}
 
+	if (config.virtualIp) {
+		validateVirtualIp(config.virtualIp, config);
+	}
+
 	await module.updateJobProgress(job, `Network interface updating...`);
 	try {
 		const bondExists = await connectionExists(BOND_NAME);
@@ -240,6 +216,8 @@ const updateInterface = async (job, module) => {
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
 	}
+
+	await applyVirtualIp(config.virtualIp, config, module);
 	module.eventEmitter.emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };

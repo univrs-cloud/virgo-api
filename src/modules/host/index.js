@@ -6,6 +6,7 @@ import camelcaseKeys from 'camelcase-keys';
 import pkg from '../../../package.json' with { type: 'json' };
 import BaseModule from '../base.js';
 import * as setup from '../../utils/setup_state.js';
+import { readConfiguration as readVirtualIp, isEnabled as isVirtualIpEnabled } from './virtual_ip.js';
 
 const { version } = pkg;
 
@@ -70,6 +71,10 @@ class HostModule extends BaseModule {
 			})
 			.on('host:network:interface:updated', async () => {
 				await this.#loadNetworkInterfaces();
+				this.nsp.emit('host:system', this.getState('system'));
+			})
+			.on('host:network:virtualIp:updated', async () => {
+				await this.#loadVirtualIp();
 				this.nsp.emit('host:system', this.getState('system'));
 			});
 	}
@@ -432,7 +437,8 @@ class HostModule extends BaseModule {
 			this.#loadSetupCompleted(),
 			this.#loadUpdate(),
 			this.#loadNetworkIdentifier(),
-			this.#loadNetworkInterfaces()
+			this.#loadNetworkInterfaces(),
+			this.#loadVirtualIp()
 		]);
 	}
 
@@ -494,6 +500,14 @@ class HostModule extends BaseModule {
 			await new Promise((resolve) => { return setTimeout(resolve, intervalMs); });
 		}
 		return 0;
+	}
+
+	async #loadVirtualIp() {
+		const configuration = await readVirtualIp();
+		const virtualIp = (configuration?.address
+			? { ...configuration, holding: await isVirtualIpEnabled() }
+			: null);
+		this.setState('system', { ...this.getState('system'), virtualIp });
 	}
 
 	async #loadNetworkInterfaces() {

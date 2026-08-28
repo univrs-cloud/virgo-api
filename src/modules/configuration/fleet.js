@@ -6,6 +6,8 @@ import DataService from '../../database/data_service.js';
 import { attachProxyHandlers } from '../../utils/fleet_proxy.js';
 import { setFleetRuntimeState, resetFleetRuntimeState } from '../../utils/fleet_state.js';
 import { normalizeEmail } from '../../utils/email.js';
+import { getAddresses, getDefaultInterfaceName } from '../../utils/network.js';
+import { readConfiguration as readVirtualIp, isEnabled as isVirtualIpEnabled } from '../host/virtual_ip.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
@@ -17,7 +19,9 @@ const STARTUP_JITTER_MS = 30000;
 const ACME_RELAY_TIMEOUT_MS = 10000;
 const ACME_CONNECT_TIMEOUT_MS = 15000;
 const ACME_CONNECT_POLL_MS = 500;
+const DOMAIN_REPORT_DELAY_MS = 3000;
 let fleetSocket = null;
+let domainReportTimer = null;
 let fleetModule = null;
 // Each matches its source event: system is host:updates, apps is the docker module's per-app update
 // summary (array | [] | false).
@@ -58,6 +62,34 @@ const reportUpsToFleet = () => {
 	if (fleetSocket?.connected) {
 		fleetSocket.emit('node:ups', lastUps);
 	}
+};
+
+const reportDomainToFleet = async () => {
+	if (!fleetSocket?.connected) {
+		return;
+	}
+
+	const identifier = await getNodeIdentifier();
+	if (!identifier.hostname || !identifier.domainName || !identifier.address) {
+		return;
+	}
+
+	fleetSocket.emit('node:domain:claim', identifier, (response) => {
+		if (response?.status !== 'succeeded') {
+			console.error(`Fleet domain claim failed: ${response?.message || 'no response'}`);
+		}
+	});
+};
+
+const scheduleDomainReport = () => {
+	clearTimeout(domainReportTimer);
+	domainReportTimer = setTimeout(() => {
+		domainReportTimer = null;
+		reportDomainToFleet().catch((error) => {
+			console.error('Error reporting the node address to fleet:', error);
+		});
+	}, DOMAIN_REPORT_DELAY_MS);
+	domainReportTimer.unref();
 };
 
 const fleetUpdate = () => {
@@ -116,12 +148,20 @@ const getNodeIdentifier = async () => {
 	};
 };
 
+/** The virtual IP wins when this node is the one holding it: it is the address the router forwards to
+ * and the one that survives a node being replaced, so it is what the fleet's LAN records should point
+ * at. A node that has it configured but stood down answers on its own address instead. */
 const getNodeAddress = async () => {
 	try {
-		const name = await si.networkInterfaceDefault();
-		const interfaces = await si.networkInterfaces();
-		const found = interfaces.find((item) => { return item.iface === name; });
-		return found?.ip4 || '';
+		const virtualIp = await readVirtualIp();
+		if (virtualIp?.address && await isVirtualIpEnabled()) {
+			return virtualIp.address;
+		}
+
+		const device = await getDefaultInterfaceName();
+		const addrInfo = (await getAddresses()).find((item) => { return item.ifname === device; })?.addr_info || [];
+		const address = addrInfo.find((info) => { return info.family === 'inet' && info.local !== virtualIp?.address; });
+		return address?.local || '';
 	} catch (error) {
 		return '';
 	}
@@ -168,6 +208,7 @@ const connect = async ({ token, nodeId }) => {
 		reportStorageToFleet();
 		reportUpsToFleet();
 		requestAppUpdateJobs();
+		scheduleDomainReport();
 	});
 	fleetSocket.on('fleet:unregister', async (ack = () => {}) => {
 		try {
@@ -360,6 +401,9 @@ const register = (module) => {
 		lastUps = ups;
 		reportUpsToFleet();
 	});
+	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
+	module.eventEmitter.on('host:network:interface:updated', scheduleDomainReport);
+	module.eventEmitter.on('host:network:virtualIp:updated', scheduleDomainReport);
 	// A node that boots before its pool reads no configuration at all, so an enrolment carried by a
 	// pool imported afterwards is only discovered when the configuration becomes readable.
 	module.eventEmitter.on('configuration:updated', startIfEnabled);

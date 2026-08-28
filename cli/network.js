@@ -68,6 +68,9 @@ const queueHostNetworkInterfaceJob = async (options) => {
 			config.netmask = String(options.prefix);
 			config.gateway = options.gateway;
 		}
+		if (options.virtualIp !== undefined) {
+			config.virtualIp = options.virtualIp;
+		}
 		return config;
 	}
 };
@@ -104,7 +107,26 @@ const register = (program) => {
 		.option('--prefix <n>', 'CIDR prefix length (required with --method manual)', parsePrefixOption)
 		.option('--gateway <ip>', 'Default gateway (required with --method manual)')
 		.option('--dns <ip>', 'DNS server address, repeatable up to 3 times', collectDnsOption, [])
+		.option('--virtual-ip <ip>', 'Virtual IP carried by this node (empty string removes it)')
 		.action(queueHostNetworkInterfaceJob);
+
+	const virtualIpCmd = networkCmd
+		.command('virtual-ip')
+		.description('Virtual IP carried by this node');
+
+	virtualIpCmd
+		.command('promote')
+		.description('Claim the configured virtual IP for this node')
+		.action(() => {
+			return enqueueHostJob('host:network:virtualIp:promote', { username: process.env.USER || 'cli' }, 'Virtual IP promotion started.');
+		});
+
+	virtualIpCmd
+		.command('release')
+		.description('Give up the virtual IP held by this node')
+		.action(() => {
+			return enqueueHostJob('host:network:virtualIp:release', { username: process.env.USER || 'cli' }, 'Virtual IP release started.');
+		});
 
 	function collectDnsOption(value, previous) {
 		return previous.concat([value]);

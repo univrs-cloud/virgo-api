@@ -9,6 +9,7 @@ After=network-online.target
 Type=simple
 EnvironmentFile=/etc/default/{{ node_deb_package_name }}
 WorkingDirectory={{ node_deb_install_dir }}/{{ node_deb_package_name }}
+ExecStartPre=/bin/bash {{ node_deb_install_dir }}/{{ node_deb_package_name }}/app/cert/generate.sh
 ExecStart={{ node_deb_install_dir }}/{{ node_deb_package_name }}/app/{{ daemon_entrypoint }}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

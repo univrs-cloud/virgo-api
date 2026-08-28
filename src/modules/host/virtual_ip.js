@@ -1,0 +1,225 @@
+import fs from 'fs/promises';
+import { execa } from 'execa';
+import DataService from '../../database/data_service.js';
+import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
+import { discover } from './discovery.js';
+
+const ENVIRONMENT_FILE = '/etc/default/virgo-virtual-ip';
+const UNIT = 'virgo-virtual-ip.service';
+
+const toInteger = (address) => {
+	return address.split('.').reduce((total, octet) => { return ((total << 8) >>> 0) + Number(octet); }, 0) >>> 0;
+};
+
+const isIPv4 = (address) => {
+	const octets = String(address || '').split('.');
+	return octets.length === 4 && octets.every((octet) => {
+		return /^\d{1,3}$/.test(octet) && Number(octet) <= 255;
+	});
+};
+
+const isSameSubnet = (first, second, prefixLength) => {
+	const mask = (prefixLength === 0 ? 0 : (0xFFFFFFFF << (32 - prefixLength)) >>> 0);
+	return ((toInteger(first) & mask) >>> 0) === ((toInteger(second) & mask) >>> 0);
+};
+
+const readConfiguration = async () => {
+	return (await DataService.getConfiguration()).virtualIp || null;
+};
+
+const isEnabled = async () => {
+	try {
+		const { stdout } = await execa('systemctl', ['is-enabled', UNIT]);
+		return stdout.trim() === 'enabled';
+	} catch (error) {
+		return false;
+	}
+};
+
+const writeEnvironmentFile = async ({ address, netmask, device }) => {
+	const contents = `VIRTUAL_IP_ADDR=${address}\nVIRTUAL_IP_CIDR=${address}/${netmask}\nVIRTUAL_IP_DEV=${device}\n`;
+	await fs.writeFile(ENVIRONMENT_FILE, contents, 'utf8');
+};
+
+/** The virtual IP must never move on its own, so claiming is the only operation that probes: if
+ * another host already answers, this node stands down rather than creating a duplicate address. */
+const claim = async (address) => {
+	if (!await holdsAddress(address) && await isAddressInUse(address) === true) {
+		throw new Error(`${address} is already held by another host on the network.`);
+	}
+
+	await execa('systemctl', ['enable', '--now', UNIT]);
+};
+
+const standDown = async () => {
+	await execa('systemctl', ['disable', '--now', UNIT]);
+};
+
+/** Validated against the interface configuration being submitted, not against what the node currently
+ * holds: the two are written in one job, and the virtual IP has to make sense on the addressing the
+ * node is moving to. */
+const validate = (virtualIp, config) => {
+	if (!isIPv4(virtualIp)) {
+		throw new Error(`${virtualIp} is not a valid IPv4 address.`);
+	}
+
+	if (config.method !== 'manual') {
+		throw new Error(`A virtual IP needs a static address; it cannot be used with automatic addressing.`);
+	}
+
+	if (virtualIp === config.ipAddress) {
+		throw new Error(`The virtual IP cannot be the same as the node's own address.`);
+	}
+
+	const prefixLength = Number.parseInt(config.netmask, 10);
+	if (!Number.isInteger(prefixLength) || prefixLength < 1 || prefixLength > 32) {
+		throw new Error(`${config.netmask} is not a valid netmask.`);
+	}
+
+	if (!isIPv4(config.ipAddress)) {
+		throw new Error(`${config.ipAddress} is not a valid IPv4 address.`);
+	}
+
+	if (!isSameSubnet(virtualIp, config.ipAddress, prefixLength)) {
+		throw new Error(`${virtualIp} is not in the same subnet as ${config.ipAddress}/${prefixLength}.`);
+	}
+};
+
+/** A node that has no virtual IP of its own may not claim one while another node on the segment
+ * already carries one — those two should be paired instead, and two unrelated holders is the state
+ * the design exists to avoid. A node that already has one may keep changing it.
+ *
+ * Enforced here rather than only in the form: a disabled input is not a permission check, and the CLI
+ * reaches this same job. Discovery failing answers nothing, so it fails open with a warning and
+ * leaves the ARP probe in `claim()` as the check that can still prove a collision. */
+const assertClaimable = async () => {
+	if (await readConfiguration()) {
+		return;
+	}
+
+	let peers = [];
+	try {
+		peers = await discover();
+	} catch (error) {
+		console.warn(`Could not check the network for other virtual IPs: ${error.shortMessage || error.message}`);
+		return;
+	}
+
+	const holder = peers.find((peer) => { return Boolean(peer.virtualIp); });
+	if (holder) {
+		throw new Error(`${holder.name || holder.address} already has virtual IP ${holder.virtualIp}. Join that node instead of configuring a second one.`);
+	}
+};
+
+/** Applied after the bond is up, because bringing the connection up flushes the interface's
+ * addresses. An empty value removes the virtual IP rather than leaving a stale one behind. */
+const apply = async (virtualIp, config, module) => {
+	const device = await getDefaultInterfaceName() || BOND_NAME;
+	if (!virtualIp) {
+		if (await readConfiguration()) {
+			await standDown();
+			await DataService.setConfiguration('virtualIp', null);
+			module.eventEmitter.emit('host:network:virtualIp:updated');
+		}
+
+		return;
+	}
+
+	validate(virtualIp, config);
+	await assertClaimable();
+	await writeEnvironmentFile({ address: virtualIp, netmask: config.netmask, device });
+	await DataService.setConfiguration('virtualIp', { address: virtualIp, netmask: config.netmask, device });
+	await claim(virtualIp);
+	module.eventEmitter.emit('host:network:virtualIp:updated');
+};
+
+const promote = async (job, module) => {
+	const configuration = await readConfiguration();
+	if (!configuration?.address) {
+		throw new Error(`No virtual IP is configured on this node.`);
+	}
+
+	await module.updateJobProgress(job, `Claiming ${configuration.address}...`);
+	await writeEnvironmentFile(configuration);
+	await claim(configuration.address);
+	module.eventEmitter.emit('host:network:virtualIp:updated');
+	return `${configuration.address} is now held by this node.`;
+};
+
+const release = async (job, module) => {
+	const configuration = await readConfiguration();
+	if (!configuration?.address) {
+		throw new Error(`No virtual IP is configured on this node.`);
+	}
+
+	await module.updateJobProgress(job, `Releasing ${configuration.address}...`);
+	await standDown();
+	module.eventEmitter.emit('host:network:virtualIp:updated');
+	return `${configuration.address} released.`;
+};
+
+/** Bringing bond0 up flushes its addresses, so a network change silently drops the virtual IP unless
+ * the unit is restarted behind it. keepalived did this by itself; this is the replacement. */
+const reassert = async (module) => {
+	const configuration = await readConfiguration();
+	if (!configuration?.address || !await isEnabled()) {
+		return;
+	}
+
+	try {
+		await execa('systemctl', ['restart', UNIT]);
+		module.eventEmitter.emit('host:network:virtualIp:updated');
+	} catch (error) {
+		console.warn(`Could not re-assert the virtual IP: ${error.shortMessage || error.message}`);
+	}
+};
+
+/** The unit's own announcement can be lost at boot: bond0 is created with updelay=60000, so the link
+ * may not carry traffic when ExecStartPost runs. Re-announcing once virgo-api is up leaves the
+ * router's ARP cache correct either way. */
+const announce = async () => {
+	const configuration = await readConfiguration();
+	if (!configuration?.address || !await holdsAddress(configuration.address)) {
+		return;
+	}
+
+	try {
+		await execa('arping', ['-U', '-q', '-c', '3', '-I', configuration.device || BOND_NAME, configuration.address]);
+	} catch (error) {
+		console.warn(`Could not announce the virtual IP: ${error.shortMessage || error.message}`);
+	}
+};
+
+const onConnection = (socket, module) => {
+	socket.on('host:network:virtualIp:promote', async () => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:network:virtualIp:promote', { username: socket.username });
+	});
+	socket.on('host:network:virtualIp:release', async () => {
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			return;
+		}
+
+		await module.addJob('host:network:virtualIp:release', { username: socket.username });
+	});
+};
+
+const register = (module) => {
+	announce();
+	module.eventEmitter.on('host:network:interface:updated', () => { reassert(module); });
+};
+
+export default {
+	name: 'virtual_ip',
+	register,
+	onConnection,
+	jobs: {
+		'host:network:virtualIp:promote': promote,
+		'host:network:virtualIp:release': release
+	}
+};
+
+export { apply, validate, readConfiguration, isEnabled };

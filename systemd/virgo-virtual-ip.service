@@ -1,0 +1,16 @@
+[Unit]
+Description=Virgo virtual IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/default/virgo-virtual-ip
+ExecStartPre=/usr/local/bin/virgo-virtual-ip-guard
+ExecStart=/usr/sbin/ip addr replace ${VIRTUAL_IP_CIDR} dev ${VIRTUAL_IP_DEV}
+ExecStartPost=-/usr/bin/arping -U -q -c 3 -I ${VIRTUAL_IP_DEV} ${VIRTUAL_IP_ADDR}
+ExecStop=-/usr/sbin/ip addr del ${VIRTUAL_IP_CIDR} dev ${VIRTUAL_IP_DEV}
+
+[Install]
+WantedBy=multi-user.target
