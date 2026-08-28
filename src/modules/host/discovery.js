@@ -5,6 +5,7 @@ const SERVICE_TYPE = '_univrs._tcp';
 const MIN_RESTART_DELAY_MS = 1000;
 const MAX_RESTART_DELAY_MS = 60000;
 const HEALTHY_AFTER_MS = 30000;
+const SETTLE_MS = 3000;
 
 /** avahi-browse escapes `;` inside a field, so splitting on a bare separator would shift every
  * following index whenever a node's name contains one. */
@@ -76,6 +77,8 @@ const serviceKey = (fields) => {
 
 const peers = new Map();
 const keyToId = new Map();
+const lastSeen = new Map();
+let generation = 0;
 
 let watcher = null;
 let restartDelay = MIN_RESTART_DELAY_MS;
@@ -105,6 +108,7 @@ const applyLine = (line, selfId) => {
 		const id = keyToId.get(key);
 
 		keyToId.delete(key);
+		lastSeen.delete(id);
 
 		return id ? peers.delete(id) : false;
 	}
@@ -116,6 +120,7 @@ const applyLine = (line, selfId) => {
 	}
 
 	keyToId.set(key, peer.id);
+	lastSeen.set(peer.id, generation);
 
 	const previous = peers.get(peer.id);
 
@@ -142,6 +147,40 @@ const watch = async () => {
 	const process = execa('avahi-browse', ['-rp', SERVICE_TYPE]);
 
 	watcher = process;
+	generation += 1;
+
+	/** A restart must not be mistaken for an empty network. Clearing the peers here would publish a
+	 * definite "nothing is out there", which makes the virtual IP field mandatory and, worse, lets
+	 * `assertClaimable()` permit a claim it should refuse — the guard would fail open exactly while
+	 * discovery is blind. So previous peers are kept, avahi's re-dump on start reconfirms them, and
+	 * anything the new browse has not re-seen by the time it settles is dropped then. */
+	const thisGeneration = generation;
+
+	const settleTimer = setTimeout(() => {
+		if (generation !== thisGeneration) {
+			return;
+		}
+
+		let changed = false;
+
+		for (const id of [...peers.keys()]) {
+			if (lastSeen.get(id) !== thisGeneration) {
+				peers.delete(id);
+				lastSeen.delete(id);
+				changed = true;
+			}
+		}
+
+		for (const [key, id] of [...keyToId.entries()]) {
+			if (!peers.has(id)) {
+				keyToId.delete(key);
+			}
+		}
+
+		if (changed) {
+			publish();
+		}
+	}, SETTLE_MS);
 
 	// A browse that stays up is a healthy one, so the backoff resets once it has clearly survived.
 	const healthyTimer = setTimeout(() => {
@@ -166,14 +205,11 @@ const watch = async () => {
 		// avahi-browse exited unsuccessfully. The supervisor below will restart it.
 	} finally {
 		clearTimeout(healthyTimer);
+		clearTimeout(settleTimer);
 
 		if (watcher === process) {
 			watcher = null;
 		}
-
-		peers.clear();
-		keyToId.clear();
-		publish();
 
 		const delay = restartDelay;
 
