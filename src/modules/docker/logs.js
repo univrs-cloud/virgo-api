@@ -14,6 +14,9 @@ const cleanupSession = (socket) => {
 	socket.off('disconnect', session.socketDisconnectHandler);
 	session.logsStream?.destroy();
 	activeSessions.delete(socket);
+	// A container restarting ends the stream, which is the common way this session dies. Without
+	// telling the client, it goes on showing the stream as live and never offers the reconnect link.
+	socket.emit('docker:container:logs:disconnected');
 };
 
 const logsConnect = async (socket, containerId) => {

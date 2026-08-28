@@ -11,6 +11,10 @@ const cleanupSession = async (socket) => {
 		return;
 	}
 
+	// Dropped before anything is awaited. Reconnecting cleans up the old session while building its
+	// replacement, and a delete that happened after the await below would remove the session that had
+	// already replaced this one, leaving it untracked and impossible to clean up later.
+	activeSessions.delete(socket);
 	socket.off('docker:container:terminal:input', session.inputHandler);
 	socket.off('docker:container:terminal:resize', session.resizeHandler);
 	socket.off('docker:container:terminal:disconnect', session.disconnectHandler);
@@ -33,13 +37,17 @@ const cleanupSession = async (socket) => {
 	} else {
 		session.terminalStream?.destroy();
 	}
-	activeSessions.delete(socket);
+
+	// The shell exiting is the common way a session ends, and without this the client is never told:
+	// it keeps showing the session as live, and the reconnect link that only appears once it is marked
+	// disconnected never appears at all.
+	socket.emit('docker:container:terminal:disconnected');
 };
 
 const terminalConnect = async (socket, containerId) => {
 	try {
-		// Clean up any existing session first
-		cleanupSession(socket);
+		// Awaited so the previous session is fully torn down before its replacement is registered
+		await cleanupSession(socket);
 
 		const container = docker.getContainer(containerId);
 		if (!container) {
