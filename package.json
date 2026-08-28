@@ -6,7 +6,7 @@
 	"license": "UNLICENSED",
 	"main": "index.js",
 	"scripts": {
-		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js cli/ cert/ src/ indexer/",
+		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy -- index.js config.js cli/ cert/ src/ indexer/ systemd/",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"bin": {
@@ -17,7 +17,7 @@
 		"architecture": "arm64",
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping",
+		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,avahi-daemon,avahi-utils",
 		"user": "root",
 		"templates": {
 			"preinst": "templates/preinstall",
@@ -39,7 +39,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^6.2.2",
+		"bullmq": "^6.3.1",
 		"camelcase-keys": "^10.0.2",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -54,7 +54,7 @@
 		"express-validator": "^7.3.2",
 		"ini": "^7.0.0",
 		"ioredis": "^6.0.0",
-		"js-yaml": "^5.4.0",
+		"js-yaml": "^5.4.1",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^2.0.2",
 		"path": "^0.12.7",
@@ -63,7 +63,7 @@
 		"socket.io": "^4.8.3",
 		"socket.io-client": "^4.8.3",
 		"sqlite3": "^6.0.1",
-		"systeminformation": "^5.33.3",
+		"systeminformation": "^5.33.5",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
@@ -71,7 +71,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.3.0",
+		"@types/node": "^26.4.0",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {

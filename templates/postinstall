@@ -2,26 +2,74 @@
 
 set -o pipefail
 
-mkdir -p /var/www/virgo-api/app/cert/
-openssl genrsa -out /var/www/virgo-api/app/cert/key.pem 4096
-chmod 600 /var/www/virgo-api/app/cert/key.pem
-openssl req -new -key /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/csr.pem -subj "/CN=virgo/O=univrs.cloud/C=RO"
-openssl x509 -req -days 365 -in /var/www/virgo-api/app/cert/csr.pem -signkey /var/www/virgo-api/app/cert/key.pem -out /var/www/virgo-api/app/cert/cert.pem -sha256
-chmod 644 /var/www/virgo-api/app/cert/cert.pem
+app_dir="/var/www/virgo-api/app"
 
-# this must be done in post install, after the dependencies have been installed
-file_path="/etc/mail.rc"
-line_to_add="set mta=/usr/bin/msmtp"
-if ! grep -Fxq "$line_to_add" "$file_path"; then
-	echo "$line_to_add" >> "$file_path"
-fi
+generate_certificate() {
+	bash "$app_dir/cert/generate.sh" --force
+}
 
-systemctl disable nvmf-autoconnect.service nvmefc-boot-connections.service # not needed, installed by nvme-cli
+configure_mail() {
+	# this must be done in post install, after the dependencies have been installed
+	local file_path="/etc/mail.rc"
+	local line_to_add="set mta=/usr/bin/msmtp"
+	if ! grep -Fxq "$line_to_add" "$file_path"; then
+		echo "$line_to_add" >> "$file_path"
+	fi
+}
 
-systemctl enable virgo-api.service
-if ! ischroot; then
-	cd /var/www/virgo-api/app/src/migrations
+install_virtual_ip_unit() {
+	install -v -m 755 "$app_dir/systemd/virgo-virtual-ip-guard" /usr/local/bin/virgo-virtual-ip-guard
+	install -v -m 644 "$app_dir/systemd/virgo-virtual-ip.service" /lib/systemd/system/virgo-virtual-ip.service
+	systemctl daemon-reload
+}
+
+configure_services() {
+	systemctl disable nvmf-autoconnect.service nvmefc-boot-connections.service # not needed, installed by nvme-cli
+	systemctl enable virgo-api.service
+}
+
+configure_nonlocal_bind() {
+	local sysctl_file="/etc/sysctl.d/90-nonlocal-bind.conf"
+	local sysctl_setting="net.ipv4.ip_nonlocal_bind = 1"
+	if [ -f "$sysctl_file" ] && grep -Fxq "$sysctl_setting" "$sysctl_file"; then
+		return
+	fi
+
+	echo "$sysctl_setting" > "$sysctl_file"
+	sysctl -p "$sysctl_file" > /dev/null
+	echo "Wrote $sysctl_file."
+}
+
+configure_avahi_interfaces() {
+	local avahi_file="/etc/avahi/avahi-daemon.conf"
+	local interfaces="bond0,eth0,eth1"
+	if [ ! -f "$avahi_file" ] || grep -Fxq "allow-interfaces=$interfaces" "$avahi_file"; then
+		return
+	fi
+
+	sed -i "s/^#\?allow-interfaces=.*/allow-interfaces=$interfaces/" "$avahi_file"
+	if ! grep -Fxq "allow-interfaces=$interfaces" "$avahi_file"; then
+		echo "Warning: could not set allow-interfaces in $avahi_file; node discovery may not work."
+		return
+	fi
+
+	systemctl restart avahi-daemon
+	echo "Set allow-interfaces=$interfaces in $avahi_file."
+}
+
+run_migrations() {
+	cd "$app_dir/src/migrations" || return
 	/usr/local/bin/node run.js
+}
 
+configure_mail
+configure_services
+
+if ! ischroot; then
+	generate_certificate
+	install_virtual_ip_unit
+	configure_nonlocal_bind
+	configure_avahi_interfaces
+	run_migrations
 	systemctl start virgo-api.service
 fi
