@@ -1,4 +1,3 @@
-import readline from 'readline';
 import { execa } from 'execa';
 import { getNodeId } from './advertisement.js';
 
@@ -16,8 +15,10 @@ const splitFields = (line) => {
 /** The whole TXT set arrives as one field of space-separated quoted pairs. */
 const parseTxt = (blob) => {
 	const records = {};
+
 	for (const [, entry] of String(blob || '').matchAll(/"([^"]*)"/g)) {
 		const separator = entry.indexOf('=');
+
 		if (separator > 0) {
 			records[entry.slice(0, separator)] = entry.slice(separator + 1);
 		}
@@ -31,6 +32,7 @@ const parseTxt = (blob) => {
  * protocol and service name are kept as a second key to find the entry to drop. */
 const toPeer = (fields) => {
 	const records = parseTxt(fields[9]);
+
 	if (!records.id) {
 		return null;
 	}
@@ -61,6 +63,7 @@ const serviceKey = (fields) => {
 
 const peers = new Map();
 const keyToId = new Map();
+
 let watcher = null;
 let restartDelay = MIN_RESTART_DELAY_MS;
 let onChange = null;
@@ -74,6 +77,7 @@ const publish = () => {
 const applyLine = (line, selfId) => {
 	const fields = splitFields(line);
 	const [event] = fields;
+
 	if (event !== '=' && event !== '-') {
 		return false;
 	}
@@ -83,20 +87,27 @@ const applyLine = (line, selfId) => {
 	}
 
 	const key = serviceKey(fields);
+
 	if (event === '-') {
 		const id = keyToId.get(key);
+
 		keyToId.delete(key);
+
 		return (id ? peers.delete(id) : false);
 	}
 
 	const peer = toPeer(fields);
+
 	if (!peer || peer.id === selfId) {
 		return false;
 	}
 
 	keyToId.set(key, peer.id);
+
 	const previous = peers.get(peer.id);
+
 	peers.set(peer.id, peer);
+
 	return !isSamePeer(previous, peer);
 };
 
@@ -106,6 +117,7 @@ const applyLine = (line, selfId) => {
  * restarted underneath must not silently end discovery for the life of the daemon. */
 const watch = async () => {
 	let selfId = null;
+
 	try {
 		selfId = await getNodeId();
 	} catch (error) {
@@ -115,35 +127,54 @@ const watch = async () => {
 		return;
 	}
 
-	watcher = execa('avahi-browse', ['-rp', SERVICE_TYPE], { buffer: false });
-	const stream = readline.createInterface({ input: watcher.stdout });
-	stream.on('line', (line) => {
-		try {
-			if (applyLine(line, selfId)) {
-				publish();
-			}
-		} catch (error) {
-			console.warn(`Could not read a discovery record: ${error.message}`);
-		}
-	});
-	watcher.catch(() => {});
-	watcher.on('exit', () => {
-		stream.close();
-		watcher = null;
-		peers.clear();
-		keyToId.clear();
-		publish();
-		setTimeout(() => {
-			restartDelay = Math.min(restartDelay * 2, MAX_RESTART_DELAY_MS);
-			watch();
-		}, restartDelay);
-	});
+	const process = execa('avahi-browse', ['-rp', SERVICE_TYPE]);
+
+	watcher = process;
+
 	// A browse that stays up is a healthy one, so the backoff resets once it has clearly survived.
-	setTimeout(() => {
-		if (watcher) {
+	const healthyTimer = setTimeout(() => {
+		if (watcher === process) {
 			restartDelay = MIN_RESTART_DELAY_MS;
 		}
 	}, HEALTHY_AFTER_MS);
+
+	try {
+		for await (const line of process) {
+			try {
+				if (applyLine(line, selfId)) {
+					publish();
+				}
+			} catch (error) {
+				console.warn(`Could not read a discovery record: ${error.message}`);
+			}
+		}
+	} catch (error) {
+		// avahi-browse exited unsuccessfully. The process is supervised below and will be restarted.
+		// Do not log here: a restart is expected behaviour for the supervisor.
+	} finally {
+		clearTimeout(healthyTimer);
+
+		// Only clear the global reference if this is still the active process. This protects against
+		// an older process finishing after a newer one has already been started.
+		if (watcher === process) {
+			watcher = null;
+		}
+
+		peers.clear();
+		keyToId.clear();
+		publish();
+
+		const delay = restartDelay;
+
+		setTimeout(() => {
+			restartDelay = Math.min(
+				delay * 2,
+				MAX_RESTART_DELAY_MS
+			);
+
+			watch();
+		}, delay);
+	}
 };
 
 const discover = () => {
@@ -170,12 +201,17 @@ const onConnection = (socket, module) => {
 const register = (module) => {
 	onChange = () => {
 		const list = discover();
+
 		module.setState('discovery', list);
+
 		module.emitChanged('host:discovery', list, {
 			sortArrays: true,
-			filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+			filter: (socket) => {
+				return socket.isAuthenticated && socket.isAdmin;
+			}
 		});
 	};
+
 	watch();
 };
 
@@ -185,4 +221,11 @@ export default {
 	onConnection
 };
 
-export { discover, splitFields, parseTxt, applyLine, toPeer, serviceKey };
+export {
+	discover,
+	splitFields,
+	parseTxt,
+	applyLine,
+	toPeer,
+	serviceKey
+};
