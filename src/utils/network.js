@@ -40,6 +40,22 @@ const getAddresses = async () => {
 	}
 };
 
+/** The node's own IPv4 address: the one on the interface the default route uses, skipping any address
+ * it is only carrying on behalf of something else. A virtual IP sits on the same interface, so without
+ * excluding it this can return the address that moves between nodes rather than the one that
+ * identifies this node. */
+const getOwnAddress = async (excludeAddress = null) => {
+	const device = await getDefaultInterfaceName();
+	if (!device) {
+		return null;
+	}
+
+	const iface = (await getAddresses()).find((entry) => { return entry.ifname === device; });
+	return iface?.addr_info?.find((info) => {
+		return info.family === 'inet' && info.local !== excludeAddress;
+	})?.local || null;
+};
+
 const holdsAddress = async (address) => {
 	return (await getAddresses()).some((iface) => {
 		return iface.addr_info?.some((info) => { return info.local === address; });
@@ -51,5 +67,6 @@ export {
 	getDefaultInterfaceName,
 	isAddressInUse,
 	getAddresses,
+	getOwnAddress,
 	holdsAddress
 };

@@ -9,7 +9,9 @@ const HEALTHY_AFTER_MS = 30000;
 /** avahi-browse escapes `;` inside a field, so splitting on a bare separator would shift every
  * following index whenever a node's name contains one. */
 const splitFields = (line) => {
-	return line.split(/(?<!\\);/).map((field) => { return field.replace(/\\;/g, ';'); });
+	return line.split(/(?<!\\);/).map((field) => {
+		return field.replace(/\\;/g, ';');
+	});
 };
 
 /** The whole TXT set arrives as one field of space-separated quoted pairs. */
@@ -40,7 +42,9 @@ const toPeer = (fields) => {
 	return {
 		id: records.id,
 		name: records.name || fields[3] || '',
-		address: fields[7] || '',
+		// Prefer the address explicitly published by the node. Fall back to Avahi's resolved address
+		// so older nodes that don't publish the address TXT field continue to work.
+		address: records.address || fields[7] || '',
 		setupCompleted: records.setup === 'complete',
 		virtualIp: records.virtualip || null,
 		holdsVirtualIp: records.holds === '1',
@@ -53,8 +57,17 @@ const isSamePeer = (first, second) => {
 		return false;
 	}
 
-	return ['id', 'name', 'address', 'setupCompleted', 'virtualIp', 'holdsVirtualIp', 'version']
-		.every((key) => { return first[key] === second[key]; });
+	return [
+		'id',
+		'name',
+		'address',
+		'setupCompleted',
+		'virtualIp',
+		'holdsVirtualIp',
+		'version'
+	].every((key) => {
+		return first[key] === second[key];
+	});
 };
 
 const serviceKey = (fields) => {
@@ -93,7 +106,7 @@ const applyLine = (line, selfId) => {
 
 		keyToId.delete(key);
 
-		return (id ? peers.delete(id) : false);
+		return id ? peers.delete(id) : false;
 	}
 
 	const peer = toPeer(fields);
@@ -113,17 +126,16 @@ const applyLine = (line, selfId) => {
 
 /** Long-lived rather than polled: avahi already knows the moment a node appears or goes away, so
  * asking it repeatedly would be both slower and noisier than letting it tell us. Without `-t` the
- * browse never terminates, so the process is supervised and restarted with a backoff — avahi being
- * restarted underneath must not silently end discovery for the life of the daemon. */
+ * browse never terminates, so the process is supervised and restarted with a backoff. */
 const watch = async () => {
 	let selfId = null;
 
 	try {
 		selfId = await getNodeId();
 	} catch (error) {
-		// Without a stable identity this node cannot tell its own advertisement from a peer's, and
-		// mistaking itself for a peer would lock the virtual IP field against its own address.
-		console.warn(`Discovery is unavailable: ${error.shortMessage || error.message}`);
+		console.warn(
+			`Discovery is unavailable: ${error.shortMessage || error.message}`
+		);
 		return;
 	}
 
@@ -145,17 +157,16 @@ const watch = async () => {
 					publish();
 				}
 			} catch (error) {
-				console.warn(`Could not read a discovery record: ${error.message}`);
+				console.warn(
+					`Could not read a discovery record: ${error.message}`
+				);
 			}
 		}
 	} catch (error) {
-		// avahi-browse exited unsuccessfully. The process is supervised below and will be restarted.
-		// Do not log here: a restart is expected behaviour for the supervisor.
+		// avahi-browse exited unsuccessfully. The supervisor below will restart it.
 	} finally {
 		clearTimeout(healthyTimer);
 
-		// Only clear the global reference if this is still the active process. This protects against
-		// an older process finishing after a newer one has already been started.
 		if (watcher === process) {
 			watcher = null;
 		}
@@ -182,9 +193,7 @@ const discover = () => {
 };
 
 const onConnection = (socket, module) => {
-	// A late joiner has missed every change emitted before it connected, and emitChanged suppresses a
-	// repeat of the last payload, so the current list is replayed on connection rather than left until
-	// the next time something on the network moves.
+	// A late joiner has missed every change emitted before it connected, so replay the current list.
 	if (socket.isAuthenticated && socket.isAdmin) {
 		socket.emit('host:discovery', discover());
 	}
