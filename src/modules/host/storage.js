@@ -4,6 +4,7 @@ import { execa } from 'execa';
 import config from '../../../config.js';
 import { open as openDatabase } from '../../database/index.js';
 import DataService from '../../database/data_service.js';
+import { CORE_APPS } from '../../utils/core_apps.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -46,10 +47,10 @@ const OWNER = 'voyager:users';
 // it is obtained on their node's behalf.
 const SSL_EMAIL = 'voyager@univrs.cloud';
 const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
-const CORE_APPS = [
-	{ name: 'authelia', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; } },
-	{ name: 'traefik', env: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; } }
-];
+const CORE_APP_ENV = {
+	authelia: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
+	traefik: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; }
+};
 
 let scanning = null;
 
@@ -273,11 +274,11 @@ const installCoreApps = async (job, module) => {
 		return;
 	}
 
-	for (const app of CORE_APPS) {
-		await module.updateJobProgress(job, `Installing ${app.name}...`);
-		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', app.name, '--force', '--env-json', JSON.stringify(app.env(fqdn))], { reject: false });
+	for (const name of CORE_APPS) {
+		await module.updateJobProgress(job, `Installing ${name}...`);
+		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn))], { reject: false });
 		if (exitCode !== 0) {
-			console.error(`Could not install ${app.name}: ${stderr}`);
+			console.error(`Could not install ${name}: ${stderr}`);
 		}
 	}
 };

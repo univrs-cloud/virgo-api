@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import dockerCompose from 'docker-compose';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
+import { isCoreApp } from '../../utils/core_apps.js';
 
 const streamPipeline = promisify(stream.pipeline);
 
@@ -86,7 +87,7 @@ const installApp = async (job, module) => {
 	}
 	const app = {
 		name: template.name,
-		canBeRemoved: true,
+		canBeRemoved: !isCoreApp(template.name),
 		category: template.categories.find((_, index) => { return index === 0; }),
 		icon: icon,
 		title: template.title
