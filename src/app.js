@@ -3,6 +3,7 @@ import authorizationHandler from './middleware/authorization_handler.js';
 import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
 import errorHandler from './middleware/error_handler.js';
+import frameAncestorsHandler from './middleware/frame_ancestors_handler.js';
 import * as trustedProxy from './utils/trusted_proxy.js';
 import { relayAcmeChallenge } from './modules/configuration/fleet.js';
 
@@ -13,6 +14,7 @@ function createApp() {
 	// forwarding header the browser wrote itself, and that address is what Authelia rate limits by and
 	// what its network rules match.
 	app.set('trust proxy', (address) => { return trustedProxy.isFromTrustedProxy(address); });
+	app.use(frameAncestorsHandler);
 	app.use(express.json());
 	app.use(authorizationHandler);
 	app.use(controllers);
