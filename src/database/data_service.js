@@ -2,17 +2,17 @@ import { sequelize } from './index.js';
 import Configuration from './models/Configuration.js';
 import { Application, Bookmark, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
+import { CORE_APPS } from '../utils/core_apps.js';
 
 class DataService {
 	static async initialize() {
 		try {
-			// Sync the models with the database
 			await Configuration.sync({ force: false });
 			await Application.sync({ force: false });
 			await Bookmark.sync({ force: false });
 			await ItemOrder.sync({ force: false });
 			console.log(`Database models synchronized.`);
-			
+			await Application.update({ canBeRemoved: false }, { where: { name: CORE_APPS, canBeRemoved: true } });
 			return true;
 		} catch (error) {
 			console.error(`Unable to connect to the database:`, error);
@@ -24,8 +24,6 @@ class DataService {
 		try {
 			const configs = await Configuration.findAll();
 			const configuration = {};
-			
-			// Parse each configuration value
 			for (const config of configs) {
 				try {
 					configuration[config.key] = JSON.parse(config.value);
@@ -33,7 +31,6 @@ class DataService {
 					configuration[config.key] = config.value;
 				}
 			}
-			
 			return configuration;
 		} catch (error) {
 			console.error(`Error reading configuration from database:`, error);
