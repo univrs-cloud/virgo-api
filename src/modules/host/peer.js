@@ -7,6 +7,7 @@ import DataService from '../../database/data_service.js';
 import * as socket from '../../socket.js';
 import * as advertisement from './advertisement.js';
 import * as discovery from './discovery.js';
+import { getOwnAddress } from '../../utils/network.js';
 
 const { version } = pkg;
 const NAMESPACE = '/peer';
@@ -14,6 +15,7 @@ const KEY_BYTES = 32;
 const REQUEST_TIMEOUT_MS = 15000;
 
 let hostModule = null;
+const reconciled = new Set();
 
 const sign = (key, nonce) => {
 	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(String(nonce)).digest('hex');
@@ -39,8 +41,21 @@ const virtualIpConfiguration = async () => {
 	return (virtualIp?.address ? { address: virtualIp.address, netmask: virtualIp.netmask } : null);
 };
 
+/** The address is this node's own, with the virtual IP excluded — that address moves between nodes, so
+ * a peer that stored it would be pointed at whichever node holds it rather than at this one. */
 const describeSelf = async () => {
-	return { id: await advertisement.getNodeId(), name: (hostModule?.getState('system')?.osInfo?.hostname || ''), version };
+	const { virtualIp } = await DataService.getConfiguration();
+	return {
+		id: await advertisement.getNodeId(),
+		name: (hostModule?.getState('system')?.osInfo?.hostname || ''),
+		address: await getOwnAddress(virtualIp?.address),
+		version
+	};
+};
+
+/** Discovery knows where a peer is right now; the stored address is only where it was when adopted. */
+const resolveAddress = (peer) => {
+	return (discovery.discover().find((node) => { return node.id === peer.id; })?.address || peer.address);
 };
 
 const publishPeers = async () => {
@@ -49,6 +64,13 @@ const publishPeers = async () => {
 	hostModule?.emitChanged('host:peers', peers, {
 		filter: (connection) => { return connection.isAuthenticated && connection.isAdmin; }
 	});
+};
+
+const forgetPeer = async (nodeId) => {
+	const peers = await readConfiguration();
+	await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== nodeId; }));
+	await publishPeers();
+	hostModule?.eventEmitter.emit('host:peer:updated');
 };
 
 /** Adopting one node does not preclude adopting another, so this appends rather than replaces. A node
@@ -87,7 +109,12 @@ const attachNamespace = () => {
 
 		const peer = (mode === 'call' ? await findPeer(nodeId) : null);
 		if (!peer) {
-			next(new Error('Peer authentication failed.'));
+			// The caller uses this to tell "you removed me" apart from "I could not reach you", so it
+			// has to say which. It reveals only that an id is not adopted, to someone who already
+			// knows the id.
+			const error = new Error('Peer authentication failed.');
+			error.data = { reason: 'unknown' };
+			next(error);
 			return;
 		}
 
@@ -121,10 +148,7 @@ const attachNamespace = () => {
 				return;
 			}
 
-			const peers = await readConfiguration();
-			await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== connection.identity.peer.id; }));
-			await publishPeers();
-			hostModule?.eventEmitter.emit('host:peer:updated');
+			await forgetPeer(connection.identity.peer.id);
 			acknowledge({ status: 'ok' });
 		});
 		connection.on('virtualIp:promote', async (payload, acknowledge) => {
@@ -178,7 +202,7 @@ const call = async (peerId, event, payload = {}) => {
 	}
 
 	const self = await describeSelf();
-	const connection = connectToPeer(peer.address, { mode: 'call', nodeId: self.id });
+	const connection = connectToPeer(resolveAddress(peer), { mode: 'call', nodeId: self.id });
 	try {
 		return await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, REQUEST_TIMEOUT_MS);
@@ -222,7 +246,7 @@ const adopt = async (job, module) => {
 			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, REQUEST_TIMEOUT_MS);
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error('Could not reach that node.')); });
 			connection.on('connect', () => {
-				connection.emit('pair:request', { ...self, address: peer.address, virtualIp: configured }, (answer) => {
+				connection.emit('pair:request', { ...self, virtualIp: configured }, (answer) => {
 					clearTimeout(timer);
 					(answer?.status === 'ok' ? resolve(answer) : reject(new Error(answer?.message || 'Pairing was refused.')));
 				});
@@ -236,6 +260,54 @@ const adopt = async (job, module) => {
 		return `Adopted ${response.node.name || peer.address}.`;
 	} finally {
 		connection.close();
+	}
+};
+
+/** Removal only ever reaches a node that is up. Remove a node while it is powered off and it comes
+ * back still believing it is adopted, holding a key the other side has already forgotten — so the one
+ * left behind has to notice for itself.
+ *
+ * Being told "I do not know you" is the only answer that removes anything. Unreachable, timed out and
+ * refused all leave the pairing alone: not hearing back is not the same as having been removed, and
+ * treating it that way would drop a peer every time the other node reboots. */
+const reconcile = async (peer) => {
+	const self = await describeSelf();
+	const connection = connectToPeer(resolveAddress(peer), { mode: 'call', nodeId: self.id });
+	try {
+		const adopted = await new Promise((resolve) => {
+			const timer = setTimeout(() => { resolve(true); }, REQUEST_TIMEOUT_MS);
+			connection.on('connect', () => { clearTimeout(timer); resolve(true); });
+			connection.on('connect_error', (error) => { clearTimeout(timer); resolve(error?.data?.reason !== 'unknown'); });
+		});
+		if (adopted) {
+			return;
+		}
+
+		console.log(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
+		await forgetPeer(peer.id);
+	} finally {
+		connection.close();
+	}
+};
+
+/** Checked when a peer turns up on the network, which covers both sides of the case: this node
+ * booting and seeing its peers, and a peer booting and being seen. Once per appearance — a peer that
+ * stays visible is not re-checked, and going away is what arms the next check. */
+const reconcileVisible = async (nodes) => {
+	const visible = new Set(nodes.map((node) => { return node.id; }));
+	reconciled.forEach((id) => {
+		if (!visible.has(id)) {
+			reconciled.delete(id);
+		}
+	});
+
+	for (const peer of await readConfiguration()) {
+		if (!visible.has(peer.id) || reconciled.has(peer.id)) {
+			continue;
+		}
+
+		reconciled.add(peer.id);
+		await reconcile(peer);
 	}
 };
 
@@ -257,10 +329,7 @@ const remove = async (job, module) => {
 		console.warn(`Could not tell ${peer.name || peer.address} it was removed: ${error.message}`);
 	}
 
-	const peers = await readConfiguration();
-	await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== peer.id; }));
-	await publishPeers();
-	module.eventEmitter.emit('host:peer:updated');
+	await forgetPeer(peer.id);
 	return `${peer.name || peer.address} removed.`;
 };
 
@@ -291,6 +360,11 @@ const register = (module) => {
 	hostModule = module;
 	attachNamespace();
 	publishPeers();
+	module.eventEmitter.on('host:discovery:updated', (nodes) => {
+		reconcileVisible(nodes).catch((error) => {
+			console.warn(`Could not reconcile adopted nodes: ${error.message}`);
+		});
+	});
 };
 
 export default {

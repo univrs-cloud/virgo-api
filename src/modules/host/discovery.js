@@ -240,6 +240,7 @@ const register = (module) => {
 		const list = discover();
 
 		module.setState('discovery', list);
+		module.eventEmitter.emit('host:discovery:updated', list);
 
 		module.emitChanged('host:discovery', list, {
 			sortArrays: true,
