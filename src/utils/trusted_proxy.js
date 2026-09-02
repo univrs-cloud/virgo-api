@@ -36,21 +36,18 @@ function matchesTrustedProxyRule(normalized, rule) {
 	return false;
 }
 
-function clear() {
-	configuredProxyRules = [];
-}
-
 /**
- * @param {unknown} rule
+ * Replaces the configured rules in a single assignment. Emptying the list and refilling it entry by
+ * entry would leave a window in which a reload had already discarded a proxy it was about to add back,
+ * and a request arriving in that window would be judged against an incomplete list.
+ *
+ * @param {unknown} rules
  */
-function add(rule) {
-	if (typeof rule !== 'string') {
-		return;
-	}
-	const r = rule.trim();
-	if (r) {
-		configuredProxyRules.push(r);
-	}
+function set(rules) {
+	configuredProxyRules = (Array.isArray(rules) ? rules : [])
+		.filter((rule) => { return typeof rule === 'string'; })
+		.map((rule) => { return rule.trim(); })
+		.filter(Boolean);
 }
 
 function isFromTrustedProxy(remoteAddress) {
@@ -67,6 +64,5 @@ function isFromTrustedProxy(remoteAddress) {
 
 export {
 	isFromTrustedProxy,
-	clear,
-	add
+	set
 };

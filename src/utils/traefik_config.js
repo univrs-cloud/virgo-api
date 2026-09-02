@@ -291,12 +291,8 @@ export {
 	getDomain,
 	getCertresolver,
 	readAll,
-	parse,
 	match,
-	generate,
 	write,
 	remove,
-	enrichBookmarks,
-	TRAEFIK_CONFIG_PATH,
-	TRAEFIK_ENV_PATH
+	enrichBookmarks
 };

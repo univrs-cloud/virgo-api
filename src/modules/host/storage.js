@@ -4,7 +4,7 @@ import { execa } from 'execa';
 import config from '../../../config.js';
 import { open as openDatabase } from '../../database/index.js';
 import DataService from '../../database/data_service.js';
-import { CORE_APPS } from '../../utils/core_apps.js';
+import { getCoreApps } from '../../utils/core_apps.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -274,7 +274,7 @@ const installCoreApps = async (job, module) => {
 		return;
 	}
 
-	for (const name of CORE_APPS) {
+	for (const name of getCoreApps()) {
 		await module.updateJobProgress(job, `Installing ${name}...`);
 		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn))], { reject: false });
 		if (exitCode !== 0) {

@@ -356,4 +356,4 @@ function disableBulkMode(db) {
 	checkpoint(db);
 }
 
-export { INDEX_DB_DIR, INDEX_DB_NAME, INDEX_DB_PATH, open, transaction, enableBulkMode, disableBulkMode, checkpoint, vacuumIfBloated };
+export { INDEX_DB_DIR, INDEX_DB_PATH, open, transaction, enableBulkMode, disableBulkMode, checkpoint, vacuumIfBloated };

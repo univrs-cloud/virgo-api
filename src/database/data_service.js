@@ -2,7 +2,7 @@ import { sequelize } from './index.js';
 import Configuration from './models/Configuration.js';
 import { Application, Bookmark, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
-import { CORE_APPS } from '../utils/core_apps.js';
+import { getCoreApps } from '../utils/core_apps.js';
 
 class DataService {
 	static async initialize() {
@@ -12,7 +12,7 @@ class DataService {
 			await Bookmark.sync({ force: false });
 			await ItemOrder.sync({ force: false });
 			console.log(`Database models synchronized.`);
-			await Application.update({ canBeRemoved: false }, { where: { name: CORE_APPS, canBeRemoved: true } });
+			await Application.update({ canBeRemoved: false }, { where: { name: getCoreApps(), canBeRemoved: true } });
 			return true;
 		} catch (error) {
 			console.error(`Unable to connect to the database:`, error);

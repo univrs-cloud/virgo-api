@@ -3,11 +3,11 @@ import si from 'systeminformation';
 import { io } from 'socket.io-client';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
-import { attachProxyHandlers } from '../../utils/fleet_proxy.js';
-import { setFleetRuntimeState, resetFleetRuntimeState } from '../../utils/fleet_state.js';
-import { normalizeEmail } from '../../utils/email.js';
-import { getAddresses, getDefaultInterfaceName } from '../../utils/network.js';
-import { readConfiguration as readVirtualIp, isEnabled as isVirtualIpEnabled } from '../host/virtual_ip.js';
+import * as fleetProxy from '../../utils/fleet_proxy.js';
+import * as fleetState from '../../utils/fleet_state.js';
+import * as email from '../../utils/email.js';
+import * as network from '../../utils/network.js';
+import * as virtualIp from '../host/virtual_ip.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
@@ -153,13 +153,13 @@ const getNodeIdentifier = async () => {
  * at. A node that has it configured but stood down answers on its own address instead. */
 const getNodeAddress = async () => {
 	try {
-		const virtualIp = await readVirtualIp();
-		if (virtualIp?.address && await isVirtualIpEnabled()) {
-			return virtualIp.address;
+		const configured = await virtualIp.readConfiguration();
+		if (configured?.address && await virtualIp.isEnabled()) {
+			return configured.address;
 		}
 
-		const device = await getDefaultInterfaceName();
-		const addrInfo = (await getAddresses()).find((item) => { return item.ifname === device; })?.addr_info || [];
+		const device = await network.getDefaultInterfaceName();
+		const addrInfo = (await network.getAddresses()).find((item) => { return item.ifname === device; })?.addr_info || [];
 		const address = addrInfo.find((info) => { return info.family === 'inet' && info.local !== virtualIp?.address; });
 		return address?.local || '';
 	} catch (error) {
@@ -187,7 +187,7 @@ const resolveNodeId = async (configuration) => {
 
 const connect = async ({ token, nodeId }) => {
 	disconnect();
-	resetFleetRuntimeState();
+	fleetState.resetRuntimeState();
 	fleetSocket = io(`${fleetUrl}/node`, {
 		path: '/api',
 		auth: { role: 'node', secret: token },
@@ -200,8 +200,8 @@ const connect = async ({ token, nodeId }) => {
 		randomizationFactor: 0.75
 	});
 	fleetSocket.on('connect', () => {
-		setFleetRuntimeState({ connected: true, authFailed: false });
-		attachProxyHandlers(fleetSocket);
+		fleetState.setRuntimeState({ connected: true, authFailed: false });
+		fleetProxy.attachHandlers(fleetSocket);
 		broadcastConfigurationUpdate();
 		reportUpdatesToFleet();
 		reportUpdateToFleet();
@@ -222,13 +222,13 @@ const connect = async ({ token, nodeId }) => {
 		}
 	});
 	fleetSocket.on('disconnect', () => {
-		setFleetRuntimeState({ connected: false });
+		fleetState.setRuntimeState({ connected: false });
 		broadcastConfigurationUpdate();
 	});
 	fleetSocket.on('connect_error', (error) => {
 		console.error('Fleet connection error:', error?.message || error);
 		if (error?.message === AUTH_FAILED_ERROR) {
-			setFleetRuntimeState({ connected: false, authFailed: true });
+			fleetState.setRuntimeState({ connected: false, authFailed: true });
 			fleetSocket?.disconnect();
 			fleetSocket = null;
 			broadcastConfigurationUpdate();
@@ -241,7 +241,7 @@ const disconnect = () => {
 		fleetSocket.disconnect();
 		fleetSocket = null;
 	}
-	resetFleetRuntimeState();
+	fleetState.resetRuntimeState();
 };
 
 const registerNode = ({ email, password, nodeId, name, hostname, domainName, address }) => {
@@ -301,8 +301,8 @@ const registerFleet = async (job, module) => {
 	await module.updateJobProgress(job, 'Registering with fleet...');
 
 	const configuration = await DataService.getConfiguration();
-	const submittedEmail = normalizeEmail(config?.email);
-	const registeredEmail = normalizeEmail(configuration?.fleet?.token ? configuration?.fleet?.email : '');
+	const submittedEmail = email.normalize(config?.email);
+	const registeredEmail = email.normalize(configuration?.fleet?.token ? configuration?.fleet?.email : '');
 	if (registeredEmail && registeredEmail !== submittedEmail) {
 		throw new Error('Fleet email cannot be changed');
 	}

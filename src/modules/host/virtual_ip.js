@@ -2,10 +2,13 @@ import fs from 'fs/promises';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
-import { discover } from './discovery.js';
+import * as discovery from './discovery.js';
+import * as peer from './peer.js';
 
 const ENVIRONMENT_FILE = '/etc/default/virgo-virtual-ip';
 const UNIT = 'virgo-virtual-ip.service';
+const HANDOVER_TIMEOUT_MS = 15000;
+const HANDOVER_INTERVAL_MS = 500;
 
 const toInteger = (address) => {
 	return address.split('.').reduce((total, octet) => { return ((total << 8) >>> 0) + Number(octet); }, 0) >>> 0;
@@ -99,7 +102,7 @@ const assertClaimable = async () => {
 
 	let peers = [];
 	try {
-		peers = await discover();
+		peers = await discovery.discover();
 	} catch (error) {
 		console.warn(`Could not check the network for other virtual IPs: ${error.shortMessage || error.message}`);
 		return;
@@ -108,6 +111,21 @@ const assertClaimable = async () => {
 	const holder = peers.find((peer) => { return Boolean(peer.virtualIp); });
 	if (holder) {
 		throw new Error(`${holder.name || holder.address} already has virtual IP ${holder.virtualIp}. Join that node instead of configuring a second one.`);
+	}
+};
+
+/** A node that shares an address with another has to sit in the same subnet as it, or it could never
+ * answer for it. Enforced here as well as in the form because the CLI reaches the same job, and
+ * because discovery may have moved on since the form was filled in. */
+const validateAgainstPeers = (config) => {
+	const holder = discovery.discover().find((node) => { return Boolean(node.virtualIp); });
+	if (!holder) {
+		return;
+	}
+
+	const prefixLength = Number.parseInt(config.netmask, 10);
+	if (!isSameSubnet(config.ipAddress, holder.virtualIp, prefixLength)) {
+		throw new Error(`${config.ipAddress}/${prefixLength} is not in the same subnet as ${holder.virtualIp}, the virtual IP on ${holder.name || holder.address}.`);
 	}
 };
 
@@ -133,10 +151,39 @@ const apply = async (virtualIp, config, module) => {
 	module.eventEmitter.emit('host:network:virtualIp:updated');
 };
 
+/** Taking the address over means the node holding it has to let go first, and only an adopted node can
+ * be asked to. That is what the key exchanged at adoption authorises. A holder that was never adopted
+ * cannot be asked, so the ARP probe in `claim()` refuses rather than creating a duplicate address. */
+const waitForRelease = async (address) => {
+	const deadline = Date.now() + HANDOVER_TIMEOUT_MS;
+	while (Date.now() < deadline) {
+		if (await isAddressInUse(address) !== true) {
+			return true;
+		}
+
+		await new Promise((resolve) => { setTimeout(resolve, HANDOVER_INTERVAL_MS); });
+	}
+
+	return false;
+};
+
 const promote = async (job, module) => {
 	const configuration = await readConfiguration();
 	if (!configuration?.address) {
 		throw new Error(`No virtual IP is configured on this node.`);
+	}
+
+	if (await holdsAddress(configuration.address)) {
+		return `${configuration.address} is already held by this node.`;
+	}
+
+	const holder = await peer.findHolder(configuration.address);
+	if (holder) {
+		await module.updateJobProgress(job, `Asking ${holder.name || holder.address} to release ${configuration.address}...`);
+		await peer.call(holder.id, 'virtualIp:release');
+		if (!await waitForRelease(configuration.address)) {
+			throw new Error(`${holder.name || holder.address} did not release ${configuration.address}.`);
+		}
 	}
 
 	await module.updateJobProgress(job, `Claiming ${configuration.address}...`);
@@ -222,4 +269,4 @@ export default {
 	}
 };
 
-export { apply, validate, readConfiguration, isEnabled };
+export { apply, validate, validateAgainstPeers, readConfiguration, isEnabled };

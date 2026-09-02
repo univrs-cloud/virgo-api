@@ -50,7 +50,6 @@ async function cleanupQueues() {
 }
 
 export {
-	MODULES,
 	QUEUE_NAMES,
 	getQueueName,
 	getScheduledQueueName,

@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { getNodeId } from './advertisement.js';
+import * as advertisement from './advertisement.js';
 
 const SERVICE_TYPE = '_univrs._tcp';
 const MIN_RESTART_DELAY_MS = 1000;
@@ -136,7 +136,7 @@ const watch = async () => {
 	let selfId = null;
 
 	try {
-		selfId = await getNodeId();
+		selfId = await advertisement.getNodeId();
 	} catch (error) {
 		console.warn(
 			`Discovery is unavailable: ${error.shortMessage || error.message}`
@@ -233,14 +233,6 @@ const onConnection = (socket, module) => {
 	if (socket.isAuthenticated && socket.isAdmin) {
 		socket.emit('host:discovery', discover());
 	}
-
-	socket.on('host:discovery:fetch', () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		socket.emit('host:discovery', discover());
-	});
 };
 
 const register = (module) => {
@@ -266,11 +258,4 @@ export default {
 	onConnection
 };
 
-export {
-	discover,
-	splitFields,
-	parseTxt,
-	applyLine,
-	toPeer,
-	serviceKey
-};
+export { discover };
