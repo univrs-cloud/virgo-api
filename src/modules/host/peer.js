@@ -54,9 +54,9 @@ const describeSelf = async () => {
 	};
 };
 
-/** Both this node's own addresses. Avahi resolves a node to the virtual IP when that is what answers,
- * and a pairing made before the address fix stored the wrong side's address altogether — so a peer
- * address that is really ours is a case that happens, not a hypothetical. */
+/** Both this node's own addresses. A peer address that turns out to be ours is defensive rather than
+ * expected: a node that publishes no address TXT is resolved by avahi to whatever answers, which is
+ * the virtual IP, and that address may since have moved here. */
 const ownAddresses = async () => {
 	const { virtualIp } = await DataService.getConfiguration();
 	return [await getOwnAddress(virtualIp?.address), virtualIp?.address].filter(Boolean);
