@@ -33,6 +33,12 @@ const findPeer = async (nodeId) => {
 	return (await readConfiguration()).find((peer) => { return peer.id === nodeId; }) || null;
 };
 
+/** Only what a peer needs to claim the address later, never the runtime state. */
+const virtualIpConfiguration = async () => {
+	const { virtualIp } = await DataService.getConfiguration();
+	return (virtualIp?.address ? { address: virtualIp.address, netmask: virtualIp.netmask } : null);
+};
+
 const describeSelf = async () => {
 	return { id: await advertisement.getNodeId(), name: (hostModule?.getState('system')?.osInfo?.hostname || ''), version };
 };
@@ -94,7 +100,14 @@ const attachNamespace = () => {
 			connection.on('pair:request', async (request, acknowledge) => {
 				const key = crypto.randomBytes(KEY_BYTES).toString('hex');
 				await savePeer({ id: request.id, name: request.name, address: request.address, key });
-				acknowledge({ status: 'ok', node: await describeSelf(), key });
+				if (request.virtualIp?.address) {
+					hostModule?.eventEmitter.emit('host:peer:virtualIp:received', request.virtualIp);
+				}
+
+				// The virtual IP travels with the adoption. Without it the adopting node has no address
+				// of its own to take over later — it can see this one holds an address, but not which
+				// address it would be claiming or on what prefix.
+				acknowledge({ status: 'ok', node: await describeSelf(), key, virtualIp: await virtualIpConfiguration() });
 			});
 			return;
 		}
@@ -102,6 +115,31 @@ const attachNamespace = () => {
 		// A recognised id is not proof. Every call carries a token over this connection's nonce, so the
 		// key authorises the action rather than merely knowing whose id to claim.
 		const nonce = crypto.randomBytes(16).toString('hex');
+		connection.on('peer:remove', async (payload, acknowledge) => {
+			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+				acknowledge({ status: 'failed', message: 'Not authorised.' });
+				return;
+			}
+
+			const peers = await readConfiguration();
+			await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== connection.identity.peer.id; }));
+			await publishPeers();
+			hostModule?.eventEmitter.emit('host:peer:updated');
+			acknowledge({ status: 'ok' });
+		});
+		connection.on('virtualIp:promote', async (payload, acknowledge) => {
+			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+				acknowledge({ status: 'failed', message: 'Not authorised.' });
+				return;
+			}
+
+			try {
+				await hostModule.addJob('host:network:virtualIp:promote', { username: connection.identity.peer.name || 'peer' });
+				acknowledge({ status: 'ok' });
+			} catch (error) {
+				acknowledge({ status: 'failed', message: 'Could not take the virtual IP over.' });
+			}
+		});
 		connection.on('virtualIp:release', async (payload, acknowledge) => {
 			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
@@ -175,19 +213,26 @@ const adopt = async (job, module) => {
 
 	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
 	const self = await describeSelf();
+	// Sent as well as read back: the node holding the address is the one that adopts, so the config
+	// usually travels outward. Both directions are carried so it works whichever side initiates.
+	const configured = await virtualIpConfiguration();
 	const connection = connectToPeer(peer.address, { mode: 'pair' });
 	try {
 		const response = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, REQUEST_TIMEOUT_MS);
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error('Could not reach that node.')); });
 			connection.on('connect', () => {
-				connection.emit('pair:request', { ...self, address: peer.address }, (answer) => {
+				connection.emit('pair:request', { ...self, address: peer.address, virtualIp: configured }, (answer) => {
 					clearTimeout(timer);
 					(answer?.status === 'ok' ? resolve(answer) : reject(new Error(answer?.message || 'Pairing was refused.')));
 				});
 			});
 		});
 		await savePeer({ id: response.node.id, name: response.node.name, address: peer.address, key: response.key });
+		if (response.virtualIp?.address) {
+			module.eventEmitter.emit('host:peer:virtualIp:received', response.virtualIp);
+		}
+
 		return `Adopted ${response.node.name || peer.address}.`;
 	} finally {
 		connection.close();
@@ -204,6 +249,14 @@ const remove = async (job, module) => {
 	}
 
 	await module.updateJobProgress(job, `Removing ${peer.name || peer.address}...`);
+	// Best effort: a node that has died still has to be removable, so failing to reach it is not a
+	// reason to leave it adopted here. When it does answer, both sides forget each other.
+	try {
+		await call(peer.id, 'peer:remove');
+	} catch (error) {
+		console.warn(`Could not tell ${peer.name || peer.address} it was removed: ${error.message}`);
+	}
+
 	const peers = await readConfiguration();
 	await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== peer.id; }));
 	await publishPeers();

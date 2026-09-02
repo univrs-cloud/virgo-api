@@ -167,6 +167,24 @@ const waitForRelease = async (address) => {
 	return false;
 };
 
+/** Written but never claimed. Adoption tells this node which address the pair shares; taking it over
+ * stays a deliberate act, so the unit is left disabled until an admin asks for it. */
+const adoptConfiguration = async (received, module) => {
+	if (await readConfiguration()) {
+		return;
+	}
+
+	const device = await getDefaultInterfaceName() || BOND_NAME;
+	const configuration = { address: received.address, netmask: received.netmask, device };
+	try {
+		await writeEnvironmentFile(configuration);
+		await DataService.setConfiguration('virtualIp', configuration);
+		module.eventEmitter.emit('host:network:virtualIp:updated');
+	} catch (error) {
+		console.warn(`Could not store the virtual IP from the adopted node: ${error.shortMessage || error.message}`);
+	}
+};
+
 const promote = async (job, module) => {
 	const configuration = await readConfiguration();
 	if (!configuration?.address) {
@@ -191,6 +209,26 @@ const promote = async (job, module) => {
 	await claim(configuration.address);
 	module.eventEmitter.emit('host:network:virtualIp:updated');
 	return `${configuration.address} is now held by this node.`;
+};
+
+/** The mirror of taking over, and deliberately not a local release: letting go first would leave the
+ * address unheld if the other node could not be reached. Asking it to take over instead means it runs
+ * its own promote, which asks this node to release and only then claims — so a peer that cannot be
+ * reached leaves the address exactly where it was. */
+const handover = async (job, module) => {
+	const { config } = job.data;
+	const configuration = await readConfiguration();
+	if (!configuration?.address) {
+		throw new Error(`No virtual IP is configured on this node.`);
+	}
+
+	if (!await holdsAddress(configuration.address)) {
+		throw new Error(`This node is not holding ${configuration.address}.`);
+	}
+
+	await module.updateJobProgress(job, `Handing ${configuration.address} over...`);
+	await peer.call(config.peerId, 'virtualIp:promote');
+	return `${configuration.address} handed over.`;
 };
 
 const release = async (job, module) => {
@@ -245,17 +283,18 @@ const onConnection = (socket, module) => {
 
 		await module.addJob('host:network:virtualIp:promote', { username: socket.username });
 	});
-	socket.on('host:network:virtualIp:release', async () => {
+	socket.on('host:network:virtualIp:handover', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}
 
-		await module.addJob('host:network:virtualIp:release', { username: socket.username });
+		await module.addJob('host:network:virtualIp:handover', { config, username: socket.username });
 	});
 };
 
 const register = (module) => {
 	announce();
+	module.eventEmitter.on('host:peer:virtualIp:received', (received) => { adoptConfiguration(received, module); });
 	module.eventEmitter.on('host:network:interface:updated', () => { reassert(module); });
 };
 
@@ -265,6 +304,7 @@ export default {
 	onConnection,
 	jobs: {
 		'host:network:virtualIp:promote': promote,
+		'host:network:virtualIp:handover': handover,
 		'host:network:virtualIp:release': release
 	}
 };

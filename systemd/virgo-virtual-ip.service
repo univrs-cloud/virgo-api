@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# The guard waits for the bond, which is created with updelay=60000.
+TimeoutStartSec=180
 EnvironmentFile=/etc/default/virgo-virtual-ip
 ExecStartPre=/usr/local/bin/virgo-virtual-ip-guard
 ExecStart=/usr/sbin/ip addr replace ${VIRTUAL_IP_CIDR} dev ${VIRTUAL_IP_DEV}
