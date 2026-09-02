@@ -3,20 +3,20 @@ let runtimeState = {
 	authFailed: false
 };
 
-const getFleetRuntimeState = () => {
+const getRuntimeState = () => {
 	return { ...runtimeState };
 };
 
-const setFleetRuntimeState = (updates) => {
+const setRuntimeState = (updates) => {
 	runtimeState = { ...runtimeState, ...updates };
 };
 
-const resetFleetRuntimeState = () => {
+const resetRuntimeState = () => {
 	runtimeState = { connected: false, authFailed: false };
 };
 
 export {
-	getFleetRuntimeState,
-	setFleetRuntimeState,
-	resetFleetRuntimeState
+	getRuntimeState,
+	setRuntimeState,
+	resetRuntimeState
 };

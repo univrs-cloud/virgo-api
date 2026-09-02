@@ -2,7 +2,7 @@ import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 import configurationManager from './configuration_manager.js';
 import * as trustedProxy from '../../utils/trusted_proxy.js';
-import { getFleetRuntimeState } from '../../utils/fleet_state.js';
+import * as fleetState from '../../utils/fleet_state.js';
 
 class ConfigurationModule extends BaseModule {
 	constructor() {
@@ -26,13 +26,9 @@ class ConfigurationModule extends BaseModule {
 	async #loadConfiguration() {
 		try {
 			const configuration = await DataService.getConfiguration();
-			trustedProxy.clear();
-			const trustedProxies = Array.isArray(configuration.trustedProxies) ? configuration.trustedProxies : [];
-			trustedProxies.forEach((proxy) => {
-				trustedProxy.add(proxy);
-			});
+			trustedProxy.set(configuration.trustedProxies);
 			if (configuration.fleet) {
-				configuration.fleet = { ...configuration.fleet, ...getFleetRuntimeState() };
+				configuration.fleet = { ...configuration.fleet, ...fleetState.getRuntimeState() };
 			}
 			this.setState('configuration', configuration);
 		} catch (error) {

@@ -6,7 +6,7 @@ import camelcaseKeys from 'camelcase-keys';
 import pkg from '../../../package.json' with { type: 'json' };
 import BaseModule from '../base.js';
 import * as setup from '../../utils/setup_state.js';
-import { readConfiguration as readVirtualIp, isEnabled as isVirtualIpEnabled } from './virtual_ip.js';
+import * as virtualIp from './virtual_ip.js';
 
 const { version } = pkg;
 
@@ -503,11 +503,13 @@ class HostModule extends BaseModule {
 	}
 
 	async #loadVirtualIp() {
-		const configuration = await readVirtualIp();
-		const virtualIp = (configuration?.address
-			? { ...configuration, holding: await isVirtualIpEnabled() }
-			: null);
-		this.setState('system', { ...this.getState('system'), virtualIp });
+		const configuration = await virtualIp.readConfiguration();
+		this.setState('system', {
+			...this.getState('system'),
+			virtualIp: (configuration?.address
+				? { ...configuration, holding: await virtualIp.isEnabled() }
+				: null)
+		});
 	}
 
 	async #loadNetworkInterfaces() {

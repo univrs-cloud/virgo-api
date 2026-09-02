@@ -207,7 +207,7 @@ const openInternalSocket = ({ namespace, user }) => {
 	});
 };
 
-const attachProxyHandlers = (fleetSocket) => {
+const attachHandlers = (fleetSocket) => {
 	if (!fleetSocket || fleetSocket.data?.proxyAttached) {
 		return;
 	}
@@ -280,5 +280,5 @@ const attachProxyHandlers = (fleetSocket) => {
 };
 
 export {
-	attachProxyHandlers
+	attachHandlers
 };

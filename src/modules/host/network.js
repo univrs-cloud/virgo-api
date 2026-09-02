@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
-import { apply as applyVirtualIp, validate as validateVirtualIp } from './virtual_ip.js';
+import * as virtualIp from './virtual_ip.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const PRIMARY_INTERFACE = 'eth0';
@@ -171,8 +171,12 @@ const updateInterface = async (job, module) => {
 		}
 	}
 
+	if (config.method === 'manual') {
+		virtualIp.validateAgainstPeers(config);
+	}
+
 	if (config.virtualIp) {
-		validateVirtualIp(config.virtualIp, config);
+		virtualIp.validate(config.virtualIp, config);
 	}
 
 	await module.updateJobProgress(job, `Network interface updating...`);
@@ -217,7 +221,7 @@ const updateInterface = async (job, module) => {
 		throw new Error(`Network interface was not updated.`);
 	}
 
-	await applyVirtualIp(config.virtualIp, config, module);
+	await virtualIp.apply(config.virtualIp, config, module);
 	module.eventEmitter.emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };
