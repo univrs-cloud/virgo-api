@@ -13,6 +13,7 @@ const { version } = pkg;
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
 const REQUEST_TIMEOUT_MS = 15000;
+const ADOPTION_GRACE_MS = 60000;
 
 let hostModule = null;
 const reconciled = new Set();
@@ -53,9 +54,20 @@ const describeSelf = async () => {
 	};
 };
 
-/** Discovery knows where a peer is right now; the stored address is only where it was when adopted. */
-const resolveAddress = (peer) => {
-	return (discovery.discover().find((node) => { return node.id === peer.id; })?.address || peer.address);
+/** Both this node's own addresses. Avahi resolves a node to the virtual IP when that is what answers,
+ * and a pairing made before the address fix stored the wrong side's address altogether — so a peer
+ * address that is really ours is a case that happens, not a hypothetical. */
+const ownAddresses = async () => {
+	const { virtualIp } = await DataService.getConfiguration();
+	return [await getOwnAddress(virtualIp?.address), virtualIp?.address].filter(Boolean);
+};
+
+/** Discovery knows where a peer is right now; the stored address is only where it was when adopted.
+ * Returns null rather than this node's own address: dialling ourselves would answer a question about
+ * the peer with our own state, which reads as a confident wrong answer. */
+const resolveAddress = async (peer) => {
+	const address = (discovery.discover().find((node) => { return node.id === peer.id; })?.address || peer.address);
+	return (address && !(await ownAddresses()).includes(address) ? address : null);
 };
 
 const publishPeers = async () => {
@@ -202,7 +214,12 @@ const call = async (peerId, event, payload = {}) => {
 	}
 
 	const self = await describeSelf();
-	const connection = connectToPeer(resolveAddress(peer), { mode: 'call', nodeId: self.id });
+	const address = await resolveAddress(peer);
+	if (!address) {
+		throw new Error(`Could not reach ${peer.name || peer.address}.`);
+	}
+
+	const connection = connectToPeer(address, { mode: 'call', nodeId: self.id });
 	try {
 		return await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, REQUEST_TIMEOUT_MS);
@@ -270,9 +287,8 @@ const adopt = async (job, module) => {
  * Being told "I do not know you" is the only answer that removes anything. Unreachable, timed out and
  * refused all leave the pairing alone: not hearing back is not the same as having been removed, and
  * treating it that way would drop a peer every time the other node reboots. */
-const reconcile = async (peer) => {
-	const self = await describeSelf();
-	const connection = connectToPeer(resolveAddress(peer), { mode: 'call', nodeId: self.id });
+const reconcile = async (peer, address, nodeId) => {
+	const connection = connectToPeer(address, { mode: 'call', nodeId });
 	try {
 		const adopted = await new Promise((resolve) => {
 			const timer = setTimeout(() => { resolve(true); }, REQUEST_TIMEOUT_MS);
@@ -294,20 +310,43 @@ const reconcile = async (peer) => {
  * booting and seeing its peers, and a peer booting and being seen. Once per appearance — a peer that
  * stays visible is not re-checked, and going away is what arms the next check. */
 const reconcileVisible = async (nodes) => {
-	const visible = new Set(nodes.map((node) => { return node.id; }));
+	const visible = new Map(nodes.map((node) => { return [node.id, node]; }));
 	reconciled.forEach((id) => {
 		if (!visible.has(id)) {
 			reconciled.delete(id);
 		}
 	});
 
-	for (const peer of await readConfiguration()) {
-		if (!visible.has(peer.id) || reconciled.has(peer.id)) {
+	// Discovery changes whenever anything on the segment moves, and a node with nothing adopted — the
+	// single-node case — has no reason to read its own addresses each time.
+	const candidates = (await readConfiguration()).filter((peer) => {
+		return visible.has(peer.id) && !reconciled.has(peer.id);
+	});
+	if (!candidates.length) {
+		return;
+	}
+
+	const self = await describeSelf();
+	const own = await ownAddresses();
+	for (const peer of candidates) {
+		const node = visible.get(peer.id);
+		// Only an address discovery published for this node id, and never one of ours. The stored
+		// address is not good enough here: it may predate the peer moving, and a wrong node answering
+		// "I do not know you" is indistinguishable from the right one saying it.
+		if (!node.address || own.includes(node.address)) {
+			continue;
+		}
+
+		// The adopting node stores its side after the acknowledgement, so for a moment the node that
+		// was just adopted knows the pairing and the adopter does not. Probing into that window would
+		// undo the adoption that was still completing.
+		const pairedAt = Date.parse(peer.pairedAt);
+		if (Number.isFinite(pairedAt) && (Date.now() - pairedAt) < ADOPTION_GRACE_MS) {
 			continue;
 		}
 
 		reconciled.add(peer.id);
-		await reconcile(peer);
+		await reconcile(peer, node.address, self.id);
 	}
 };
 
