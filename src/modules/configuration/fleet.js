@@ -8,6 +8,7 @@ import * as fleetState from '../../utils/fleet_state.js';
 import * as email from '../../utils/email.js';
 import * as network from '../../utils/network.js';
 import * as virtualIp from '../host/virtual_ip.js';
+import { getNodeId } from '../host/advertisement.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
@@ -65,10 +66,12 @@ const reportUpsToFleet = () => {
 	}
 };
 
-const reportPeersToFleet = () => {
-	if (fleetSocket?.connected) {
-		fleetSocket.emit('node:peers', lastPeers);
+const reportPeersToFleet = async () => {
+	if (!fleetSocket?.connected) {
+		return;
 	}
+
+	fleetSocket.emit('node:peers', { selfId: await getNodeId(), peers: lastPeers });
 };
 
 const reportDomainToFleet = async () => {
@@ -214,7 +217,9 @@ const connect = async ({ token, nodeId }) => {
 		reportUpdateToFleet();
 		reportStorageToFleet();
 		reportUpsToFleet();
-		reportPeersToFleet();
+		reportPeersToFleet().catch((error) => {
+			console.error('Error reporting peers to fleet:', error);
+		});
 		requestAppUpdateJobs();
 		scheduleDomainReport();
 	});
@@ -411,7 +416,9 @@ const register = (module) => {
 	});
 	module.eventEmitter.on('host:peers:updated', (peers) => {
 		lastPeers = peers;
-		reportPeersToFleet();
+		reportPeersToFleet().catch((error) => {
+			console.error('Error reporting peers to fleet:', error);
+		});
 	});
 	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
 	module.eventEmitter.on('host:network:interface:updated', scheduleDomainReport);
