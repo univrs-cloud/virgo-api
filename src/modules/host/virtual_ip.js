@@ -95,8 +95,12 @@ const validate = (virtualIp, config) => {
  * Enforced here rather than only in the form: a disabled input is not a permission check, and the CLI
  * reaches this same job. Discovery failing answers nothing, so it fails open with a warning and
  * leaves the ARP probe in `claim()` as the check that can still prove a collision. */
+/** Holding the address is what earns the right to change it — not merely having it configured. A
+ * standby has the address in its configuration precisely so it can take over later, so treating that
+ * as ownership would let the node that must not touch the address be the one allowed to. */
 const assertClaimable = async () => {
-	if (await readConfiguration()) {
+	const configured = await readConfiguration();
+	if (configured?.address && await holdsAddress(configured.address)) {
 		return;
 	}
 
@@ -131,7 +135,15 @@ const validateAgainstPeers = (config) => {
 
 /** Applied after the bond is up, because bringing the connection up flushes the interface's
  * addresses. An empty value removes the virtual IP rather than leaving a stale one behind. */
+/** `undefined` means the submission did not carry a virtual IP and this leaves it alone; an empty
+ * value means the operator cleared it. The two are not the same, and conflating them made every
+ * interface edit that omitted the field — a DNS change from the CLI, a locked field in the modal —
+ * silently drop the address. */
 const apply = async (virtualIp, config, module) => {
+	if (virtualIp === undefined) {
+		return;
+	}
+
 	const device = await getDefaultInterfaceName() || BOND_NAME;
 	if (!virtualIp) {
 		if (await readConfiguration()) {
