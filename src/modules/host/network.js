@@ -6,6 +6,7 @@ import * as virtualIp from './virtual_ip.js';
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const PRIMARY_INTERFACE = 'eth0';
 const SECONDARY_INTERFACE = 'eth1';
+const WAIT_DEVICE_TIMEOUT = '10000';
 
 const sleep = (ms) => {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -114,12 +115,12 @@ const normalizeDnsServers = (dnsServers) => {
 };
 
 const createBondConnection = async () => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=60000`;
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},primary_reselect=failure,miimon=100,updelay=10000`;
 	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', bondOptions]);
 };
 
 const updateBondConnection = async (config) => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},miimon=100,updelay=60000`;
+	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},primary_reselect=failure,miimon=100,updelay=10000`;
 	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', bondOptions]);
 	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
 	if (config.method === 'manual') {
@@ -141,13 +142,13 @@ const addBondSlave = async (interfaceName) => {
 	const slaveName = `${BOND_NAME}-${interfaceName}`;
 	
 	if (await connectionExists(slaveName)) {
-		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', '60000']);
+		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', WAIT_DEVICE_TIMEOUT]);
 		return true;
 	}
 	
 	try {
 		await execa('nmcli', ['connection', 'add', 'type', 'ethernet', 'con-name', slaveName, 'ifname', interfaceName, 'master', BOND_NAME]);
-		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', '60000']);
+		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', WAIT_DEVICE_TIMEOUT]);
 		return true;
 	} catch (error) {
 		return false;

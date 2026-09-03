@@ -259,7 +259,7 @@ const reassert = async (module) => {
 	}
 };
 
-/** The unit's own announcement can be lost at boot: bond0 is created with updelay=60000, so the link
+/** The unit's own announcement can be lost at boot: bond0 is created with updelay=10000, so the link
  * may not carry traffic when ExecStartPost runs. Re-announcing once virgo-api is up leaves the
  * router's ARP cache correct either way. */
 const announce = async () => {

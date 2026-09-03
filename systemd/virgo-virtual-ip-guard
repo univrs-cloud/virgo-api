@@ -36,7 +36,7 @@ if ip -4 -o addr show | grep -Fqw "$VIRTUAL_IP_ADDR"; then
 	exit 0
 fi
 
-# The bond is created with updelay=60000, so at boot the link can be present but not yet carrying
+# The bond is created with updelay=10000, so at boot the link can be present but not yet carrying
 # traffic. Probing then answers nothing, and treating that as "free" is how two nodes end up holding
 # the same address.
 waited=0

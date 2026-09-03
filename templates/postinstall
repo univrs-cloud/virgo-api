@@ -57,6 +57,16 @@ configure_avahi_interfaces() {
 	echo "Set allow-interfaces=$interfaces in $avahi_file."
 }
 
+configure_gateway_wait() {
+	local dispatcher_file="/etc/NetworkManager/dispatcher.d/pre-up.d/10-wait-for-gateway"
+	if [ ! -f "$dispatcher_file" ] || ! grep -Fxq "MAX_RETRIES=60" "$dispatcher_file"; then
+		return
+	fi
+
+	sed -i 's/^MAX_RETRIES=60$/MAX_RETRIES=10/' "$dispatcher_file"
+	echo "Reduced the gateway wait in $dispatcher_file to 10 seconds."
+}
+
 run_migrations() {
 	cd "$app_dir/src/migrations" || return
 	/usr/local/bin/node run.js
@@ -70,6 +80,7 @@ if ! ischroot; then
 	install_virtual_ip_unit
 	configure_nonlocal_bind
 	configure_avahi_interfaces
+	configure_gateway_wait
 	run_migrations
 	systemctl start virgo-api.service
 fi
