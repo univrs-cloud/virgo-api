@@ -179,22 +179,65 @@ const waitForRelease = async (address) => {
 	return false;
 };
 
-/** Written but never claimed. Adoption tells this node which address the pair shares; taking it over
- * stays a deliberate act, so the unit is left disabled until an admin asks for it. */
+/** Written but never claimed: the unit is left disabled, so taking the address over stays a deliberate
+ * act. Clearing removes the configuration without touching the address, which this node does not hold. */
+const storeConfiguration = async (received, module) => {
+	const device = await getDefaultInterfaceName() || BOND_NAME;
+	const configuration = (received?.address ? { address: received.address, netmask: received.netmask, device } : null);
+	try {
+		if (configuration) {
+			await writeEnvironmentFile(configuration);
+		}
+
+		await DataService.setConfiguration('virtualIp', configuration);
+		module.eventEmitter.emit('host:network:virtualIp:updated');
+	} catch (error) {
+		console.warn(`Could not store the virtual IP from the other node: ${error.shortMessage || error.message}`);
+	}
+};
+
+/** Adoption tells this node which address the pair shares. It never overwrites, because a node that
+ * already has one is either the holder or a standby that was told by the holder. */
 const adoptConfiguration = async (received, module) => {
 	if (await readConfiguration()) {
 		return;
 	}
 
-	const device = await getDefaultInterfaceName() || BOND_NAME;
-	const configuration = { address: received.address, netmask: received.netmask, device };
-	try {
-		await writeEnvironmentFile(configuration);
-		await DataService.setConfiguration('virtualIp', configuration);
-		module.eventEmitter.emit('host:network:virtualIp:updated');
-	} catch (error) {
-		console.warn(`Could not store the virtual IP from the adopted node: ${error.shortMessage || error.message}`);
+	await storeConfiguration(received, module);
+};
+
+/** The holder changed the address, so a standby has to follow or it keeps a configuration for an
+ * address nobody has — which reads in the UI as a node that simply cannot take over, with nothing said.
+ *
+ * Refused while this node holds its own address: propagation only ever runs from the holder outwards,
+ * and this is what stops a standby rewriting the node that actually has the address. An unchanged
+ * value is dropped rather than rewritten, which is also what stops two nodes echoing a clear at each
+ * other forever. */
+const receiveConfiguration = async (received, module) => {
+	const current = await readConfiguration();
+	if (current?.address && await holdsAddress(current.address)) {
+		return;
 	}
+
+	if ((current?.address || null) === (received?.address || null) && (current?.netmask || null) === (received?.netmask || null)) {
+		return;
+	}
+
+	await storeConfiguration(received, module);
+};
+
+/** Best effort, and deliberately not awaited by whatever changed the address: a peer that is switched
+ * off must not make configuring a virtual IP fail. Peers missed here are caught when they next appear
+ * on the network and reconcile. */
+const propagate = async (module) => {
+	const configuration = await readConfiguration();
+	if (configuration?.address && !await holdsAddress(configuration.address)) {
+		return;
+	}
+
+	await peer.broadcast('virtualIp:configure', {
+		virtualIp: (configuration?.address ? { address: configuration.address, netmask: configuration.netmask } : null)
+	});
 };
 
 const promote = async (job, module) => {
@@ -307,6 +350,8 @@ const onConnection = (socket, module) => {
 const register = (module) => {
 	announce();
 	module.eventEmitter.on('host:peer:virtualIp:received', (received) => { adoptConfiguration(received, module); });
+	module.eventEmitter.on('host:peer:virtualIp:configure', (received) => { receiveConfiguration(received, module); });
+	module.eventEmitter.on('host:network:virtualIp:updated', () => { propagate(module); });
 	module.eventEmitter.on('host:network:interface:updated', () => { reassert(module); });
 };
 

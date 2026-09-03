@@ -163,6 +163,25 @@ const attachNamespace = () => {
 			await forgetPeer(connection.identity.peer.id);
 			acknowledge({ status: 'ok' });
 		});
+		connection.on('virtualIp:configure', async (payload, acknowledge) => {
+			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+				acknowledge({ status: 'failed', message: 'Not authorised.' });
+				return;
+			}
+
+			// Whether this is allowed is decided where the address lives, not here: a node holding it
+			// refuses to be rewritten.
+			hostModule?.eventEmitter.emit('host:peer:virtualIp:configure', payload.virtualIp);
+			acknowledge({ status: 'ok' });
+		});
+		connection.on('virtualIp:current', async (payload, acknowledge) => {
+			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+				acknowledge({ status: 'failed', message: 'Not authorised.' });
+				return;
+			}
+
+			acknowledge({ status: 'ok', virtualIp: await virtualIpConfiguration() });
+		});
 		connection.on('virtualIp:promote', async (payload, acknowledge) => {
 			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
@@ -236,6 +255,18 @@ const call = async (peerId, event, payload = {}) => {
 	}
 };
 
+/** Says the same thing to every adopted node. Unreachable peers are logged and skipped — this runs
+ * behind operations that must not fail because another node is switched off. */
+const broadcast = async (event, payload = {}) => {
+	for (const peer of await readConfiguration()) {
+		try {
+			await call(peer.id, event, payload);
+		} catch (error) {
+			console.warn(`Could not tell ${peer.name || peer.address} about ${event}: ${error.message}`);
+		}
+	}
+};
+
 /** One call: the other node mints a key, keeps it, and hands back a copy. */
 const adopt = async (job, module) => {
 	const { config } = job.data;
@@ -296,13 +327,32 @@ const reconcile = async (peer, address, nodeId) => {
 			connection.on('connect_error', (error) => { clearTimeout(timer); resolve(error?.data?.reason !== 'unknown'); });
 		});
 		if (adopted) {
-			return;
+			return true;
 		}
 
 		console.log(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
 		await forgetPeer(peer.id);
+		return false;
 	} finally {
 		connection.close();
+	}
+};
+
+/** A virtual IP that changed while this node was off never arrived, and the holder has no reason to
+ * say it again. Discovery says which node holds an address and which address it is, so a disagreement
+ * with what this node has is visible without asking — and only then is the holder asked for the
+ * netmask, which is not advertised. */
+const reconcileVirtualIp = async (peer, node) => {
+	const configured = await virtualIpConfiguration();
+	if (!node.holdsVirtualIp || node.virtualIp === configured?.address) {
+		return;
+	}
+
+	try {
+		const answer = await call(peer.id, 'virtualIp:current');
+		hostModule?.eventEmitter.emit('host:peer:virtualIp:configure', answer.virtualIp);
+	} catch (error) {
+		console.warn(`Could not read the virtual IP from ${peer.name || peer.address}: ${error.message}`);
 	}
 };
 
@@ -346,7 +396,9 @@ const reconcileVisible = async (nodes) => {
 		}
 
 		reconciled.add(peer.id);
-		await reconcile(peer, node.address, self.id);
+		if (await reconcile(peer, node.address, self.id)) {
+			await reconcileVirtualIp(peer, node);
+		}
 	}
 };
 
@@ -416,4 +468,4 @@ export default {
 	}
 };
 
-export { call, findHolder };
+export { call, broadcast, findHolder };
