@@ -12,23 +12,18 @@ class IndexerModule extends BaseModule {
 				this.#loadDatasets(),
 				this.#loadStats()
 			]);
+			this.#emitDatasets();
+			this.#emitStats();
 		})();
 
 		this.eventEmitter
 			.on('indexer:index:updated', async () => {
 				await this.#loadStats();
-				for (const socket of this.nsp.sockets.values()) {
-					if (socket.isAuthenticated && socket.isAdmin) {
-						socket.emit('indexer:stats', this.getState('stats'));
-					}
-				}
+				this.#emitStats();
 			})
 			.on('configuration:updated', async () => {
 				await this.#loadDatasets();
-				this.emitChanged('indexer:datasets', this.getState('datasets'), {
-					sortArrays: true,
-					filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
-				});
+				this.#emitDatasets();
 			});
 	}
 
@@ -60,6 +55,27 @@ class IndexerModule extends BaseModule {
 		} catch (error) {
 			console.warn(`Could not load indexer stats: ${error.shortMessage || error.message}`);
 		}
+	}
+
+	#emitDatasets() {
+		if (!this.getState('datasets')) {
+			return;
+		}
+
+		this.emitChanged('indexer:datasets', this.getState('datasets'), {
+			sortArrays: true,
+			filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+		});
+	}
+
+	#emitStats() {
+		if (!this.getState('stats')) {
+			return;
+		}
+
+		this.emitChanged('indexer:stats', this.getState('stats'), {
+			filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
+		});
 	}
 }
 

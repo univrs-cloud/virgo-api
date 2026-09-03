@@ -15,20 +15,13 @@ class UserModule extends BaseModule {
 
 		(async () => {
 			await this.#loadUsers();
+			this.#emitUsers();
 		})();
 		
 		this.eventEmitter
 			.on('users:updated', async () => {
 				await this.#loadUsers();
-				this.nsp.sockets.forEach((socket) => {
-					if (socket.isAuthenticated) {
-						if (!socket.isAdmin) {
-							socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
-						} else {
-							socket.emit('users', this.getState('users'));
-						}
-					}
-				});
+				this.#emitUsers();
 			});
 	}
 
@@ -41,15 +34,11 @@ class UserModule extends BaseModule {
 	}
 
 	onConnection(socket) {
-		if (this.getState('users')) {
-			if (socket.isAuthenticated) {
-				if (!socket.isAdmin) {
-					socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
-				} else {
-					socket.emit('users', this.getState('users'));
-				}
-			}
+		if (!this.getState('users')) {
+			return;
 		}
+
+		this.#emitUsersToSocket(socket);
 	}
 
 	async setSambaUserPassword(username, password) {
@@ -106,6 +95,29 @@ class UserModule extends BaseModule {
 		} catch (error) {
 			this.setState('users', false);
 		}
+	}
+
+	#emitUsers() {
+		if (!this.getState('users')) {
+			return;
+		}
+
+		this.nsp.sockets.forEach((socket) => {
+			this.#emitUsersToSocket(socket);
+		});
+	}
+
+	#emitUsersToSocket(socket) {
+		if (!socket.isAuthenticated) {
+			return;
+		}
+
+		if (!socket.isAdmin) {
+			socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
+			return;
+		}
+
+		socket.emit('users', this.getState('users'));
 	}
 }
 
