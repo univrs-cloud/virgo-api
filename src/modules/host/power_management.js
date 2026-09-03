@@ -20,13 +20,14 @@ const shutdown = async (socket, module) => {
 		return;
 	}
 
+	module.setState('shutdown', true);
+	module.nsp.emit('host:shutdown', true);
 	try {
 		await execa('shutdown', ['-h', 'now']);
-		module.setState('shutdown', true);
 	} catch (error) {
 		module.setState('shutdown', false);
+		module.nsp.emit('host:shutdown', false);
 	}
-	module.nsp.emit('host:shutdown', module.getState('shutdown'));
 };
 
 const onConnection = (socket, module) => {
