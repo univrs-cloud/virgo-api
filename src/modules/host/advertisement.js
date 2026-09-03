@@ -103,10 +103,15 @@ const readServiceFile = async () => {
 };
 
 /** Written atomically so Avahi never sees a partially written service file. */
+/** The temporary file is kept out of the directory avahi watches. Avahi reloads on any change there,
+ * not only on files it will read, so staging inside it makes one update land as three reloads — and
+ * every reload withdraws and re-announces the service. Same filesystem, so the rename is still atomic
+ * and arrives as a single event. */
 const writeServiceFile = async (document) => {
-	const temporaryFile = `${SERVICE_FILE}.tmp`;
+	const serviceDirectory = path.dirname(SERVICE_FILE);
+	const temporaryFile = path.join(path.dirname(serviceDirectory), `.${path.basename(SERVICE_FILE)}.tmp`);
 
-	await fs.mkdir(path.dirname(SERVICE_FILE), { recursive: true });
+	await fs.mkdir(serviceDirectory, { recursive: true });
 	await fs.writeFile(temporaryFile, document, 'utf8');
 	await fs.rename(temporaryFile, SERVICE_FILE);
 };
