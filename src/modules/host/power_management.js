@@ -5,13 +5,14 @@ const reboot = async (socket, module) => {
 		return;
 	}
 
+	module.setState('reboot', true);
+	module.nsp.emit('host:reboot', true);
 	try {
 		await execa('reboot');
-		module.setState('reboot', true);
 	} catch (error) {
 		module.setState('reboot', false);
+		module.nsp.emit('host:reboot', false);
 	}
-	module.nsp.emit('host:reboot', module.getState('reboot'));
 };
 
 const shutdown = async (socket, module) => {
