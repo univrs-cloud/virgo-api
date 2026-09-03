@@ -48,8 +48,7 @@ const toPeer = (fields) => {
 		address: records.address || fields[7] || '',
 		setupCompleted: records.setup === 'complete',
 		virtualIp: records.virtualip || null,
-		holdsVirtualIp: records.holds === '1',
-		version: records.ver || ''
+		holdsVirtualIp: records.holds === '1'
 	};
 };
 
@@ -64,8 +63,7 @@ const isSamePeer = (first, second) => {
 		'address',
 		'setupCompleted',
 		'virtualIp',
-		'holdsVirtualIp',
-		'version'
+		'holdsVirtualIp'
 	].every((key) => {
 		return first[key] === second[key];
 	});

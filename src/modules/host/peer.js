@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import https from 'https';
 import { io as ioClient } from 'socket.io-client';
-import pkg from '../../../package.json' with { type: 'json' };
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as socket from '../../socket.js';
@@ -9,7 +8,6 @@ import * as advertisement from './advertisement.js';
 import * as discovery from './discovery.js';
 import { getOwnAddress } from '../../utils/network.js';
 
-const { version } = pkg;
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
 const REQUEST_TIMEOUT_MS = 15000;
@@ -49,8 +47,7 @@ const describeSelf = async () => {
 	return {
 		id: await advertisement.getNodeId(),
 		name: (hostModule?.getState('system')?.osInfo?.hostname || ''),
-		address: await getOwnAddress(virtualIp?.address),
-		version
+		address: await getOwnAddress(virtualIp?.address)
 	};
 };
 
