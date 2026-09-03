@@ -2,13 +2,11 @@ import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import pkg from '../../../package.json' with { type: 'json' };
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
 import { getOwnAddress, holdsAddress } from '../../utils/network.js';
 
-const { version } = pkg;
 
 const SERVICE_FILE = '/etc/avahi/services/univrs.service';
 const SERVICE_TYPE = '_univrs._tcp';
@@ -55,8 +53,7 @@ const buildRecords = async () => {
 	const records = {
 		id: await getNodeId(),
 		name: os.hostname(),
-		setup: (setup.isCompleted() ? 'complete' : 'incomplete'),
-		ver: version
+		setup: (setup.isCompleted() ? 'complete' : 'incomplete')
 	};
 
 	const { virtualIp } = await DataService.getConfiguration();

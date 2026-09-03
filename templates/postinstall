@@ -57,6 +57,10 @@ configure_avahi_interfaces() {
 	echo "Set allow-interfaces=$interfaces in $avahi_file."
 }
 
+install_mdns_dispatcher() {
+	install -v -m 755 "$app_dir/systemd/reannounce-mdns" /etc/NetworkManager/dispatcher.d/50-reannounce-mdns
+}
+
 configure_gateway_wait() {
 	local dispatcher_file="/etc/NetworkManager/dispatcher.d/pre-up.d/10-wait-for-gateway"
 	if [ ! -f "$dispatcher_file" ] || ! grep -Fxq "MAX_RETRIES=60" "$dispatcher_file"; then
@@ -80,6 +84,7 @@ if ! ischroot; then
 	install_virtual_ip_unit
 	configure_nonlocal_bind
 	configure_avahi_interfaces
+	install_mdns_dispatcher
 	configure_gateway_wait
 	run_migrations
 	systemctl start virgo-api.service
