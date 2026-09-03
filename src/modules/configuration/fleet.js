@@ -31,6 +31,7 @@ let lastUpdate = null;
 let lastUpdateSignature = null;
 let lastStorage = false;
 let lastUps = null;
+let lastPeers = [];
 
 const reportUpdatesToFleet = () => {
 	if (fleetSocket?.connected) {
@@ -61,6 +62,12 @@ const reportStorageToFleet = () => {
 const reportUpsToFleet = () => {
 	if (fleetSocket?.connected) {
 		fleetSocket.emit('node:ups', lastUps);
+	}
+};
+
+const reportPeersToFleet = () => {
+	if (fleetSocket?.connected) {
+		fleetSocket.emit('node:peers', lastPeers);
 	}
 };
 
@@ -207,6 +214,7 @@ const connect = async ({ token, nodeId }) => {
 		reportUpdateToFleet();
 		reportStorageToFleet();
 		reportUpsToFleet();
+		reportPeersToFleet();
 		requestAppUpdateJobs();
 		scheduleDomainReport();
 	});
@@ -400,6 +408,10 @@ const register = (module) => {
 	module.eventEmitter.on('host:ups:updated', (ups) => {
 		lastUps = ups;
 		reportUpsToFleet();
+	});
+	module.eventEmitter.on('host:peers:updated', (peers) => {
+		lastPeers = peers;
+		reportPeersToFleet();
 	});
 	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
 	module.eventEmitter.on('host:network:interface:updated', scheduleDomainReport);
