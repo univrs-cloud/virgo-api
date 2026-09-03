@@ -16,9 +16,13 @@ const ADMIN_GROUP = 'admins';
 // How long to wait before asking again, when Authelia had nothing to say about its cookie — it has
 // nothing to say until it is installed.
 const DOMAIN_RETRY = 60000;
+const READINESS_PROBE_TIMEOUT = 2000;
+const READINESS_CACHE = 1000;
 
 let cookieDomain;
 let askedAt = 0;
+let readiness = { ready: false, at: 0 };
+let readinessProbe = null;
 
 /** Authelia reads the request's target from these, and the client's address from X-Forwarded-For,
  * falling back to whoever opened the connection. Both matter: the target decides which session cookie
@@ -75,6 +79,29 @@ const identity = (response) => {
 		isAdmin: groups.includes(ADMIN_GROUP),
 		groups
 	};
+};
+
+const isReady = async () => {
+	if ((Date.now() - readiness.at) < READINESS_CACHE) {
+		return readiness.ready;
+	}
+
+	if (!readinessProbe) {
+		readinessProbe = (async () => {
+			let ready = false;
+			try {
+				const response = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(READINESS_PROBE_TIMEOUT) });
+				ready = response.ok;
+			} catch (error) {
+				ready = false;
+			}
+			readiness = { ready, at: Date.now() };
+			readinessProbe = null;
+			return ready;
+		})();
+	}
+
+	return readinessProbe;
 };
 
 /** The question the proxy asks on behalf of every app it gates, asked here about the node's own pages.
@@ -146,6 +173,7 @@ const logout = async ({ fqdn, cookie }) => {
 
 export {
 	getCookieDomain,
+	isReady,
 	authorize,
 	login,
 	logout
