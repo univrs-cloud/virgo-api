@@ -1,33 +1,16 @@
 import * as fs from 'fs';
+import prettyBytes from 'pretty-bytes';
+import prettyMilliseconds from 'pretty-ms';
 
-function formatSize(bytes) {
-	if (bytes === null || bytes === undefined) {
+function formatSize(value) {
+	if (value === null || value === undefined) {
 		return '?';
 	}
-	const abs = Math.abs(bytes);
-	const sign = bytes < 0 ? '-' : '';
-	if (abs < 1024) {
-		return `${sign}${abs}B`;
-	}
-	if (abs < 1024 ** 2) {
-		return `${sign}${(abs / 1024).toFixed(1)}K`;
-	}
-	if (abs < 1024 ** 3) {
-		return `${sign}${(abs / 1024 ** 2).toFixed(1)}M`;
-	}
-	return `${sign}${(abs / 1024 ** 3).toFixed(2)}G`;
+	return prettyBytes(value, { binary: true });
 }
 
 function formatDuration(ms) {
-	if (ms < 1000) {
-		return `${ms}ms`;
-	}
-	if (ms < 60000) {
-		return `${(ms / 1000).toFixed(1)}s`;
-	}
-	const m = Math.floor(ms / 60000);
-	const s = ((ms % 60000) / 1000).toFixed(0);
-	return `${m}m${s}s`;
+	return prettyMilliseconds(ms);
 }
 
 /**

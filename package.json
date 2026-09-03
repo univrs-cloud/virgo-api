@@ -59,6 +59,8 @@
 		"linux-sys-user": "^2.0.2",
 		"path": "^0.12.7",
 		"plist": "^5.0.0",
+		"pretty-bytes": "^7.1.2",
+		"pretty-ms": "^9.3.1",
 		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.3",
 		"socket.io-client": "^4.8.3",
@@ -83,7 +85,7 @@
 		"bufferutil@4.1.0": true,
 		"cpu-features@0.0.10": true,
 		"msgpackr-extract@3.0.4": true,
-		"protobufjs@7.6.5": true,
+		"protobufjs@7.6.6": true,
 		"sqlite3@6.0.1": true,
 		"ssh2@1.17.0": true,
 		"utf-8-validate@6.0.6": true
