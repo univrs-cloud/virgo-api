@@ -20,12 +20,13 @@ class ShareModule extends BaseModule {
 
 		(async () => {
 			await this.#loadShares();
+			this.#emitShares();
 		})();
 
 		this.eventEmitter
 			.on('shares:updated', async () => {
 				await this.#loadShares();
-				this.emitChanged('shares', this.getState('shares'));
+				this.#emitShares();
 			});
 	}
 
@@ -241,6 +242,14 @@ class ShareModule extends BaseModule {
 		} catch (error) {
 			this.setState('shares', false);
 		}
+	}
+
+	#emitShares() {
+		if (!this.getState('shares')) {
+			return;
+		}
+
+		this.emitChanged('shares', this.getState('shares'));
 	}
 }
 

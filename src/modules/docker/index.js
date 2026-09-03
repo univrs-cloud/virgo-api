@@ -32,6 +32,8 @@ class DockerModule extends BaseModule {
 				this.#loadConfigured(),
 				this.#loadTemplates()
 			]);
+			this.#emitConfigured();
+			this.#emitTemplates();
 		})();
 
 		this.eventEmitter
@@ -47,13 +49,13 @@ class DockerModule extends BaseModule {
 			})
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
-				this.nsp.emit('app:configured', this.getState('configured'));
+				this.#emitConfigured();
 			})
 			.on('app:templates:fetch', async () => {
 				// Gated because this one is an hourly cron over a rarely-changing remote catalogue, not a
 				// reaction to something having changed. No sortArrays: order is the catalogue's own.
 				await this.#loadTemplates();
-				this.emitChanged('app:templates', this.getState('templates'));
+				this.#emitTemplates();
 			});
 	}
 
@@ -178,6 +180,22 @@ class DockerModule extends BaseModule {
 			this.setState('templates', false);
 			console.error(`Error loading templates:`, error);
 		}
+	}
+
+	#emitConfigured() {
+		if (!this.getState('configured')) {
+			return;
+		}
+
+		this.nsp.emit('app:configured', this.getState('configured'));
+	}
+
+	#emitTemplates() {
+		if (!this.getState('templates')) {
+			return;
+		}
+
+		this.emitChanged('app:templates', this.getState('templates'));
 	}
 }
 

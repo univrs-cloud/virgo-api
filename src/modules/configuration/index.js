@@ -10,6 +10,7 @@ class ConfigurationModule extends BaseModule {
 
 		(async () => {
 			await this.#loadConfiguration();
+			configurationManager.broadcast(this);
 		})();
 
 		this.eventEmitter
