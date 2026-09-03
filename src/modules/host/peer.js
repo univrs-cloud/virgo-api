@@ -73,8 +73,6 @@ const publishPeers = async () => {
 	hostModule?.emitChanged('host:peers', peers, {
 		filter: (connection) => { return connection.isAuthenticated && connection.isAdmin; }
 	});
-	// Fleet grouping only needs which nodes are adopted together, matched by id — never the address or
-	// key, which are this node's own credentials for reaching a peer directly.
 	hostModule?.eventEmitter.emit('host:peers:updated', peers.map((peer) => { return peer.id; }));
 };
 
