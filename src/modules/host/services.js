@@ -209,7 +209,7 @@ const restartService = async (job, module) => {
 };
 
 const register = (module) => {
-	loadServices(module);
+	broadcastServices(module);
 
 	module.eventEmitter
 		.on('host:system:services:updated', async () => {
