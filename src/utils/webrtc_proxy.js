@@ -7,12 +7,40 @@ import {
 	decodeEvent,
 	encodeContinuation
 } from './webrtc_frame.js';
+import DataChannelSendQueue from './data_channel_send_queue.js';
 
 const MAX_PENDING_CONTINUATIONS = 8;
+const MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
+const CONTINUATION_TIMEOUT_MS = 30_000;
 const OFFER_TIMEOUT_MS = 30_000;
 
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
+const MAX_PENDING_ICE_CANDIDATES = 128;
+const HELLO_FEATURES = ['namespace-activation', 'namespace-close'];
+
+const SESSION_STATE = Object.freeze({
+	REQUESTED: 'REQUESTED',
+	OPEN_SENT: 'OPEN_SENT',
+	OFFER_RECEIVED: 'OFFER_RECEIVED',
+	ANSWERED: 'ANSWERED',
+	CONNECTED: 'CONNECTED',
+	CLOSING: 'CLOSING',
+	CLOSED: 'CLOSED'
+});
+const SESSION_STATE_ORDER = Object.freeze(Object.values(SESSION_STATE).reduce((result, state, index) => {
+	result[state] = index;
+	return result;
+}, {}));
+
+const transitionSession = (session, nextState) => {
+	if (!session || SESSION_STATE_ORDER[nextState] < SESSION_STATE_ORDER[session.state]) {
+		return false;
+	}
+	session.state = nextState;
+	session.stateChangedAt = Date.now();
+	return true;
+};
 
 let rtc = null;
 try {
@@ -80,10 +108,11 @@ const toNativeIceServers = (iceServers) => {
 			}
 
 			const relayType = RELAY_TYPES[parsed.transport ?? (parsed.scheme === 'turns' ? 'tls' : 'udp')];
+			// The packaged libdatachannel build uses libjuice. Its binding exposes TCP/TLS relay
+			// enums, but those TURN control transports require the optional libnice backend.
 			if (relayType !== 'TurnUdp') {
 				continue;
 			}
-
 			result.push({
 				hostname: parsed.hostname,
 				port: parsed.port,
@@ -97,122 +126,129 @@ const toNativeIceServers = (iceServers) => {
 	return result;
 };
 
-const isOpen = (channel) => {
-	try {
-		return Boolean(channel?.isOpen());
-	} catch (error) {
-		return false;
-	}
-};
-
-const send = (channel, buffer) => {
-	if (!isOpen(channel)) {
-		return false;
-	}
-
-	try {
-		channel.sendMessageBinary(buffer);
-		return true;
-	} catch (error) {
-		return false;
-	}
-};
-
-const sendEvent = (channel, tag, body) => {
+const sendEvent = (queue, tag, body) => {
 	const frame = encodeEvent(tag, body);
 	if (frame.length <= MAX_MESSAGE_SIZE) {
-		return send(channel, frame);
+		return queue.enqueue(frame);
 	}
 
 	const cid = nextContinuationId;
 	nextContinuationId = (nextContinuationId + 1) >>> 0 || 1;
-	for (const slice of encodeContinuation(cid, frame)) {
-		if (!send(channel, slice)) {
-			return false;
-		}
-	}
-
-	return true;
+	return queue.enqueueMany(encodeContinuation(cid, frame));
 };
 
 const createEventsChannel = (session, channel) => {
 	const loopbacks = new Map();
 	const continuations = new Map();
+	const queue = new DataChannelSendQueue(channel, {
+		onFailure: () => { closeSession(session.id, { notify: true }); }
+	});
 	session.channels.add(channel);
+	session.sendQueues.add(queue);
 	session.loopbackGroups.push(loopbacks);
 
 	const closeLoopback = (namespace) => {
-		const client = loopbacks.get(namespace);
-		if (!client) {
+		const entry = loopbacks.get(namespace);
+		if (!entry) {
 			return;
 		}
 		loopbacks.delete(namespace);
-		client.disconnect();
+		entry.client.disconnect();
 	};
 
-	const openNamespace = (namespace) => {
+	const openNamespace = (namespace, { standby = false } = {}) => {
 		if (typeof namespace !== 'string' || !namespace.startsWith('/') || loopbacks.has(namespace)) {
 			return;
 		}
 
 		const client = openInternalSocket({ namespace });
 		if (!client) {
-			sendEvent(channel, EVENT_TAG.STATE, { ns: namespace, ok: false, error: 'Local API host is not loopback' });
+			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false, error: 'Local API host is not loopback' });
 			return;
 		}
 
-		loopbacks.set(namespace, client);
+		const entry = { client, active: !standby };
+		loopbacks.set(namespace, entry);
 		client.on('connect', () => {
-			sendEvent(channel, EVENT_TAG.STATE, { ns: namespace, ok: true });
+			sendEvent(queue, EVENT_TAG.STATE, {
+				ns: namespace,
+				ok: true,
+				...(standby ? { phase: 'prepared' } : {})
+			});
 		});
 		client.on('connect_error', (error) => {
 			loopbacks.delete(namespace);
-			sendEvent(channel, EVENT_TAG.STATE, { ns: namespace, ok: false, error: error?.message || 'Connection failed' });
+			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false, error: error?.message || 'Connection failed' });
 		});
 		client.onAny((event, ...args) => {
-			sendEvent(channel, EVENT_TAG.EVT, { ns: namespace, event, args });
+			if (entry.active) {
+				sendEvent(queue, EVENT_TAG.EVT, { ns: namespace, event, args });
+			}
 		});
 		client.on('disconnect', () => {
 			loopbacks.delete(namespace);
-			sendEvent(channel, EVENT_TAG.STATE, { ns: namespace, ok: false });
+			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false });
 		});
 	};
 
+	const activateNamespace = (namespace) => {
+		const entry = loopbacks.get(namespace);
+		if (!entry?.client.connected) {
+			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false, error: 'Namespace is not prepared' });
+			return;
+		}
+		entry.active = true;
+		sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: true, phase: 'active' });
+	};
+
 	const handleCall = async ({ ns, cid, event, args, timeout }) => {
-		const client = loopbacks.get(ns);
-		if (!client?.connected) {
-			sendEvent(channel, EVENT_TAG.REPLY, { ns, cid, error: { message: 'Namespace is not open' } });
+		const entry = loopbacks.get(ns);
+		if (!entry?.active || !entry.client.connected) {
+			sendEvent(queue, EVENT_TAG.REPLY, { ns, cid, error: { message: 'Namespace is not active' } });
 			return;
 		}
 
 		try {
 			const bounded = Number.isFinite(timeout) ? Math.min(timeout, CALL_TIMEOUT_MS) : CALL_TIMEOUT_MS;
-			const result = await client.timeout(bounded).emitWithAck(event, ...(Array.isArray(args) ? args : []));
-			sendEvent(channel, EVENT_TAG.REPLY, { ns, cid, result });
+			const result = await entry.client.timeout(bounded).emitWithAck(event, ...(Array.isArray(args) ? args : []));
+			sendEvent(queue, EVENT_TAG.REPLY, { ns, cid, result });
 		} catch (error) {
-			sendEvent(channel, EVENT_TAG.REPLY, { ns, cid, error: { message: error?.message || 'operation has timed out' } });
+			sendEvent(queue, EVENT_TAG.REPLY, { ns, cid, error: { message: error?.message || 'operation has timed out' } });
 		}
 	};
 
 	const dispatch = (frame) => {
 		switch (frame.tag) {
 			case EVENT_TAG.HELLO:
-				sendEvent(channel, EVENT_TAG.HELLO, { v: PROTOCOL_VERSION });
+				sendEvent(queue, EVENT_TAG.HELLO, {
+					v: PROTOCOL_VERSION,
+					ok: frame.body?.v === PROTOCOL_VERSION,
+					features: HELLO_FEATURES
+				});
+				if (frame.body?.v === PROTOCOL_VERSION && session.state !== SESSION_STATE.CONNECTED) {
+					transitionSession(session, SESSION_STATE.CONNECTED);
+					clearTimeout(session.offerTimer);
+					session.offerTimer = null;
+				}
 				return;
 			case EVENT_TAG.OPEN:
-				openNamespace(frame.body?.ns);
+				openNamespace(frame.body?.ns, { standby: Boolean(frame.body?.standby) });
+				return;
+			case EVENT_TAG.ACTIVATE:
+				activateNamespace(frame.body?.ns);
 				return;
 			case EVENT_TAG.EVT: {
-				const client = loopbacks.get(frame.body?.ns);
-				if (client?.connected) {
-					client.emit(frame.body.event, ...(Array.isArray(frame.body.args) ? frame.body.args : []));
+				const entry = loopbacks.get(frame.body?.ns);
+				if (entry?.active && entry.client.connected) {
+					entry.client.emit(frame.body.event, ...(Array.isArray(frame.body.args) ? frame.body.args : []));
 				}
 				return;
 			}
 			case EVENT_TAG.CALL:
 				handleCall(frame.body ?? {}).catch(() => {});
 				return;
-			case EVENT_TAG.STATE:
+			case EVENT_TAG.CLOSE:
+			case EVENT_TAG.STATE: // Legacy clients used STATE as CLOSE.
 				closeLoopback(frame.body?.ns);
 				return;
 			default:
@@ -225,21 +261,35 @@ const createEventsChannel = (session, channel) => {
 			if (continuations.size >= MAX_PENDING_CONTINUATIONS) {
 				return;
 			}
-			pending = { parts: new Array(frame.total).fill(null), received: 0 };
+			pending = {
+				parts: new Array(frame.total).fill(null),
+				received: 0,
+				bytes: 0,
+				timer: setTimeout(() => { continuations.delete(frame.cid); }, CONTINUATION_TIMEOUT_MS)
+			};
+			pending.timer.unref?.();
 			continuations.set(frame.cid, pending);
 		}
 		if (pending.parts.length !== frame.total) {
+			clearTimeout(pending.timer);
 			continuations.delete(frame.cid);
 			return;
 		}
 		if (!pending.parts[frame.part]) {
+			if (pending.bytes + frame.slice.length > MAX_CONTINUATION_BYTES) {
+				clearTimeout(pending.timer);
+				continuations.delete(frame.cid);
+				return;
+			}
 			pending.parts[frame.part] = Buffer.from(frame.slice);
 			pending.received += 1;
+			pending.bytes += frame.slice.length;
 		}
 		if (pending.received < frame.total) {
 			return;
 		}
 
+		clearTimeout(pending.timer);
 		continuations.delete(frame.cid);
 		const complete = decodeEvent(Buffer.concat(pending.parts));
 		if (complete && complete.tag !== EVENT_TAG.CONT) {
@@ -267,12 +317,18 @@ const createEventsChannel = (session, channel) => {
 
 	channel.onClosed(() => {
 		session.channels.delete(channel);
+		session.sendQueues.delete(queue);
+		queue.close();
+		for (const continuation of continuations.values()) {
+			clearTimeout(continuation.timer);
+		}
 		continuations.clear();
-		for (const client of loopbacks.values()) {
-			client.disconnect();
+		for (const entry of loopbacks.values()) {
+			entry.client.disconnect();
 		}
 		loopbacks.clear();
 	});
+	channel.onError(() => { closeSession(session.id, { notify: true }); });
 };
 
 const closeSession = (sessionId, { notify = false } = {}) => {
@@ -282,18 +338,24 @@ const closeSession = (sessionId, { notify = false } = {}) => {
 	}
 
 	sessions.delete(sessionId);
+	transitionSession(session, SESSION_STATE.CLOSING);
 	clearTimeout(session.offerTimer);
 	for (const loopbacks of session.loopbackGroups) {
-		for (const client of loopbacks.values()) {
-			client.disconnect();
+		for (const entry of loopbacks.values()) {
+			entry.client.disconnect();
 		}
 		loopbacks.clear();
 	}
+	for (const queue of session.sendQueues) {
+		queue.close();
+	}
+	session.sendQueues.clear();
 	for (const channel of session.channels) {
 		quietly(() => { channel.close(); });
 	}
 	session.channels.clear();
 	quietly(() => { session.pc.close(); });
+	transitionSession(session, SESSION_STATE.CLOSED);
 
 	if (notify && session.fleetSocket?.connected) {
 		session.fleetSocket.emit('webrtc:close', { sessionId });
@@ -319,12 +381,17 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 	}
 
 	const session = {
+		id: sessionId,
 		pc,
 		token,
 		fleetSocket,
 		channels: new Set(),
+		sendQueues: new Set(),
 		loopbackGroups: [],
-		offerTimer: null
+		pendingCandidates: [],
+		offerTimer: null,
+		state: SESSION_STATE.REQUESTED,
+		stateChangedAt: Date.now()
 	};
 	sessions.set(sessionId, session);
 	session.offerTimer = setTimeout(() => {
@@ -334,6 +401,7 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 
 	pc.onLocalDescription((sdp, type) => {
 		if (type === 'answer' && fleetSocket.connected) {
+			transitionSession(session, SESSION_STATE.ANSWERED);
 			fleetSocket.emit('webrtc:answer', { sessionId, sdp });
 		}
 	});
@@ -354,15 +422,25 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 	});
 
 	pc.onStateChange((state) => {
+		if (state === 'connected') {
+			transitionSession(session, SESSION_STATE.CONNECTED);
+			clearTimeout(session.offerTimer);
+			session.offerTimer = null;
+			if (fleetSocket.connected) {
+				fleetSocket.emit('webrtc:connected', { sessionId });
+			}
+			return;
+		}
 		if (state === 'failed' || state === 'closed') {
 			closeSession(sessionId, { notify: state === 'failed' });
 		}
 	});
+	transitionSession(session, SESSION_STATE.OPEN_SENT);
 };
 
 const applyOffer = (fleetSocket, { sessionId, sdp, token }) => {
 	const session = sessions.get(sessionId);
-	if (!session || !sdp) {
+	if (!session || session.state !== SESSION_STATE.OPEN_SENT || !sdp) {
 		return;
 	}
 
@@ -373,9 +451,14 @@ const applyOffer = (fleetSocket, { sessionId, sdp, token }) => {
 	}
 
 	try {
-		clearTimeout(session.offerTimer);
-		session.offerTimer = null;
+		transitionSession(session, SESSION_STATE.OFFER_RECEIVED);
 		session.pc.setRemoteDescription(sdp, 'offer');
+		for (const pendingCandidate of session.pendingCandidates) {
+			quietly(() => {
+				session.pc.addRemoteCandidate(pendingCandidate.candidate, pendingCandidate.sdpMid ?? '0');
+			});
+		}
+		session.pendingCandidates = [];
 	} catch (error) {
 		fleetSocket.emit('webrtc:error', { sessionId, message: error.message });
 		closeSession(sessionId);
@@ -388,6 +471,12 @@ const addCandidate = ({ sessionId, candidate }) => {
 		return;
 	}
 
+	if (session.state === SESSION_STATE.OPEN_SENT) {
+		if (session.pendingCandidates.length < MAX_PENDING_ICE_CANDIDATES) {
+			session.pendingCandidates.push(candidate);
+		}
+		return;
+	}
 	quietly(() => { session.pc.addRemoteCandidate(candidate.candidate, candidate.sdpMid ?? '0'); });
 };
 
