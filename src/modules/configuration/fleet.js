@@ -178,6 +178,15 @@ const getNodeAddress = async () => {
 	}
 };
 
+const refreshWebrtcBindAddress = async () => {
+	try {
+		const configured = await virtualIp.readConfiguration();
+		webrtcProxy.setBindAddress(await network.getOwnAddress(configured?.address || null));
+	} catch (error) {
+		webrtcProxy.setBindAddress(null);
+	}
+};
+
 /** This node's fleet identity: minted on first registration and kept for as long as the node stays
  * enrolled, so a retry after a failed attempt — or a later re-registration — lands on the same fleet
  * record instead of creating a second one. Persisted before registering for exactly that reason: if
@@ -213,6 +222,7 @@ const connect = async ({ token, nodeId }) => {
 	fleetSocket.on('connect', () => {
 		fleetState.setRuntimeState({ connected: true, authFailed: false });
 		fleetProxy.attachHandlers(fleetSocket);
+		refreshWebrtcBindAddress();
 		webrtcProxy.attachWebrtcHandlers(fleetSocket, { token, nodeId });
 		fleetSocket.emit('node:capabilities', { webrtc: webrtcProxy.isSupported() });
 		broadcastConfigurationUpdate();
@@ -428,6 +438,8 @@ const register = (module) => {
 	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
 	module.eventEmitter.on('host:network:interface:updated', scheduleDomainReport);
 	module.eventEmitter.on('host:network:virtualIp:updated', scheduleDomainReport);
+	module.eventEmitter.on('host:network:interface:updated', refreshWebrtcBindAddress);
+	module.eventEmitter.on('host:network:virtualIp:updated', refreshWebrtcBindAddress);
 	// A node that boots before its pool reads no configuration at all, so an enrolment carried by a
 	// pool imported afterwards is only discovered when the configuration becomes readable.
 	module.eventEmitter.on('configuration:updated', startIfEnabled);

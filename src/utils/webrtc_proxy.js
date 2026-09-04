@@ -8,6 +8,7 @@ import {
 	encodeContinuation
 } from './webrtc_frame.js';
 import DataChannelSendQueue from './data_channel_send_queue.js';
+import { isPrivateAddress } from './private_address.js';
 
 const MAX_PENDING_CONTINUATIONS = 8;
 const MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
@@ -52,6 +53,26 @@ try {
 
 const sessions = new Map();
 let nextContinuationId = 1;
+let bindAddress = null;
+
+const setBindAddress = (address) => {
+	bindAddress = address || null;
+};
+
+const CANDIDATE_PATTERN = /^(?:a=)?candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (\S+)/i;
+
+const isAdvertisableCandidate = (candidate) => {
+	const match = CANDIDATE_PATTERN.exec(String(candidate || ''));
+	if (!match) {
+		return true;
+	}
+
+	const [, address, type] = match;
+	if (type === 'srflx' || type === 'prflx') {
+		return !isPrivateAddress(address);
+	}
+	return true;
+};
 
 const isSupported = () => {
 	return Boolean(rtc);
@@ -374,7 +395,11 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 
 	let pc = null;
 	try {
-		pc = new rtc.PeerConnection(`fleet-${sessionId}`, { iceServers: toNativeIceServers(iceServers) });
+		const configuration = { iceServers: toNativeIceServers(iceServers) };
+		if (bindAddress) {
+			configuration.bindAddress = bindAddress;
+		}
+		pc = new rtc.PeerConnection(`fleet-${sessionId}`, configuration);
 	} catch (error) {
 		fleetSocket.emit('webrtc:error', { sessionId, message: error.message });
 		return;
@@ -407,7 +432,7 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 	});
 
 	pc.onLocalCandidate((candidate, mid) => {
-		if (fleetSocket.connected) {
+		if (fleetSocket.connected && isAdvertisableCandidate(candidate)) {
 			fleetSocket.emit('webrtc:candidate', { sessionId, candidate: { candidate, sdpMid: mid } });
 		}
 	});
@@ -517,6 +542,7 @@ export {
 	attachWebrtcHandlers,
 	closeAllSessions,
 	isSupported,
+	setBindAddress,
 	shutdown,
 	toNativeIceServers
 };
