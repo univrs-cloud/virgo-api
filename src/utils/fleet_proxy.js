@@ -1,58 +1,16 @@
-import path from 'path';
-import { Agent } from 'undici';
 import { io as ioClient } from 'socket.io-client';
-import serverConfig from '../../config.js';
 import * as proxyCredential from './proxy_credential.js';
-import { folderPath as distFolder } from '../controllers/static.js';
+import {
+	HTTP_CHUNK_SIZE,
+	localFetchDispatcher,
+	localTlsOptions,
+	localBaseUrl,
+	pickResponseHeaders,
+	resolveDistPath,
+	buildLocalAssetUrl
+} from './local_assets.js';
 
-const LOOPBACK_HOST = '127.0.0.1';
-const HTTP_CHUNK_SIZE = 256 * 1024;
 const activeHttpRequests = new Map();
-
-// The node's own API is served over HTTPS with a self-signed cert, so loopback calls have to skip
-// verification. Every URL built with these options goes through localBaseUrl(), which is pinned to
-// LOOPBACK_HOST — a self-signed cert must never be accepted over the network, and pinning the address
-// here means no configuration change can send these requests off the host.
-const localFetchDispatcher = new Agent({
-	connect: { rejectUnauthorized: false }
-});
-
-const localTlsOptions = {
-	rejectUnauthorized: false
-};
-
-const localBaseUrl = () => {
-	return `https://${LOOPBACK_HOST}:${serverConfig.server.port}`;
-};
-
-const pickResponseHeaders = (headers) => {
-	const selected = {};
-	const contentType = headers.get('content-type');
-	if (contentType) {
-		selected['content-type'] = contentType;
-	}
-	return selected;
-};
-
-const resolveDistPath = (assetPath) => {
-	const cleaned = decodeURIComponent(assetPath).split('?')[0].split('#')[0];
-	const trimmed = cleaned.startsWith('/') ? cleaned.slice(1) : cleaned;
-	const target = path.resolve(distFolder, trimmed || 'index.html');
-	if (!target.startsWith(distFolder)) {
-		return null;
-	}
-	return target;
-};
-
-const buildLocalAssetUrl = (assetPath) => {
-	const base = localBaseUrl();
-	if (!base) {
-		return null;
-	}
-
-	const normalizedPath = assetPath?.startsWith('/') ? assetPath : `/${assetPath || 'index.html'}`;
-	return new URL(normalizedPath, base);
-};
 
 const createAckGate = (socket, requestId) => {
 	let nextSeq = 0;
@@ -186,7 +144,7 @@ const abortHttpRequest = ({ requestId } = {}) => {
 	activeHttpRequests.delete(requestId);
 };
 
-const openInternalSocket = ({ namespace, user }) => {
+const openInternalSocket = ({ namespace, remoteUser = 'voyager', remoteGroups = ['admins'] }) => {
 	const base = localBaseUrl();
 	if (!base) {
 		return null;
@@ -201,8 +159,8 @@ const openInternalSocket = ({ namespace, user }) => {
 			// Proof that this connection is the node's own proxy rather than something else that can
 			// reach the port; the account beside it is only believed on the strength of it.
 			secret: proxyCredential.getSecret(),
-			'remote-user': 'voyager',
-			'remote-groups': ['admins']
+			'remote-user': remoteUser,
+			'remote-groups': remoteGroups
 		}
 	});
 };
@@ -225,14 +183,14 @@ const attachHandlers = (fleetSocket) => {
 
 	fleetSocket.on('proxy:http:abort', abortHttpRequest);
 
-	fleetSocket.on('proxy:open', ({ sessionId, namespace, user } = {}) => {
+	fleetSocket.on('proxy:open', ({ sessionId, namespace } = {}) => {
 		if (!sessionId || !namespace) {
 			return;
 		}
 		if (sessions.has(sessionId)) {
 			return;
 		}
-		const client = openInternalSocket({ namespace, user });
+		const client = openInternalSocket({ namespace });
 		if (!client) {
 			return;
 		}
@@ -280,5 +238,6 @@ const attachHandlers = (fleetSocket) => {
 };
 
 export {
-	attachHandlers
+	attachHandlers,
+	openInternalSocket
 };

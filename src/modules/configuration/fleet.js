@@ -4,6 +4,7 @@ import { io } from 'socket.io-client';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as fleetProxy from '../../utils/fleet_proxy.js';
+import * as webrtcProxy from '../../utils/webrtc_proxy.js';
 import * as fleetState from '../../utils/fleet_state.js';
 import * as email from '../../utils/email.js';
 import * as network from '../../utils/network.js';
@@ -212,6 +213,8 @@ const connect = async ({ token, nodeId }) => {
 	fleetSocket.on('connect', () => {
 		fleetState.setRuntimeState({ connected: true, authFailed: false });
 		fleetProxy.attachHandlers(fleetSocket);
+		webrtcProxy.attachWebrtcHandlers(fleetSocket, { token, nodeId });
+		fleetSocket.emit('node:capabilities', { webrtc: webrtcProxy.isSupported() });
 		broadcastConfigurationUpdate();
 		reportUpdatesToFleet();
 		reportUpdateToFleet();
@@ -236,6 +239,7 @@ const connect = async ({ token, nodeId }) => {
 	});
 	fleetSocket.on('disconnect', () => {
 		fleetState.setRuntimeState({ connected: false });
+		webrtcProxy.closeAllSessions();
 		broadcastConfigurationUpdate();
 	});
 	fleetSocket.on('connect_error', (error) => {
@@ -250,6 +254,7 @@ const connect = async ({ token, nodeId }) => {
 };
 
 const disconnect = () => {
+	webrtcProxy.closeAllSessions();
 	if (fleetSocket) {
 		fleetSocket.disconnect();
 		fleetSocket = null;
