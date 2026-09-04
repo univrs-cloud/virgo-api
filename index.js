@@ -25,6 +25,8 @@ async function main() {
 	});
 }
 
+const SHUTDOWN_GRACE_MS = 500;
+
 let stopping = false;
 const stop = () => {
 	if (stopping) {
@@ -32,7 +34,7 @@ const stop = () => {
 	}
 	stopping = true;
 	webrtcProxy.shutdown();
-	process.exit(0);
+	setTimeout(() => { process.exit(0); }, SHUTDOWN_GRACE_MS);
 };
 
 process.on('SIGTERM', stop);

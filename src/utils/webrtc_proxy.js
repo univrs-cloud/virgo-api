@@ -8,6 +8,9 @@ import {
 	encodeContinuation
 } from './webrtc_frame.js';
 
+const MAX_PENDING_CONTINUATIONS = 8;
+const OFFER_TIMEOUT_MS = 30_000;
+
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
 
@@ -217,12 +220,22 @@ const createEventsChannel = (session, channel) => {
 	};
 
 	const reassemble = (frame) => {
-		const pending = continuations.get(frame.cid) ?? { parts: new Array(frame.total).fill(null), received: 0 };
+		let pending = continuations.get(frame.cid);
+		if (!pending) {
+			if (continuations.size >= MAX_PENDING_CONTINUATIONS) {
+				return;
+			}
+			pending = { parts: new Array(frame.total).fill(null), received: 0 };
+			continuations.set(frame.cid, pending);
+		}
+		if (pending.parts.length !== frame.total) {
+			continuations.delete(frame.cid);
+			return;
+		}
 		if (!pending.parts[frame.part]) {
 			pending.parts[frame.part] = Buffer.from(frame.slice);
 			pending.received += 1;
 		}
-		continuations.set(frame.cid, pending);
 		if (pending.received < frame.total) {
 			return;
 		}
@@ -235,17 +248,21 @@ const createEventsChannel = (session, channel) => {
 	};
 
 	channel.onMessage((message) => {
-		const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-		const frame = decodeEvent(buffer);
-		if (!frame) {
-			return;
-		}
-		if (frame.tag === EVENT_TAG.CONT) {
-			reassemble(frame);
-			return;
-		}
+		try {
+			const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+			const frame = decodeEvent(buffer);
+			if (!frame) {
+				return;
+			}
+			if (frame.tag === EVENT_TAG.CONT) {
+				reassemble(frame);
+				return;
+			}
 
-		dispatch(frame);
+			dispatch(frame);
+		} catch (error) {
+			console.error('Error handling a WebRTC events frame:', error);
+		}
 	});
 
 	channel.onClosed(() => {
@@ -265,6 +282,7 @@ const closeSession = (sessionId, { notify = false } = {}) => {
 	}
 
 	sessions.delete(sessionId);
+	clearTimeout(session.offerTimer);
 	for (const loopbacks of session.loopbackGroups) {
 		for (const client of loopbacks.values()) {
 			client.disconnect();
@@ -305,9 +323,14 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 		token,
 		fleetSocket,
 		channels: new Set(),
-		loopbackGroups: []
+		loopbackGroups: [],
+		offerTimer: null
 	};
 	sessions.set(sessionId, session);
+	session.offerTimer = setTimeout(() => {
+		closeSession(sessionId, { notify: true });
+	}, OFFER_TIMEOUT_MS);
+	session.offerTimer.unref?.();
 
 	pc.onLocalDescription((sdp, type) => {
 		if (type === 'answer' && fleetSocket.connected) {
@@ -350,6 +373,8 @@ const applyOffer = (fleetSocket, { sessionId, sdp, token }) => {
 	}
 
 	try {
+		clearTimeout(session.offerTimer);
+		session.offerTimer = null;
 		session.pc.setRemoteDescription(sdp, 'offer');
 	} catch (error) {
 		fleetSocket.emit('webrtc:error', { sessionId, message: error.message });
