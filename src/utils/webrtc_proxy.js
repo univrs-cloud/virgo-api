@@ -1,31 +1,15 @@
 import { openInternalSocket } from './fleet_proxy.js';
 import { verifyNodeSessionToken, timingSafeEquals } from './node_authz_token.js';
 import {
-	HTTP_CHUNK_SIZE,
-	localFetchDispatcher,
-	pickResponseHeaders,
-	resolveDistPath,
-	buildLocalAssetUrl
-} from './local_assets.js';
-import {
 	EVENT_TAG,
-	HTTP_TAG,
 	MAX_MESSAGE_SIZE,
 	encodeEvent,
 	decodeEvent,
-	encodeContinuation,
-	encodeHttp,
-	encodeHttpChunk,
-	decodeHttp
+	encodeContinuation
 } from './webrtc_frame.js';
 
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
-const BUFFER_HIGH_WATER = 1024 * 1024;
-const BUFFER_LOW_WATER = 256 * 1024;
-const DRAIN_POLL_MS = 20;
-const HTTP_CHUNK_HEADER_SIZE = 9;
-const CHANNEL_CHUNK_SIZE = Math.min(HTTP_CHUNK_SIZE, MAX_MESSAGE_SIZE - HTTP_CHUNK_HEADER_SIZE);
 
 let rtc = null;
 try {
@@ -118,14 +102,6 @@ const isOpen = (channel) => {
 	}
 };
 
-const bufferedAmount = (channel) => {
-	try {
-		return channel.bufferedAmount();
-	} catch (error) {
-		return 0;
-	}
-};
-
 const send = (channel, buffer) => {
 	if (!isOpen(channel)) {
 		return false;
@@ -137,22 +113,6 @@ const send = (channel, buffer) => {
 	} catch (error) {
 		return false;
 	}
-};
-
-const waitForDrain = (channel) => {
-	if (!isOpen(channel) || bufferedAmount(channel) < BUFFER_HIGH_WATER) {
-		return Promise.resolve();
-	}
-
-	return new Promise((resolve) => {
-		const timer = setInterval(() => {
-			if (!isOpen(channel) || bufferedAmount(channel) < BUFFER_LOW_WATER) {
-				clearInterval(timer);
-				resolve();
-			}
-		}, DRAIN_POLL_MS);
-		timer.unref?.();
-	});
 };
 
 const sendEvent = (channel, tag, body) => {
@@ -298,111 +258,6 @@ const createEventsChannel = (session, channel) => {
 	});
 };
 
-const createHttpChannel = (session, channel) => {
-	const active = new Map();
-	session.channels.add(channel);
-	session.abortGroups.push(active);
-
-	const serve = async (requestId, { method = 'GET', path: assetPath } = {}) => {
-		const target = resolveDistPath(assetPath || '/index.html');
-		if (!target) {
-			send(channel, encodeHttp(HTTP_TAG.ERR, requestId, { status: 400, message: 'Invalid path' }));
-			return;
-		}
-
-		const url = buildLocalAssetUrl(assetPath || '/index.html');
-		if (!url) {
-			send(channel, encodeHttp(HTTP_TAG.ERR, requestId, { status: 500, message: 'Local API host is not loopback' }));
-			return;
-		}
-
-		const abortController = new AbortController();
-		active.set(requestId, abortController);
-
-		try {
-			const response = await fetch(url, {
-				method,
-				signal: abortController.signal,
-				dispatcher: localFetchDispatcher,
-				headers: {
-					accept: '*/*',
-					'accept-encoding': 'identity'
-				}
-			});
-
-			send(channel, encodeHttp(HTTP_TAG.RESP, requestId, {
-				status: response.status,
-				headers: pickResponseHeaders(response.headers)
-			}));
-
-			if (!response.body) {
-				send(channel, encodeHttp(HTTP_TAG.END, requestId));
-				return;
-			}
-
-			const reader = response.body.getReader();
-			let seq = 0;
-			let pending = Buffer.alloc(0);
-			while (true) {
-				const { done, value } = await reader.read();
-				if (value?.byteLength) {
-					pending = Buffer.concat([pending, Buffer.from(value)]);
-				}
-
-				while (pending.length >= CHANNEL_CHUNK_SIZE || (done && pending.length > 0)) {
-					const size = Math.min(pending.length, CHANNEL_CHUNK_SIZE);
-					const bytes = Buffer.from(pending.subarray(0, size));
-					pending = pending.subarray(size);
-					await waitForDrain(channel);
-					if (abortController.signal.aborted || !isOpen(channel)) {
-						return;
-					}
-					send(channel, encodeHttpChunk(requestId, seq, bytes));
-					seq += 1;
-				}
-
-				if (done) {
-					break;
-				}
-			}
-
-			send(channel, encodeHttp(HTTP_TAG.END, requestId));
-		} catch (error) {
-			if (!abortController.signal.aborted) {
-				send(channel, encodeHttp(HTTP_TAG.ERR, requestId, { status: 500, message: error.message }));
-			}
-		} finally {
-			active.delete(requestId);
-		}
-	};
-
-	channel.onMessage((message) => {
-		const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-		const frame = decodeHttp(buffer);
-		if (!frame) {
-			return;
-		}
-
-		if (frame.tag === HTTP_TAG.REQ) {
-			serve(frame.requestId, frame.body).catch(() => {});
-			return;
-		}
-
-		if (frame.tag === HTTP_TAG.ABORT) {
-			active.get(frame.requestId)?.abort();
-			active.delete(frame.requestId);
-		}
-	});
-
-	channel.onClosed(() => {
-		session.channels.delete(channel);
-		for (const controller of active.values()) {
-			controller.abort();
-		}
-		active.clear();
-	});
-};
-
 const closeSession = (sessionId, { notify = false } = {}) => {
 	const session = sessions.get(sessionId);
 	if (!session) {
@@ -415,12 +270,6 @@ const closeSession = (sessionId, { notify = false } = {}) => {
 			client.disconnect();
 		}
 		loopbacks.clear();
-	}
-	for (const active of session.abortGroups) {
-		for (const controller of active.values()) {
-			controller.abort();
-		}
-		active.clear();
 	}
 	for (const channel of session.channels) {
 		quietly(() => { channel.close(); });
@@ -456,8 +305,7 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 		token,
 		fleetSocket,
 		channels: new Set(),
-		loopbackGroups: [],
-		abortGroups: []
+		loopbackGroups: []
 	};
 	sessions.set(sessionId, session);
 
@@ -479,11 +327,6 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 			createEventsChannel(session, channel);
 			return;
 		}
-		if (label.startsWith('http.')) {
-			createHttpChannel(session, channel);
-			return;
-		}
-
 		quietly(() => { channel.close(); });
 	});
 
