@@ -53,7 +53,10 @@ class DataChannelSendQueue {
 		return true;
 	}
 
-	whenDrained() {
+	whenDrained(signal) {
+		if (signal?.aborted) {
+			return Promise.reject(new Error('Asset request aborted'));
+		}
 		if (this.#closed || !this.#isOpen()) {
 			return Promise.reject(new Error('WebRTC data channel is closed'));
 		}
@@ -61,7 +64,17 @@ class DataChannelSendQueue {
 			return Promise.resolve();
 		}
 		return new Promise((resolve, reject) => {
-			this.#drainWaiters.push({ resolve, reject });
+			const cleanup = () => { signal?.removeEventListener('abort', aborted); };
+			const waiter = {
+				resolve: () => { cleanup(); resolve(); },
+				reject: (error) => { cleanup(); reject(error); }
+			};
+			const aborted = () => {
+				this.#drainWaiters = this.#drainWaiters.filter((entry) => { return entry !== waiter; });
+				waiter.reject(new Error('Asset request aborted'));
+			};
+			this.#drainWaiters.push(waiter);
+			signal?.addEventListener('abort', aborted, { once: true });
 		});
 	}
 
