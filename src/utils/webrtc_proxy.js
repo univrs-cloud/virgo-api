@@ -2,23 +2,37 @@ import { openInternalSocket } from './fleet_proxy.js';
 import { verifyNodeSessionToken, timingSafeEquals } from './node_authz_token.js';
 import {
 	EVENT_TAG,
+	ASSET_TAG,
+	ASSET_CHUNK_SIZE,
 	MAX_MESSAGE_SIZE,
 	encodeEvent,
 	decodeEvent,
-	encodeContinuation
+	encodeContinuation,
+	encodeAssetControl,
+	encodeAssetChunk,
+	decodeAssetFrame
 } from './webrtc_frame.js';
 import DataChannelSendQueue from './data_channel_send_queue.js';
 import { isPrivateAddress } from './private_address.js';
+import {
+	localFetchDispatcher,
+	buildLocalAssetUrl,
+	pickResponseHeaders,
+	resolveDistPath
+} from './local_assets.js';
 
 const MAX_PENDING_CONTINUATIONS = 8;
 const MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
 const CONTINUATION_TIMEOUT_MS = 30_000;
 const OFFER_TIMEOUT_MS = 30_000;
+const MAX_CONCURRENT_ASSET_REQUESTS = 8;
 
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_PENDING_ICE_CANDIDATES = 128;
-const HELLO_FEATURES = ['namespace-activation', 'namespace-close'];
+const HELLO_FEATURES = ['namespace-activation', 'namespace-close', 'heartbeat'];
+const HEARTBEAT_INTERVAL_MS = 15000;
+const LIVENESS_TIMEOUT_MS = 45000;
 
 const SESSION_STATE = Object.freeze({
 	REQUESTED: 'REQUESTED',
@@ -147,6 +161,19 @@ const toNativeIceServers = (iceServers) => {
 	return result;
 };
 
+const startSessionLiveness = (session) => {
+	if (session.livenessTimer) {
+		return;
+	}
+	session.lastInboundAt = Date.now();
+	session.livenessTimer = setInterval(() => {
+		if (Date.now() - session.lastInboundAt >= LIVENESS_TIMEOUT_MS) {
+			closeSession(session.id, { notify: true });
+		}
+	}, HEARTBEAT_INTERVAL_MS);
+	session.livenessTimer.unref?.();
+};
+
 const sendEvent = (queue, tag, body) => {
 	const frame = encodeEvent(tag, body);
 	if (frame.length <= MAX_MESSAGE_SIZE) {
@@ -251,6 +278,12 @@ const createEventsChannel = (session, channel) => {
 					clearTimeout(session.offerTimer);
 					session.offerTimer = null;
 				}
+				if (Array.isArray(frame.body?.features) && frame.body.features.includes('heartbeat')) {
+					startSessionLiveness(session);
+				}
+				return;
+			case EVENT_TAG.PING:
+				sendEvent(queue, EVENT_TAG.PONG, {});
 				return;
 			case EVENT_TAG.OPEN:
 				openNamespace(frame.body?.ns, { standby: Boolean(frame.body?.standby) });
@@ -320,6 +353,7 @@ const createEventsChannel = (session, channel) => {
 
 	channel.onMessage((message) => {
 		try {
+			session.lastInboundAt = Date.now();
 			const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
 			const frame = decodeEvent(buffer);
 			if (!frame) {
@@ -352,6 +386,154 @@ const createEventsChannel = (session, channel) => {
 	channel.onError(() => { closeSession(session.id, { notify: true }); });
 };
 
+const createAssetsChannel = (session, channel) => {
+	const requests = new Map();
+	const queue = new DataChannelSendQueue(channel, {
+		onFailure: () => { failChannel(); }
+	});
+	session.channels.add(channel);
+	session.sendQueues.add(queue);
+
+	const send = (tag, requestId, body) => {
+		return queue.enqueue(encodeAssetControl(tag, requestId, body));
+	};
+
+	const abortAll = () => {
+		for (const request of requests.values()) {
+			quietly(() => { request.controller.abort(); });
+		}
+		requests.clear();
+	};
+
+	const failChannel = () => {
+		abortAll();
+		quietly(() => { channel.close(); });
+	};
+
+	const pump = async (requestId, reader, controller) => {
+		let seq = 0;
+		let pending = Buffer.alloc(0);
+		const flush = async (final) => {
+			while (pending.length >= ASSET_CHUNK_SIZE || (final && pending.length)) {
+				const size = Math.min(pending.length, ASSET_CHUNK_SIZE);
+				const slice = Buffer.from(pending.subarray(0, size));
+				pending = pending.subarray(size);
+				if (!queue.enqueue(encodeAssetChunk(requestId, seq, slice))) {
+					throw new Error('Asset channel is not writable');
+				}
+				seq += 1;
+				await queue.whenDrained();
+				if (controller.signal.aborted || !requests.has(requestId)) {
+					throw new Error('Asset request aborted');
+				}
+			}
+		};
+
+		while (true) {
+			const { done, value } = await reader.read();
+			if (value?.byteLength) {
+				const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+				pending = pending.length ? Buffer.concat([pending, bytes]) : Buffer.from(bytes);
+			}
+			await flush(done);
+			if (done) {
+				return;
+			}
+		}
+	};
+
+	const handleRequest = async (requestId, body) => {
+		if (requests.has(requestId)) {
+			return;
+		}
+		if (requests.size >= MAX_CONCURRENT_ASSET_REQUESTS) {
+			send(ASSET_TAG.ERR, requestId, { status: 429, message: 'Too many asset requests' });
+			return;
+		}
+
+		const assetPath = (typeof body?.path === 'string') ? body.path : '';
+		if (!assetPath.startsWith('/') || !resolveDistPath(assetPath)) {
+			send(ASSET_TAG.ERR, requestId, { status: 400, message: 'Invalid path' });
+			return;
+		}
+		const url = buildLocalAssetUrl(assetPath);
+		if (!url) {
+			send(ASSET_TAG.ERR, requestId, { status: 500, message: 'Local API host is not loopback' });
+			return;
+		}
+
+		const controller = new AbortController();
+		requests.set(requestId, { controller });
+		try {
+			const response = await fetch(url, {
+				method: 'GET',
+				signal: controller.signal,
+				dispatcher: localFetchDispatcher,
+				headers: {
+					accept: '*/*',
+					'accept-encoding': 'identity'
+				}
+			});
+			if (!requests.has(requestId)) {
+				return;
+			}
+			send(ASSET_TAG.RES, requestId, {
+				status: response.status,
+				headers: pickResponseHeaders(response.headers)
+			});
+			if (response.body) {
+				await pump(requestId, response.body.getReader(), controller);
+			}
+			if (requests.has(requestId)) {
+				send(ASSET_TAG.END, requestId, {});
+			}
+		} catch (error) {
+			if (!controller.signal.aborted && requests.has(requestId)) {
+				send(ASSET_TAG.ERR, requestId, { status: 502, message: error.message });
+			}
+		} finally {
+			requests.delete(requestId);
+		}
+	};
+
+	const handleAbort = (requestId) => {
+		const request = requests.get(requestId);
+		if (!request) {
+			return;
+		}
+		requests.delete(requestId);
+		quietly(() => { request.controller.abort(); });
+	};
+
+	channel.onMessage((message) => {
+		try {
+			session.lastInboundAt = Date.now();
+			const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+			const frame = decodeAssetFrame(buffer);
+			if (!frame) {
+				return;
+			}
+			if (frame.tag === ASSET_TAG.REQ) {
+				handleRequest(frame.requestId, frame.body).catch(() => {});
+				return;
+			}
+			if (frame.tag === ASSET_TAG.ABORT) {
+				handleAbort(frame.requestId);
+			}
+		} catch (error) {
+			console.error('Error handling a WebRTC asset frame:', error);
+		}
+	});
+
+	channel.onClosed(() => {
+		session.channels.delete(channel);
+		session.sendQueues.delete(queue);
+		queue.close();
+		abortAll();
+	});
+	channel.onError(() => { failChannel(); });
+};
+
 const closeSession = (sessionId, { notify = false } = {}) => {
 	const session = sessions.get(sessionId);
 	if (!session) {
@@ -361,6 +543,8 @@ const closeSession = (sessionId, { notify = false } = {}) => {
 	sessions.delete(sessionId);
 	transitionSession(session, SESSION_STATE.CLOSING);
 	clearTimeout(session.offerTimer);
+	clearInterval(session.livenessTimer);
+	session.livenessTimer = null;
 	for (const loopbacks of session.loopbackGroups) {
 		for (const entry of loopbacks.values()) {
 			entry.client.disconnect();
@@ -415,6 +599,8 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 		loopbackGroups: [],
 		pendingCandidates: [],
 		offerTimer: null,
+		livenessTimer: null,
+		lastInboundAt: 0,
 		state: SESSION_STATE.REQUESTED,
 		stateChangedAt: Date.now()
 	};
@@ -441,6 +627,10 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 		const label = String(channel.getLabel() || '');
 		if (label === 'events') {
 			createEventsChannel(session, channel);
+			return;
+		}
+		if (label === 'assets') {
+			createAssetsChannel(session, channel);
 			return;
 		}
 		quietly(() => { channel.close(); });

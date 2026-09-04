@@ -10,7 +10,9 @@ class DataChannelSendQueue {
 	#closed = false;
 	#draining = false;
 	#retryTimer = null;
+	#drainWaiters = [];
 	#highWaterMark;
+	#lowWaterMark;
 	#maxBufferedBytes;
 	#onFailure;
 
@@ -22,6 +24,7 @@ class DataChannelSendQueue {
 	} = {}) {
 		this.#channel = channel;
 		this.#highWaterMark = highWaterMark;
+		this.#lowWaterMark = lowWaterMark;
 		this.#maxBufferedBytes = maxBufferedBytes;
 		this.#onFailure = onFailure;
 		channel.setBufferedAmountLowThreshold(lowWaterMark);
@@ -48,6 +51,30 @@ class DataChannelSendQueue {
 		this.#queuedBytes += addedBytes;
 		this.#drain();
 		return true;
+	}
+
+	whenDrained() {
+		if (this.#closed || !this.#isOpen()) {
+			return Promise.reject(new Error('WebRTC data channel is closed'));
+		}
+		if (this.#queuedBytes + this.#bufferedAmount() <= this.#lowWaterMark) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve, reject) => {
+			this.#drainWaiters.push({ resolve, reject });
+		});
+	}
+
+	#settleDrainWaiters() {
+		if (!this.#drainWaiters.length) {
+			return;
+		}
+		if (this.#queuedBytes + this.#bufferedAmount() > this.#lowWaterMark) {
+			return;
+		}
+		const waiters = this.#drainWaiters;
+		this.#drainWaiters = [];
+		waiters.forEach((waiter) => { waiter.resolve(); });
 	}
 
 	#isOpen() {
@@ -86,6 +113,7 @@ class DataChannelSendQueue {
 		} finally {
 			this.#draining = false;
 		}
+		this.#settleDrainWaiters();
 	}
 
 	#scheduleRetry() {
@@ -119,6 +147,9 @@ class DataChannelSendQueue {
 		}
 		this.#queue = [];
 		this.#queuedBytes = 0;
+		const waiters = this.#drainWaiters;
+		this.#drainWaiters = [];
+		waiters.forEach((waiter) => { waiter.reject(new Error('WebRTC data channel is closed')); });
 	}
 }
 
