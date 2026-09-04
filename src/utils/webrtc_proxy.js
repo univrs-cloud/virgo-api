@@ -26,11 +26,13 @@ const MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
 const CONTINUATION_TIMEOUT_MS = 30_000;
 const OFFER_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENT_ASSET_REQUESTS = 8;
+const ASSET_IDLE_TIMEOUT_MS = 30000;
+const ASSET_WINDOW_CHUNKS = 8;
 
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_PENDING_ICE_CANDIDATES = 128;
-const HELLO_FEATURES = ['namespace-activation', 'namespace-close', 'heartbeat'];
+const HELLO_FEATURES = ['namespace-activation', 'namespace-close', 'heartbeat', 'asset-credit'];
 const HEARTBEAT_INTERVAL_MS = 15000;
 const LIVENESS_TIMEOUT_MS = 45000;
 
@@ -400,6 +402,7 @@ const createAssetsChannel = (session, channel) => {
 
 	const abortAll = () => {
 		for (const request of requests.values()) {
+			clearTimeout(request.timer);
 			quietly(() => { request.controller.abort(); });
 		}
 		requests.clear();
@@ -410,11 +413,53 @@ const createAssetsChannel = (session, channel) => {
 		quietly(() => { channel.close(); });
 	};
 
+	const touchRequest = (requestId, request) => {
+		clearTimeout(request.timer);
+		if (request.controller.signal.aborted || requests.get(requestId) !== request) {
+			return;
+		}
+		request.timer = setTimeout(() => {
+			send(ASSET_TAG.ERR, requestId, { status: 504, message: 'Asset transfer stalled' });
+			request.controller.abort();
+			requests.delete(requestId);
+		}, ASSET_IDLE_TIMEOUT_MS);
+		request.timer.unref?.();
+	};
+
+	const takeCredit = async (requestId, request) => {
+		if (request.controller.signal.aborted || requests.get(requestId) !== request) {
+			throw new Error('Asset request aborted');
+		}
+		if (!request.flowControl) {
+			return;
+		}
+		if (!request.credits) {
+			await new Promise((resolve, reject) => {
+				const signal = request.controller.signal;
+				const finish = (error) => {
+					signal.removeEventListener('abort', aborted);
+					request.resume = null;
+					error ? reject(error) : resolve();
+				};
+				const aborted = () => { finish(new Error('Asset request aborted')); };
+				request.resume = () => { finish(); };
+				signal.addEventListener('abort', aborted, { once: true });
+				if (signal.aborted) { aborted(); }
+			});
+		}
+		if (request.controller.signal.aborted || !requests.has(requestId)) {
+			throw new Error('Asset request aborted');
+		}
+		request.credits -= 1;
+	};
+
 	const pump = async (requestId, reader, controller) => {
+		const request = requests.get(requestId);
 		let seq = 0;
 		let pending = Buffer.alloc(0);
 		const flush = async (final) => {
 			while (pending.length >= ASSET_CHUNK_SIZE || (final && pending.length)) {
+				await takeCredit(requestId, request);
 				const size = Math.min(pending.length, ASSET_CHUNK_SIZE);
 				const slice = Buffer.from(pending.subarray(0, size));
 				pending = pending.subarray(size);
@@ -422,7 +467,8 @@ const createAssetsChannel = (session, channel) => {
 					throw new Error('Asset channel is not writable');
 				}
 				seq += 1;
-				await queue.whenDrained();
+				await queue.whenDrained(controller.signal);
+				touchRequest(requestId, request);
 				if (controller.signal.aborted || !requests.has(requestId)) {
 					throw new Error('Asset request aborted');
 				}
@@ -431,6 +477,7 @@ const createAssetsChannel = (session, channel) => {
 
 		while (true) {
 			const { done, value } = await reader.read();
+			touchRequest(requestId, request);
 			if (value?.byteLength) {
 				const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
 				pending = pending.length ? Buffer.concat([pending, bytes]) : Buffer.from(bytes);
@@ -463,7 +510,9 @@ const createAssetsChannel = (session, channel) => {
 		}
 
 		const controller = new AbortController();
-		requests.set(requestId, { controller });
+		const request = { controller, credits: 0, flowControl: body.flowControl === true, resume: null, timer: null };
+		requests.set(requestId, request);
+		touchRequest(requestId, request);
 		try {
 			const response = await fetch(url, {
 				method: 'GET',
@@ -477,6 +526,7 @@ const createAssetsChannel = (session, channel) => {
 			if (!requests.has(requestId)) {
 				return;
 			}
+			touchRequest(requestId, request);
 			send(ASSET_TAG.RES, requestId, {
 				status: response.status,
 				headers: pickResponseHeaders(response.headers)
@@ -492,7 +542,11 @@ const createAssetsChannel = (session, channel) => {
 				send(ASSET_TAG.ERR, requestId, { status: 502, message: error.message });
 			}
 		} finally {
-			requests.delete(requestId);
+			clearTimeout(request.timer);
+			if (requests.get(requestId) === request) {
+				requests.delete(requestId);
+			}
+			controller.abort();
 		}
 	};
 
@@ -502,6 +556,7 @@ const createAssetsChannel = (session, channel) => {
 			return;
 		}
 		requests.delete(requestId);
+		clearTimeout(request.timer);
 		quietly(() => { request.controller.abort(); });
 	};
 
@@ -519,6 +574,15 @@ const createAssetsChannel = (session, channel) => {
 			}
 			if (frame.tag === ASSET_TAG.ABORT) {
 				handleAbort(frame.requestId);
+			}
+			if (frame.tag === ASSET_TAG.CREDIT) {
+				const request = requests.get(frame.requestId);
+				const chunks = frame.body?.chunks;
+				if (request?.flowControl && Number.isInteger(chunks) && chunks > 0 && request.credits + chunks <= ASSET_WINDOW_CHUNKS) {
+					request.credits += chunks;
+					touchRequest(frame.requestId, request);
+					request.resume?.();
+				}
 			}
 		} catch (error) {
 			console.error('Error handling a WebRTC asset frame:', error);
