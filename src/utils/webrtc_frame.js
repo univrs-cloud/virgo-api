@@ -7,13 +7,28 @@ const EVENT_TAG = {
 	REPLY: 0x15,
 	ACTIVATE: 0x16,
 	CLOSE: 0x17,
+	PING: 0x18,
+	PONG: 0x19,
 	CONT: 0x1F
+};
+
+const ASSET_TAG = {
+	REQ: 0x20,
+	RES: 0x21,
+	CHUNK: 0x22,
+	END: 0x23,
+	ERR: 0x24,
+	ABORT: 0x25
 };
 
 const MAX_MESSAGE_SIZE = 64 * 1024;
 const CONT_HEADER_SIZE = 9;
 const CONT_SLICE_SIZE = MAX_MESSAGE_SIZE - CONT_HEADER_SIZE;
 const MAX_CONTINUATION_PARTS = 256;
+const ASSET_HEADER_SIZE = 5;
+const ASSET_CHUNK_HEADER_SIZE = 9;
+const ASSET_CHUNK_SIZE = MAX_MESSAGE_SIZE - ASSET_CHUNK_HEADER_SIZE;
+const ASSET_TAGS = new Set(Object.values(ASSET_TAG));
 
 const encodeEvent = (tag, body) => {
 	const json = Buffer.from(JSON.stringify(body ?? {}), 'utf8');
@@ -68,12 +83,65 @@ const encodeContinuation = (cid, payload) => {
 	return frames;
 };
 
+const encodeAssetControl = (tag, requestId, body) => {
+	const header = Buffer.alloc(ASSET_HEADER_SIZE);
+	header[0] = tag;
+	header.writeUInt32LE(requestId, 1);
+	return Buffer.concat([header, Buffer.from(JSON.stringify(body ?? {}), 'utf8')]);
+};
+
+const encodeAssetChunk = (requestId, seq, bytes) => {
+	const header = Buffer.alloc(ASSET_CHUNK_HEADER_SIZE);
+	header[0] = ASSET_TAG.CHUNK;
+	header.writeUInt32LE(requestId, 1);
+	header.writeUInt32LE(seq, 5);
+	return Buffer.concat([header, bytes]);
+};
+
+const decodeAssetFrame = (buffer) => {
+	if (!buffer?.length || !ASSET_TAGS.has(buffer[0])) {
+		return null;
+	}
+
+	const tag = buffer[0];
+	if (tag === ASSET_TAG.CHUNK) {
+		if (buffer.length < ASSET_CHUNK_HEADER_SIZE) {
+			return null;
+		}
+		return {
+			tag,
+			requestId: buffer.readUInt32LE(1),
+			seq: buffer.readUInt32LE(5),
+			bytes: buffer.subarray(ASSET_CHUNK_HEADER_SIZE)
+		};
+	}
+
+	if (buffer.length < ASSET_HEADER_SIZE) {
+		return null;
+	}
+	try {
+		const json = buffer.subarray(ASSET_HEADER_SIZE).toString('utf8');
+		return {
+			tag,
+			requestId: buffer.readUInt32LE(1),
+			body: json ? JSON.parse(json) : {}
+		};
+	} catch (error) {
+		return null;
+	}
+};
+
 export {
 	EVENT_TAG,
+	ASSET_TAG,
+	ASSET_CHUNK_SIZE,
 	MAX_MESSAGE_SIZE,
 	CONT_SLICE_SIZE,
 	MAX_CONTINUATION_PARTS,
 	encodeEvent,
 	decodeEvent,
-	encodeContinuation
+	encodeContinuation,
+	encodeAssetControl,
+	encodeAssetChunk,
+	decodeAssetFrame
 };
