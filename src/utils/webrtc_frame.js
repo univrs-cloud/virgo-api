@@ -11,6 +11,7 @@ const EVENT_TAG = {
 const MAX_MESSAGE_SIZE = 64 * 1024;
 const CONT_HEADER_SIZE = 9;
 const CONT_SLICE_SIZE = MAX_MESSAGE_SIZE - CONT_HEADER_SIZE;
+const MAX_CONTINUATION_PARTS = 256;
 
 const encodeEvent = (tag, body) => {
 	const json = Buffer.from(JSON.stringify(body ?? {}), 'utf8');
@@ -28,11 +29,17 @@ const decodeEvent = (buffer) => {
 			return null;
 		}
 
+		const part = buffer.readUInt16LE(5);
+		const total = buffer.readUInt16LE(7);
+		if (!total || total > MAX_CONTINUATION_PARTS || part >= total) {
+			return null;
+		}
+
 		return {
 			tag,
 			cid: buffer.readUInt32LE(1),
-			part: buffer.readUInt16LE(5),
-			total: buffer.readUInt16LE(7),
+			part,
+			total,
 			slice: buffer.subarray(CONT_HEADER_SIZE)
 		};
 	}
@@ -63,6 +70,7 @@ export {
 	EVENT_TAG,
 	MAX_MESSAGE_SIZE,
 	CONT_SLICE_SIZE,
+	MAX_CONTINUATION_PARTS,
 	encodeEvent,
 	decodeEvent,
 	encodeContinuation
