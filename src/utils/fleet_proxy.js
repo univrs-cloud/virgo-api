@@ -13,6 +13,7 @@ import {
 } from './local_assets.js';
 
 const activeHttpRequests = new Map();
+const CALL_TIMEOUT_MS = 30_000;
 
 const createAckGate = (socket, requestId) => {
 	let nextSeq = 0;
@@ -191,14 +192,18 @@ const attachHandlers = (fleetSocket) => {
 
 	fleetSocket.on('proxy:http:abort', abortHttpRequest);
 
-	fleetSocket.on('proxy:open', ({ sessionId, namespace } = {}) => {
+	fleetSocket.on('proxy:open', ({ sessionId, namespace, user } = {}) => {
 		if (!sessionId || !namespace) {
 			return;
 		}
 		if (sessions.has(sessionId)) {
 			return;
 		}
-		const client = openInternalSocket({ namespace });
+		const client = openInternalSocket({
+			namespace,
+			remoteUser: (typeof user?.email === 'string' && user.email) || undefined,
+			remoteGroups: Array.isArray(user?.groups) ? user.groups : undefined
+		});
 		if (!client) {
 			return;
 		}
@@ -221,6 +226,28 @@ const attachHandlers = (fleetSocket) => {
 		const client = sessions.get(sessionId);
 		if (client?.connected) {
 			client.emit(event, ...(Array.isArray(args) ? args : []));
+		}
+	});
+
+	fleetSocket.on('proxy:call', async ({ sessionId, callId, event, args, timeout } = {}) => {
+		const client = sessions.get(sessionId);
+		if (!callId) {
+			return;
+		}
+		if (!client?.connected) {
+			fleetSocket.emit('proxy:reply', { sessionId, callId, error: { message: 'Namespace is not connected' } });
+			return;
+		}
+		try {
+			const bounded = Number.isFinite(timeout) ? Math.min(timeout, CALL_TIMEOUT_MS) : CALL_TIMEOUT_MS;
+			const result = await client.timeout(bounded).emitWithAck(event, ...(Array.isArray(args) ? args : []));
+			if (fleetSocket.connected) {
+				fleetSocket.emit('proxy:reply', { sessionId, callId, result });
+			}
+		} catch (error) {
+			if (fleetSocket.connected) {
+				fleetSocket.emit('proxy:reply', { sessionId, callId, error: { message: error?.message || 'operation has timed out' } });
+			}
 		}
 	});
 

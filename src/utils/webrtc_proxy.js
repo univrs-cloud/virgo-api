@@ -34,7 +34,7 @@ const ASSET_WINDOW_CHUNKS = 8;
 const PROTOCOL_VERSION = 1;
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_PENDING_ICE_CANDIDATES = 128;
-const HELLO_FEATURES = ['namespace-activation', 'namespace-close', 'heartbeat', 'asset-credit'];
+const FLEET_OFFLINE_GRACE_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const LIVENESS_TIMEOUT_MS = 45000;
 
@@ -72,6 +72,7 @@ try {
 const sessions = new Map();
 let nextContinuationId = 1;
 let bindAddress = null;
+let fleetOfflineTimer = null;
 
 const setBindAddress = (address) => {
 	bindAddress = address || null;
@@ -213,19 +214,23 @@ const createEventsChannel = (session, channel) => {
 			return;
 		}
 
-		const client = openInternalSocket({ namespace });
+		const client = openInternalSocket({
+			namespace,
+			remoteUser: session.user?.email || undefined,
+			remoteGroups: session.user?.groups || undefined
+		});
 		if (!client) {
 			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false, error: 'Local API host is not loopback' });
 			return;
 		}
 
-		const entry = { client, active: !standby };
+		const entry = { client, active: !standby, resnapshotting: false };
 		loopbacks.set(namespace, entry);
 		client.on('connect', () => {
 			sendEvent(queue, EVENT_TAG.STATE, {
 				ns: namespace,
 				ok: true,
-				...(standby ? { phase: 'prepared' } : {})
+				phase: entry.active ? 'active' : 'prepared'
 			});
 		});
 		client.on('connect_error', (error) => {
@@ -238,6 +243,15 @@ const createEventsChannel = (session, channel) => {
 			}
 		});
 		client.on('disconnect', () => {
+			if (entry.resnapshotting && loopbacks.get(namespace) === entry) {
+				entry.resnapshotting = false;
+				setImmediate(() => {
+					if (loopbacks.get(namespace) === entry) {
+						client.connect();
+					}
+				});
+				return;
+			}
 			loopbacks.delete(namespace);
 			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false });
 		});
@@ -249,8 +263,13 @@ const createEventsChannel = (session, channel) => {
 			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: false, error: 'Namespace is not prepared' });
 			return;
 		}
+		if (entry.active) {
+			sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: true, phase: 'active' });
+			return;
+		}
 		entry.active = true;
-		sendEvent(queue, EVENT_TAG.STATE, { ns: namespace, ok: true, phase: 'active' });
+		entry.resnapshotting = true;
+		entry.client.disconnect();
 	};
 
 	const handleCall = async ({ ns, cid, event, args, timeout }) => {
@@ -274,17 +293,14 @@ const createEventsChannel = (session, channel) => {
 			case EVENT_TAG.HELLO:
 				sendEvent(queue, EVENT_TAG.HELLO, {
 					v: PROTOCOL_VERSION,
-					ok: frame.body?.v === PROTOCOL_VERSION,
-					features: HELLO_FEATURES
+					ok: frame.body?.v === PROTOCOL_VERSION
 				});
 				if (frame.body?.v === PROTOCOL_VERSION && session.state !== SESSION_STATE.CONNECTED) {
 					transitionSession(session, SESSION_STATE.CONNECTED);
 					clearTimeout(session.offerTimer);
 					session.offerTimer = null;
 				}
-				if (Array.isArray(frame.body?.features) && frame.body.features.includes('heartbeat')) {
-					startSessionLiveness(session);
-				}
+				startSessionLiveness(session);
 				return;
 			case EVENT_TAG.PING:
 				sendEvent(queue, EVENT_TAG.PONG, {});
@@ -306,7 +322,6 @@ const createEventsChannel = (session, channel) => {
 				handleCall(frame.body ?? {}).catch(() => {});
 				return;
 			case EVENT_TAG.CLOSE:
-			case EVENT_TAG.STATE: // Legacy clients used STATE as CLOSE.
 				closeLoopback(frame.body?.ns);
 				return;
 			default:
@@ -641,11 +656,16 @@ const closeSession = (sessionId, { notify = false } = {}) => {
 };
 
 const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken, nodeId }) => {
-	if (!rtc || !sessionId || sessions.has(sessionId)) {
+	if (!sessionId || sessions.has(sessionId)) {
+		return;
+	}
+	if (!rtc) {
+		fleetSocket.emit('webrtc:error', { sessionId, message: 'WebRTC is not available on this node' });
 		return;
 	}
 
-	if (!verifyNodeSessionToken(token, { nodeToken, nodeId, sessionId })) {
+	const claims = verifyNodeSessionToken(token, { nodeToken, nodeId, sessionId });
+	if (!claims) {
 		fleetSocket.emit('webrtc:error', { sessionId, message: 'Invalid session token' });
 		return;
 	}
@@ -666,6 +686,10 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 		id: sessionId,
 		pc,
 		token,
+		user: {
+			email: (typeof claims.email === 'string' && claims.email) || null,
+			groups: Array.isArray(claims.groups) ? claims.groups : null
+		},
 		fleetSocket,
 		channels: new Set(),
 		sendQueues: new Set(),
@@ -728,7 +752,18 @@ const openSession = (fleetSocket, { sessionId, token, iceServers }, { nodeToken,
 
 const applyOffer = (fleetSocket, { sessionId, sdp, token }) => {
 	const session = sessions.get(sessionId);
-	if (!session || session.state !== SESSION_STATE.OPEN_SENT || !sdp) {
+	if (!session) {
+		fleetSocket.emit('webrtc:error', { sessionId, message: 'Unknown session' });
+		return;
+	}
+	if (session.state !== SESSION_STATE.OPEN_SENT) {
+		fleetSocket.emit('webrtc:error', { sessionId, message: `Offer not expected in state ${session.state}` });
+		closeSession(sessionId);
+		return;
+	}
+	if (typeof sdp !== 'string' || !sdp) {
+		fleetSocket.emit('webrtc:error', { sessionId, message: 'Offer is missing its SDP' });
+		closeSession(sessionId);
 		return;
 	}
 
@@ -769,6 +804,8 @@ const addCandidate = ({ sessionId, candidate }) => {
 };
 
 const closeAllSessions = () => {
+	clearTimeout(fleetOfflineTimer);
+	fleetOfflineTimer = null;
 	for (const sessionId of [...sessions.keys()]) {
 		closeSession(sessionId);
 	}
@@ -793,7 +830,28 @@ const attachWebrtcHandlers = (fleetSocket, { token, nodeId } = {}) => {
 	fleetSocket.on('webrtc:close', ({ sessionId } = {}) => {
 		closeSession(sessionId);
 	});
-	fleetSocket.on('disconnect', closeAllSessions);
+	fleetSocket.on('disconnect', () => {
+		clearTimeout(fleetOfflineTimer);
+		fleetOfflineTimer = setTimeout(() => {
+			fleetOfflineTimer = null;
+			closeAllSessions();
+		}, FLEET_OFFLINE_GRACE_MS);
+		fleetOfflineTimer.unref?.();
+	});
+	fleetSocket.on('connect', () => { announceSessions(fleetSocket); });
+	announceSessions(fleetSocket);
+};
+
+const announceSessions = (fleetSocket) => {
+	clearTimeout(fleetOfflineTimer);
+	fleetOfflineTimer = null;
+	if (!fleetSocket.connected) {
+		return;
+	}
+	const sessionIds = [...sessions.values()]
+		.filter((session) => { return session.state === SESSION_STATE.CONNECTED; })
+		.map((session) => { return session.id; });
+	fleetSocket.emit('webrtc:sessions', { sessionIds });
 };
 
 const shutdown = () => {

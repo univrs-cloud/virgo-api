@@ -249,7 +249,6 @@ const connect = async ({ token, nodeId }) => {
 	});
 	fleetSocket.on('disconnect', () => {
 		fleetState.setRuntimeState({ connected: false });
-		webrtcProxy.closeAllSessions();
 		broadcastConfigurationUpdate();
 	});
 	fleetSocket.on('connect_error', (error) => {
