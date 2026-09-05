@@ -22,6 +22,20 @@ const localBaseUrl = () => {
 	return `https://${LOOPBACK_HOST}:${serverConfig.server.port}`;
 };
 
+const COMPRESSIBLE_PATTERN = /^(?:text\/|application\/(?:javascript|json|manifest\+json|xml)|image\/svg\+xml)/i;
+const MIN_COMPRESSED_BYTES = 1024;
+
+const isCompressible = (contentType, length) => {
+	if (Number.isFinite(length) && length < MIN_COMPRESSED_BYTES) {
+		return false;
+	}
+	return COMPRESSIBLE_PATTERN.test(String(contentType || ''));
+};
+
+const gzipStream = (body) => {
+	return body.pipeThrough(new CompressionStream('gzip'));
+};
+
 const pickResponseHeaders = (headers) => {
 	const selected = {};
 	const contentType = headers.get('content-type');
@@ -53,6 +67,8 @@ const buildLocalAssetUrl = (assetPath) => {
 
 export {
 	HTTP_CHUNK_SIZE,
+	isCompressible,
+	gzipStream,
 	localFetchDispatcher,
 	localTlsOptions,
 	localBaseUrl,
