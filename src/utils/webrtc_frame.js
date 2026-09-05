@@ -31,39 +31,66 @@ const ASSET_CHUNK_HEADER_SIZE = 9;
 const ASSET_CHUNK_SIZE = MAX_MESSAGE_SIZE - ASSET_CHUNK_HEADER_SIZE;
 const ASSET_TAGS = new Set(Object.values(ASSET_TAG));
 
-const encodeEvent = (tag, body) => {
-	const json = Buffer.from(JSON.stringify(body ?? {}), 'utf8');
-	return Buffer.concat([Buffer.from([tag]), json]);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const asBytes = (message) => {
+	if (message instanceof ArrayBuffer) {
+		return new Uint8Array(message);
+	}
+	if (ArrayBuffer.isView(message)) {
+		return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+	}
+
+	return encoder.encode(String(message ?? ''));
 };
 
-const decodeEvent = (buffer) => {
-	if (!buffer?.length) {
+const concat = (parts) => {
+	const total = parts.reduce((sum, part) => { return sum + part.length; }, 0);
+	const result = new Uint8Array(total);
+	let offset = 0;
+	for (const part of parts) {
+		result.set(part, offset);
+		offset += part.length;
+	}
+
+	return result;
+};
+
+const encodeEvent = (tag, body) => {
+	return concat([Uint8Array.of(tag), encoder.encode(JSON.stringify(body ?? {}))]);
+};
+
+const decodeEvent = (message) => {
+	const bytes = asBytes(message);
+	if (!bytes.length) {
 		return null;
 	}
 
-	const tag = buffer[0];
+	const tag = bytes[0];
 	if (tag === EVENT_TAG.CONT) {
-		if (buffer.length < CONT_HEADER_SIZE) {
+		if (bytes.length < CONT_HEADER_SIZE) {
 			return null;
 		}
 
-		const part = buffer.readUInt16LE(5);
-		const total = buffer.readUInt16LE(7);
+		const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+		const part = view.getUint16(5, true);
+		const total = view.getUint16(7, true);
 		if (!total || total > MAX_CONTINUATION_PARTS || part >= total) {
 			return null;
 		}
 
 		return {
 			tag,
-			cid: buffer.readUInt32LE(1),
+			cid: view.getUint32(1, true),
 			part,
 			total,
-			slice: buffer.subarray(CONT_HEADER_SIZE)
+			slice: bytes.subarray(CONT_HEADER_SIZE)
 		};
 	}
 
 	try {
-		return { tag, body: JSON.parse(buffer.subarray(1).toString('utf8')) };
+		return { tag, body: JSON.parse(decoder.decode(bytes.subarray(1))) };
 	} catch (error) {
 		return null;
 	}
@@ -73,58 +100,62 @@ const encodeContinuation = (cid, payload) => {
 	const total = Math.max(1, Math.ceil(payload.length / CONT_SLICE_SIZE));
 	const frames = [];
 	for (let part = 0; part < total; part += 1) {
-		const header = Buffer.alloc(CONT_HEADER_SIZE);
+		const header = new Uint8Array(CONT_HEADER_SIZE);
+		const view = new DataView(header.buffer);
 		header[0] = EVENT_TAG.CONT;
-		header.writeUInt32LE(cid, 1);
-		header.writeUInt16LE(part, 5);
-		header.writeUInt16LE(total, 7);
-		frames.push(Buffer.concat([header, payload.subarray(part * CONT_SLICE_SIZE, (part + 1) * CONT_SLICE_SIZE)]));
+		view.setUint32(1, cid, true);
+		view.setUint16(5, part, true);
+		view.setUint16(7, total, true);
+		frames.push(concat([header, payload.subarray(part * CONT_SLICE_SIZE, (part + 1) * CONT_SLICE_SIZE)]));
 	}
 
 	return frames;
 };
 
 const encodeAssetControl = (tag, requestId, body) => {
-	const header = Buffer.alloc(ASSET_HEADER_SIZE);
+	const header = new Uint8Array(ASSET_HEADER_SIZE);
 	header[0] = tag;
-	header.writeUInt32LE(requestId, 1);
-	return Buffer.concat([header, Buffer.from(JSON.stringify(body ?? {}), 'utf8')]);
+	new DataView(header.buffer).setUint32(1, requestId, true);
+	return concat([header, encoder.encode(JSON.stringify(body ?? {}))]);
 };
 
 const encodeAssetChunk = (requestId, seq, bytes) => {
-	const header = Buffer.alloc(ASSET_CHUNK_HEADER_SIZE);
+	const header = new Uint8Array(ASSET_CHUNK_HEADER_SIZE);
 	header[0] = ASSET_TAG.CHUNK;
-	header.writeUInt32LE(requestId, 1);
-	header.writeUInt32LE(seq, 5);
-	return Buffer.concat([header, bytes]);
+	const view = new DataView(header.buffer);
+	view.setUint32(1, requestId, true);
+	view.setUint32(5, seq, true);
+	return concat([header, bytes]);
 };
 
-const decodeAssetFrame = (buffer) => {
-	if (!buffer?.length || !ASSET_TAGS.has(buffer[0])) {
+const decodeAssetFrame = (message) => {
+	const bytes = asBytes(message);
+	if (!bytes.length || !ASSET_TAGS.has(bytes[0])) {
 		return null;
 	}
 
-	const tag = buffer[0];
+	const tag = bytes[0];
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	if (tag === ASSET_TAG.CHUNK) {
-		if (buffer.length < ASSET_CHUNK_HEADER_SIZE) {
+		if (bytes.length < ASSET_CHUNK_HEADER_SIZE) {
 			return null;
 		}
 		return {
 			tag,
-			requestId: buffer.readUInt32LE(1),
-			seq: buffer.readUInt32LE(5),
-			bytes: buffer.subarray(ASSET_CHUNK_HEADER_SIZE)
+			requestId: view.getUint32(1, true),
+			seq: view.getUint32(5, true),
+			bytes: bytes.subarray(ASSET_CHUNK_HEADER_SIZE)
 		};
 	}
 
-	if (buffer.length < ASSET_HEADER_SIZE) {
+	if (bytes.length < ASSET_HEADER_SIZE) {
 		return null;
 	}
 	try {
-		const json = buffer.subarray(ASSET_HEADER_SIZE).toString('utf8');
+		const json = decoder.decode(bytes.subarray(ASSET_HEADER_SIZE));
 		return {
 			tag,
-			requestId: buffer.readUInt32LE(1),
+			requestId: view.getUint32(1, true),
 			body: json ? JSON.parse(json) : {}
 		};
 	} catch (error) {
@@ -139,6 +170,7 @@ export {
 	MAX_MESSAGE_SIZE,
 	CONT_SLICE_SIZE,
 	MAX_CONTINUATION_PARTS,
+	concat,
 	encodeEvent,
 	decodeEvent,
 	encodeContinuation,
