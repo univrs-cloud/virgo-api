@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import authorizationHandler from './middleware/authorization_handler.js';
 import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
@@ -14,6 +15,11 @@ function createApp() {
 	// forwarding header the browser wrote itself, and that address is what Authelia rate limits by and
 	// what its network rules match.
 	app.set('trust proxy', (address) => { return trustedProxy.isFromTrustedProxy(address); });
+	app.use(compression({
+		filter: (request, response) => {
+			return response.getHeader('Content-Encoding') ? false : compression.filter(request, response);
+		}
+	}));
 	app.use(frameAncestorsHandler);
 	app.use(express.json());
 	app.use(authorizationHandler);
