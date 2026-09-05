@@ -18,7 +18,9 @@ import {
 	localFetchDispatcher,
 	buildLocalAssetUrl,
 	pickResponseHeaders,
-	resolveDistPath
+	resolveDistPath,
+	isCompressible,
+	gzipStream
 } from './local_assets.js';
 
 const MAX_PENDING_CONTINUATIONS = 8;
@@ -527,12 +529,19 @@ const createAssetsChannel = (session, channel) => {
 				return;
 			}
 			touchRequest(requestId, request);
+			const headers = pickResponseHeaders(response.headers);
+			const gzip = body.acceptEncoding === 'gzip'
+				&& isCompressible(headers['content-type'], Number(response.headers.get('content-length')));
+			if (gzip) {
+				headers['content-encoding'] = 'gzip';
+			}
 			send(ASSET_TAG.RES, requestId, {
 				status: response.status,
-				headers: pickResponseHeaders(response.headers)
+				headers
 			});
 			if (response.body) {
-				await pump(requestId, response.body.getReader(), controller);
+				const stream = gzip ? gzipStream(response.body) : response.body;
+				await pump(requestId, stream.getReader(), controller);
 			}
 			if (requests.has(requestId)) {
 				send(ASSET_TAG.END, requestId, {});

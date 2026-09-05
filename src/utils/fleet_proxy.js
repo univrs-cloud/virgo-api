@@ -7,7 +7,9 @@ import {
 	localBaseUrl,
 	pickResponseHeaders,
 	resolveDistPath,
-	buildLocalAssetUrl
+	buildLocalAssetUrl,
+	isCompressible,
+	gzipStream
 } from './local_assets.js';
 
 const activeHttpRequests = new Map();
@@ -73,7 +75,7 @@ const emitChunkedBody = async (reader, ackGate) => {
 	}
 };
 
-const handleHttpRequest = async (socket, { requestId, method = 'GET', path: assetPath } = {}) => {
+const handleHttpRequest = async (socket, { requestId, method = 'GET', path: assetPath, acceptEncoding } = {}) => {
 	if (!requestId) {
 		return;
 	}
@@ -109,10 +111,16 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 			return;
 		}
 
+		const headers = pickResponseHeaders(response.headers);
+		const gzip = acceptEncoding === 'gzip'
+			&& isCompressible(headers['content-type'], Number(response.headers.get('content-length')));
+		if (gzip) {
+			headers['content-encoding'] = 'gzip';
+		}
 		socket.emit('proxy:http:response', {
 			requestId,
 			status: response.status,
-			headers: pickResponseHeaders(response.headers)
+			headers
 		});
 
 		if (!response.body) {
@@ -120,7 +128,7 @@ const handleHttpRequest = async (socket, { requestId, method = 'GET', path: asse
 			return;
 		}
 
-		await emitChunkedBody(response.body.getReader(), ackGate);
+		await emitChunkedBody((gzip ? gzipStream(response.body) : response.body).getReader(), ackGate);
 		if (socket.connected) {
 			socket.emit('proxy:http:end', { requestId });
 		}
