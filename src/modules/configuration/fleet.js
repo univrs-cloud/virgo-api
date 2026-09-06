@@ -297,11 +297,12 @@ const registerNode = ({ email, password, nodeId, name, hostname, domainName, add
 	});
 };
 
-const checkDomainAvailability = (label) => {
+const checkDomainAvailability = async (label) => {
+	const token = (await DataService.getConfiguration())?.fleet?.token || '';
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
-			auth: { role: 'node' },
+			auth: { role: 'node', ...(token ? { secret: token } : {}) },
 			rejectUnauthorized: true,
 			reconnection: false,
 			timeout: 10000
