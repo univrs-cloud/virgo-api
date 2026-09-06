@@ -4,7 +4,7 @@ import { execa } from 'execa';
 import config from '../../../config.js';
 import { open as openDatabase } from '../../database/index.js';
 import DataService from '../../database/data_service.js';
-import { getCoreApps } from '../../utils/core_apps.js';
+import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -266,21 +266,33 @@ const createDirectories = async () => {
 
 /** Queues the apps the node cannot be used without, through the same command an operator would run.
  * The command returns once the work is queued; the installs themselves report their own progress.
- * Forced, because an imported pool already lists them: they are reconfigured for this node's name. */
+ * Forced, because an imported pool already lists them: they are reconfigured for this node's name.
+ * Both apps are named after the node, so without a name there is nothing to install — a job that
+ * reported that as done would be claiming work it never did. */
 const installCoreApps = async (job, module) => {
 	const fqdn = module.getState('system')?.osInfo?.fqdn;
 	if (!fqdn) {
-		console.warn('Could not install core apps: this node has no name yet.');
-		return;
+		throw new Error('Core apps were not installed: this node has no name yet.');
 	}
 
+	// Every app is attempted before the job gives up: they are independent, and one that fails should not
+	// hide whether the other would have worked. What failed is reported once, at the end.
+	const failedApps = [];
 	for (const name of getCoreApps()) {
-		await module.updateJobProgress(job, `Installing ${name}...`);
+		const title = getCoreAppTitle(name);
+		await module.updateJobProgress(job, `Installing ${title}...`);
 		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn))], { reject: false });
 		if (exitCode !== 0) {
-			console.error(`Could not install ${name}: ${stderr}`);
+			failedApps.push(title);
+			console.error(`Could not install ${title}: ${stderr}`);
 		}
 	}
+
+	if (failedApps.length) {
+		throw new Error(`Could not install ${failedApps.join(' and ')}.`);
+	}
+
+	return `Core apps installed.`;
 };
 
 /** Everything the pool needs before anything can be installed on it. Each part checks its own work
