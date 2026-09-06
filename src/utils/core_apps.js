@@ -1,12 +1,15 @@
-const CORE_APPS = ['authelia', 'traefik'];
+const CORE_APPS = { authelia: 'Authelia', traefik: 'Traefik' };
 
-/** A copy, so a caller cannot reshape the list every other caller reads. */
 const getCoreApps = () => {
-	return [...CORE_APPS];
+	return Object.keys(CORE_APPS);
 };
 
 const isCoreApp = (name) => {
-	return CORE_APPS.includes(name);
+	return Object.hasOwn(CORE_APPS, name);
 };
 
-export { getCoreApps, isCoreApp };
+const getCoreAppTitle = (name) => {
+	return CORE_APPS[name] || name;
+};
+
+export { getCoreApps, isCoreApp, getCoreAppTitle };

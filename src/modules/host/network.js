@@ -8,6 +8,14 @@ const PRIMARY_INTERFACE = 'eth0';
 const SECONDARY_INTERFACE = 'eth1';
 const WAIT_DEVICE_TIMEOUT = '10000';
 
+// Bringing the connection back up drops the browser watching this job, and a job that finishes while
+// nothing is listening takes its result with it. Held open after the last thing that touches the link
+// and before the node reads itself back, so the addressing has settled by the time it describes itself
+// and the browser is there to be told.
+const RECONNECT_GRACE_MS = 10000;
+// A manual address is on the connection the moment it comes up; a leased one has to be asked for.
+const DHCP_LEASE_WAIT_MS = 2000;
+
 const sleep = (ms) => {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 };
@@ -101,7 +109,7 @@ const updateIdentifier = async (job, module) => {
 		const ip = ipv4Info?.local || '';
 		const fqdn = `${config.hostname}.${config.domainName}`;
 		await updateEtcHosts(module, ip, config.hostname, fqdn);
-		await sleep(1000);
+		await sleep(RECONNECT_GRACE_MS);
 	} catch (error) {
 		throw new Error(`Host was not updated.`);
 	}
@@ -213,16 +221,16 @@ const updateInterface = async (job, module) => {
 		await execa('nmcli', ['connection', 'up', BOND_NAME]);
 		let ip = config.ipAddress;
 		if (config.method !== 'manual') {
-			await sleep(2000); // Wait for DHCP
+			await sleep(DHCP_LEASE_WAIT_MS);
 			ip = await getCurrentIPv4Address();
 		}
 		await updateEtcHosts(module, ip, system.osInfo.hostname, system.osInfo.fqdn);
-		await sleep(1000);
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
 	}
 
 	await virtualIp.apply(config.virtualIp, config, module);
+	await sleep(RECONNECT_GRACE_MS);
 	module.eventEmitter.emit('host:network:interface:updated');
 	return `Network interface updated.`;
 };
