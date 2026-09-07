@@ -75,7 +75,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.4.1",
+		"@types/node": "^26.5.0",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
