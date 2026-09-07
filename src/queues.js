@@ -7,7 +7,7 @@ const MODULES = [
 	'host',
 	'user',
 	'docker',
-	'bookmark',
+	'shortcut',
 	'share',
 	'indexer',
 	'weather'

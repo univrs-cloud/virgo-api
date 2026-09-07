@@ -242,7 +242,7 @@ const createDockerNetwork = async () => {
 };
 
 const createDirectories = async () => {
-	for (const directory of [SHARES_DIR, CONFIG_DIR, `${CONFIG_DIR}/assets/img/apps`, `${CONFIG_DIR}/assets/img/bookmarks`]) {
+	for (const directory of [SHARES_DIR, CONFIG_DIR, `${CONFIG_DIR}/assets/img/apps`, `${CONFIG_DIR}/assets/img/shortcuts`]) {
 		await fs.mkdir(directory, { recursive: true });
 	}
 
@@ -313,7 +313,7 @@ const prepare = async (job, module) => {
 	await openDatabase();
 	await DataService.initialize();
 	// Everything these modules read lives on the pool and was unreachable when they started, so they
-	// are told to look again: an imported pool arrives with apps, bookmarks, shares and an enrolment
+	// are told to look again: an imported pool arrives with apps, shortcuts, shares and an enrolment
 	// already in it, and samba was configured before its share files existed.
 	module.eventEmitter.emit('host:storage:fetch');
 	module.eventEmitter.emit('configuration:updated');

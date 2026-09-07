@@ -13,17 +13,17 @@ const staticMiddleware = express.static(folderPath, {
 /** Icons stored under messier config; path mirrors URL /assets/img/... */
 const CONFIG_ASSETS_BASE = '/messier/.config/assets/img';
 const appsIconsDir = path.join(CONFIG_ASSETS_BASE, 'apps');
-const bookmarksIconsDir = path.join(CONFIG_ASSETS_BASE, 'bookmarks');
+const shortcutsIconsDir = path.join(CONFIG_ASSETS_BASE, 'shortcuts');
 const configIconsOptions = { index: false, dotfiles: 'deny', etag: false };
 
 /**
  * Controller for serving static files and the root HTML.
- * Serves app and bookmark icons from /messier/.config/ at /assets/img/apps and /assets/img/bookmarks.
+ * Serves app and shortcut icons from /messier/.config/ at /assets/img/apps and /assets/img/shortcuts.
  */
 export {
 	folderPath,
 	staticMiddleware,
 	appsIconsDir,
-	bookmarksIconsDir,
+	shortcutsIconsDir,
 	configIconsOptions
 };

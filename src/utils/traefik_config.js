@@ -149,19 +149,19 @@ const parse = (yamlContent) => {
 };
 
 /**
- * Matches a Traefik config to a bookmark by comparing protocol, subdomain, and domain
+ * Matches a Traefik config to a shortcut by comparing protocol, subdomain, and domain
  * @param {object} config - Parsed Traefik config
- * @param {object} bookmark - Bookmark object with url field
+ * @param {object} shortcut - Shortcut object with url field
  * @returns {boolean}
  */
-const match = (config, bookmark) => {
+const match = (config, shortcut) => {
 	const domain = getDomain();
-	if (!config?.subdomain || !bookmark?.url || !domain) {
+	if (!config?.subdomain || !shortcut?.url || !domain) {
 		return false;
 	}
 	
 	try {
-		const url = new URL(bookmark.url);
+		const url = new URL(shortcut.url);
 		
 		// Check protocol is https
 		if (url.protocol !== 'https:') {
@@ -265,18 +265,18 @@ const remove = async (name) => {
 };
 
 /**
- * Enriches bookmarks with Traefik config data
- * @param {Array} bookmarks - Array of bookmark objects
- * @returns {Promise<Array>} - Bookmarks with traefik field added
+ * Enriches shortcuts with Traefik config data
+ * @param {Array} shortcuts - Array of shortcut objects
+ * @returns {Promise<Array>} - Shortcuts with traefik field added
  */
-const enrichBookmarks = async (bookmarks) => {
+const enrichShortcuts = async (shortcuts) => {
 	const configs = await readAll();
 	
-	return bookmarks.map((bookmark) => {
-		const matchedConfig = configs.find((config) => match(config, bookmark));
+	return shortcuts.map((shortcut) => {
+		const matchedConfig = configs.find((config) => match(config, shortcut));
 		
 		return {
-			...bookmark,
+			...shortcut,
 			traefik: matchedConfig ? {
 				subdomain: matchedConfig.subdomain,
 				backendUrl: matchedConfig.backendUrl,
@@ -294,5 +294,5 @@ export {
 	match,
 	write,
 	remove,
-	enrichBookmarks
+	enrichShortcuts
 };

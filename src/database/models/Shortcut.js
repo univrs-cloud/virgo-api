@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
-const Bookmark = sequelize.define('Bookmark', {
+const Shortcut = sequelize.define('Shortcut', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -30,4 +30,4 @@ const Bookmark = sequelize.define('Bookmark', {
 	}
 });
 
-export default Bookmark;
+export default Shortcut;

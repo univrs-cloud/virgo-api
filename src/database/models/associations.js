@@ -1,5 +1,5 @@
 import Application from './Application.js';
-import Bookmark from './Bookmark.js';
+import Shortcut from './Shortcut.js';
 import ItemOrder from './ItemOrder.js';
 
 // Define associations
@@ -8,7 +8,7 @@ Application.hasOne(ItemOrder, {
 	constraints: false
 });
 
-Bookmark.hasOne(ItemOrder, {
+Shortcut.hasOne(ItemOrder, {
 	foreignKey: 'itemId',
 	constraints: false
 });
@@ -18,13 +18,13 @@ ItemOrder.belongsTo(Application, {
 	constraints: false
 });
 
-ItemOrder.belongsTo(Bookmark, {
+ItemOrder.belongsTo(Shortcut, {
 	foreignKey: 'itemId',
 	constraints: false
 });
 
 export {
 	Application,
-	Bookmark,
+	Shortcut,
 	ItemOrder
 };

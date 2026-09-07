@@ -12,7 +12,7 @@ const ItemOrder = sequelize.define('ItemOrder', {
 		allowNull: false
 	},
 	type: {
-		type: DataTypes.ENUM('app', 'bookmark'),
+		type: DataTypes.ENUM('app', 'shortcut'),
 		allowNull: false
 	},
 	order: {
