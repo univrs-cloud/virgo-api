@@ -122,26 +122,18 @@ const moveIcons = async () => {
 		return;
 	}
 
-	if (!await exists(NEW_ICONS_DIR)) {
-		await fs.mkdir(path.dirname(NEW_ICONS_DIR), { recursive: true });
-		await fs.rename(OLD_ICONS_DIR, NEW_ICONS_DIR);
-		console.log(`Moved ${OLD_ICONS_DIR} -> ${NEW_ICONS_DIR}`);
-		return;
-	}
-
-	for (const entry of await fs.readdir(OLD_ICONS_DIR)) {
-		const destination = path.join(NEW_ICONS_DIR, entry);
-		if (await exists(destination)) {
-			continue;
-		}
-		await fs.rename(path.join(OLD_ICONS_DIR, entry), destination);
-	}
-	await fs.rm(OLD_ICONS_DIR, { recursive: true, force: true });
-	console.log(`Merged ${OLD_ICONS_DIR} into ${NEW_ICONS_DIR}`);
+	await fs.mkdir(path.dirname(NEW_ICONS_DIR), { recursive: true });
+	await fs.rename(OLD_ICONS_DIR, NEW_ICONS_DIR);
+	console.log(`Moved ${OLD_ICONS_DIR} -> ${NEW_ICONS_DIR}`);
 };
 
 const renameBookmarksToShortcuts = async () => {
 	try {
+		if (await exists(NEW_ICONS_DIR)) {
+			console.log(`${NEW_ICONS_DIR} already exists. Skipping the bookmark to shortcut rename.`);
+			return;
+		}
+
 		if (!await exists(DATABASE_FILE)) {
 			console.log(`No database file found. Skipping the bookmark to shortcut rename.`);
 			await moveIcons();
