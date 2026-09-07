@@ -9,7 +9,7 @@ const OLD_APPS_ICONS = '/var/www/virgo-ui/app/dist/assets/img/apps';
 const OLD_BOOKMARKS_ICONS = '/var/www/virgo-ui/app/dist/assets/img/bookmarks';
 const NEW_ICONS_BASE = '/messier/.config/assets/img';
 const NEW_APPS_ICONS = path.join(NEW_ICONS_BASE, 'apps');
-const NEW_BOOKMARKS_ICONS = path.join(NEW_ICONS_BASE, 'bookmarks');
+const NEW_SHORTCUTS_ICONS = path.join(NEW_ICONS_BASE, 'shortcuts');
 
 const copyIconsToConfig = async () => {
 	try {
@@ -39,7 +39,7 @@ const copyIconsToConfig = async () => {
 	};
 
 	await copyDirIfDestMissing(OLD_APPS_ICONS, NEW_APPS_ICONS);
-	await copyDirIfDestMissing(OLD_BOOKMARKS_ICONS, NEW_BOOKMARKS_ICONS);
+	await copyDirIfDestMissing(OLD_BOOKMARKS_ICONS, NEW_SHORTCUTS_ICONS);
 
 	console.log('Icons copy to config completed.');
 };

@@ -1,6 +1,6 @@
 import { sequelize } from './index.js';
 import Configuration from './models/Configuration.js';
-import { Application, Bookmark, ItemOrder } from './models/associations.js';
+import { Application, Shortcut, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
 import { getCoreApps } from '../utils/core_apps.js';
 
@@ -9,7 +9,7 @@ class DataService {
 		try {
 			await Configuration.sync({ force: false });
 			await Application.sync({ force: false });
-			await Bookmark.sync({ force: false });
+			await Shortcut.sync({ force: false });
 			await ItemOrder.sync({ force: false });
 			console.log(`Database models synchronized.`);
 			await Application.update({ canBeRemoved: false }, { where: { name: getCoreApps(), canBeRemoved: true } });
@@ -148,58 +148,58 @@ class DataService {
 		}
 	}
 
-	// Bookmark methods
-	static async getBookmarks() {
+	// Shortcut methods
+	static async getShortcuts() {
 		try {
-			const bookmarks = await Bookmark.findAll({
+			const shortcuts = await Shortcut.findAll({
 				raw: true
 			});
-			return await traefikConfig.enrichBookmarks(bookmarks);
+			return await traefikConfig.enrichShortcuts(shortcuts);
 		} catch (error) {
-			console.error(`Error reading bookmarks from database:`, error);
+			console.error(`Error reading shortcuts from database:`, error);
 			return [];
 		}
 	}
 
-	static async getBookmark(name) {
+	static async getShortcut(name) {
 		try {
-			const bookmark = await Bookmark.findOne({
+			const shortcut = await Shortcut.findOne({
 				where: { name },
 				raw: true
 			});
-			return bookmark;
+			return shortcut;
 		} catch (error) {
-			console.error(`Error reading bookmark '${name}' from database:`, error);
+			console.error(`Error reading shortcut '${name}' from database:`, error);
 			return null;
 		}
 	}
 
-	static async setBookmark(bookmarkData) {
+	static async setShortcut(shortcutData) {
 		try {
-			const { traefik, ...bookmarkFields } = bookmarkData;
+			const { traefik, ...shortcutFields } = shortcutData;
 			
-			// Get existing bookmark if updating (by id) to find old traefik config
-			let existingBookmark = null;
-			if (bookmarkFields.id) {
-				existingBookmark = await Bookmark.findByPk(bookmarkFields.id, { raw: true });
+			// Get existing shortcut if updating (by id) to find old traefik config
+			let existingShortcut = null;
+			if (shortcutFields.id) {
+				existingShortcut = await Shortcut.findByPk(shortcutFields.id, { raw: true });
 			}
 			
-			const [ entry ] = await Bookmark.upsert({
-				id: bookmarkFields.id,
-				name: bookmarkFields.name,
-				category: bookmarkFields.category,
-				title: bookmarkFields.title,
-				icon: bookmarkFields.icon,
-				url: bookmarkFields.url
+			const [ entry ] = await Shortcut.upsert({
+				id: shortcutFields.id,
+				name: shortcutFields.name,
+				category: shortcutFields.category,
+				title: shortcutFields.title,
+				icon: shortcutFields.icon,
+				url: shortcutFields.url
 			}, { returning: true });
-			const bookmark = entry.get({ plain: true });
-			const order = await DataService.getNextOrderForCategory(bookmark.category);
-			await DataService.setItemOrder(bookmark.id, 'bookmark', order);
+			const shortcut = entry.get({ plain: true });
+			const order = await DataService.getNextOrderForCategory(shortcut.category);
+			await DataService.setItemOrder(shortcut.id, 'shortcut', order);
 			
 			// Handle Traefik config
 			// Find existing config using OLD url (if updating) or new url (if creating)
 			const configs = await traefikConfig.readAll();
-			const oldUrl = existingBookmark?.url || bookmarkFields.url;
+			const oldUrl = existingShortcut?.url || shortcutFields.url;
 			const existingConfig = configs.find((c) => traefikConfig.match(c, { url: oldUrl }));
 			
 			if (traefik === null) {
@@ -222,35 +222,35 @@ class DataService {
 			
 			return true;
 		} catch (error) {
-			console.error(`Error writing bookmark '${bookmarkData.name}' to database:`, error);
+			console.error(`Error writing shortcut '${shortcutData.name}' to database:`, error);
 			return false;
 		}
 	}
 	
-	static async deleteBookmark(name) {
+	static async deleteShortcut(name) {
 		try {
-			const bookmark = await Bookmark.findOne({
+			const shortcut = await Shortcut.findOne({
 				where: { name }
 			});
-			if (!bookmark) {
+			if (!shortcut) {
 				return false;
 			}
 			
 			// Find and delete associated Traefik config file (if it exists)
 			const configs = await traefikConfig.readAll();
-			const existingConfig = configs.find((c) => traefikConfig.match(c, { url: bookmark.url }));
+			const existingConfig = configs.find((c) => traefikConfig.match(c, { url: shortcut.url }));
 			if (existingConfig) {
 				await traefikConfig.remove(existingConfig.subdomain);
 			}
 			
-			await DataService.deleteItemOrder(bookmark.id, 'bookmark');
-			const deleted = await Bookmark.destroy({
+			await DataService.deleteItemOrder(shortcut.id, 'shortcut');
+			const deleted = await Shortcut.destroy({
 				where: { name }
 			});
 			
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting bookmark '${name}' from database:`, error);
+			console.error(`Error deleting shortcut '${name}' from database:`, error);
 			return false;
 		}
 	}
@@ -293,23 +293,23 @@ class DataService {
 					where: { type: 'app' }
 				}]
 			});
-			const bookmarks = await Bookmark.findAll({
+			const shortcuts = await Shortcut.findAll({
 				include: [{
 					model: ItemOrder,
 					required: false,
-					where: { type: 'bookmark' }
+					where: { type: 'shortcut' }
 				}]
 			});
 			const appEntries = applications.map((app) => {
 				const { ItemOrder, ...data } = app.get({ plain: true });
 				return { ...data, type: 'app', order: ItemOrder?.order ?? null };
 			});
-			const bookmarkEntries = bookmarks.map((bookmark) => {
-				const { ItemOrder, ...data } = bookmark.get({ plain: true });
-				return { ...data, type: 'bookmark', order: ItemOrder?.order ?? null };
+			const shortcutEntries = shortcuts.map((shortcut) => {
+				const { ItemOrder, ...data } = shortcut.get({ plain: true });
+				return { ...data, type: 'shortcut', order: ItemOrder?.order ?? null };
 			});
-			const enrichedBookmarkEntries = await traefikConfig.enrichBookmarks(bookmarkEntries);
-			return [...appEntries, ...enrichedBookmarkEntries];
+			const enrichedShortcutEntries = await traefikConfig.enrichShortcuts(shortcutEntries);
+			return [...appEntries, ...enrichedShortcutEntries];
 		} catch (error) {
 			console.error(`Error getting configured items:`, error);
 			return [];
@@ -326,15 +326,15 @@ class DataService {
 				}],
 				attributes: ['order']
 			});
-			const bookmarkOrderEntries = await ItemOrder.findAll({
+			const shortcutOrderEntries = await ItemOrder.findAll({
 				include: [{
-					model: Bookmark,
+					model: Shortcut,
 					where: { category },
 					attributes: []
 				}],
 				attributes: ['order']
 			});
-			const allOrders = [...appOrderEntries, ...bookmarkOrderEntries].map(entry => entry.order);
+			const allOrders = [...appOrderEntries, ...shortcutOrderEntries].map(entry => entry.order);
 			const maxOrder = allOrders.length > 0 ? Math.max(...allOrders) : 0;
 			return maxOrder + 1;
 		} catch (error) {

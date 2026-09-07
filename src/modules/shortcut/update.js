@@ -7,46 +7,46 @@ import DataService from '../../database/data_service.js';
 
 const streamPipeline = promisify(stream.pipeline);
 
-const updateBookmark = async (job, module) => {
+const updateShortcut = async (job, module) => {
 	const { config } = job.data;
-	const existingBookmark = await DataService.getBookmark(config?.name);
-	if (!existingBookmark) {
-		throw new Error(`Bookmark not found.`);
+	const existingShortcut = await DataService.getShortcut(config?.name);
+	if (!existingShortcut) {
+		throw new Error(`Shortcut not found.`);
 	}
 
-	await module.updateJobProgress(job, `${existingBookmark.title} bookmark is updating...`);
-	let icon = existingBookmark.icon;
+	await module.updateJobProgress(job, `${existingShortcut.title} shortcut is updating...`);
+	let icon = existingShortcut.icon;
 	if (config?.icon && config.icon !== '') {
 		const iconFilename = config.icon.split('/').pop();
 		const responseIcon = await fetch(config.icon);
 		if (responseIcon.ok) {
-			await fs.mkdir(module.bookmarkIconsDir, { recursive: true });
-			await streamPipeline(responseIcon.body, createWriteStream(path.join(module.bookmarkIconsDir, iconFilename)));
+			await fs.mkdir(module.shortcutIconsDir, { recursive: true });
+			await streamPipeline(responseIcon.body, createWriteStream(path.join(module.shortcutIconsDir, iconFilename)));
 			icon = iconFilename;
 		}
 	}
-	const bookmark = {
-		id: existingBookmark.id,
+	const shortcut = {
+		id: existingShortcut.id,
 		name: config.name || changeCase.kebabCase(config.title),
 		category: config.category,
 		icon,
 		title: config.title,
 		url: config.url,
 		traefik: config.traefik,
-		order: existingBookmark.order
+		order: existingShortcut.order
 	};
-	await DataService.setBookmark(bookmark);
+	await DataService.setShortcut(shortcut);
 	module.eventEmitter.emit('configured:updated');
-	return `${existingBookmark.title} bookmark updated.`;
+	return `${existingShortcut.title} shortcut updated.`;
 };
 
 const onConnection = (socket, module) => {
-	socket.on('bookmark:update', async (config) => {
+	socket.on('shortcut:update', async (config) => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}
 		
-		await module.addJob('bookmark:update', { config, username: socket.username });
+		await module.addJob('shortcut:update', { config, username: socket.username });
 	});
 };
 
@@ -54,6 +54,6 @@ export default {
 	name: 'update',
 	onConnection,
 	jobs: {
-		'bookmark:update': updateBookmark
+		'shortcut:update': updateShortcut
 	}
 };

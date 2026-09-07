@@ -5,7 +5,7 @@ import createConfigurationModule from './configuration/index.js';
 import createHostModule from './host/index.js';
 import createUserModule from './user/index.js';
 import createDockerModule from './docker/index.js';
-import createBookmarkModule from './bookmark/index.js';
+import createShortcutModule from './shortcut/index.js';
 import createShareModule from './share/index.js';
 import createIndexerModule from './indexer/index.js';
 import createWeatherModule from './weather/index.js';
@@ -20,7 +20,7 @@ export default async () => {
 		createHostModule(),
 		createUserModule(),
 		createDockerModule(),
-		createBookmarkModule(),
+		createShortcutModule(),
 		createShareModule(),
 		createIndexerModule(),
 		createWeatherModule()
