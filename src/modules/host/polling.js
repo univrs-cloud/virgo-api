@@ -9,8 +9,18 @@ import * as setup from '../../utils/setup_state.js';
 
 const BY_ID_DIR = '/dev/disk/by-id';
 const CERTIFICATE_INTERVAL_MS = 10000;
+const KELVIN_OFFSET = 273;
+const DEFAULT_TEMPERATURE_THRESHOLD = 99;
 const polls = [];
 let certificatePoll = null;
+
+const parseJson = (stdout) => {
+	try {
+		return JSON.parse(stdout || '{}');
+	} catch (error) {
+		return {};
+	}
+};
 
 const getNetworkStats = async (module) => {
 	try {
@@ -88,24 +98,32 @@ const getDriveIds = async () => {
 const getDrives = async (module) => {
 	try {
 		const ids = await getDriveIds();
-		const [{ stdout: smartctl }, { stdout: nvmeList }] = await Promise.all([
-			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} smartctl -a -j {} | jq -s .`, { shell: true }),
-			execa(`smartctl --scan | awk '{print $1}' | xargs -I {} nvme id-ctrl -o json {} | jq -s '[.[] | {wctemp: (.wctemp - 273), cctemp: (.cctemp - 273)}]'`, { shell: true })
-		]);
-		let drives = JSON.parse(smartctl || '[]');
-		let nvme = JSON.parse(nvmeList || '[]');
-		module.setState('drives', drives.map((drive, index) => {
+		const { stdout: smartctlScan } = await execa('smartctl', ['--scan'], { reject: false });
+		const devices = (smartctlScan.match(/^\/dev\/\S+/gm) || []);
+		const drives = await Promise.all(devices.map(async (device) => {
+			const [{ stdout: smartctl }, { stdout: nvme }] = await Promise.all([
+				execa('smartctl', ['-a', '-j', device], { reject: false }),
+				execa('nvme', ['id-ctrl', '-o', 'json', device], { reject: false })
+			]);
+			const drive = parseJson(smartctl);
+			const limits = parseJson(nvme);
+			const name = drive?.device?.name;
+			if (!name) {
+				return null;
+			}
+
 			return {
-				name: drive?.device?.name,
-				eui: (ids[drive?.device?.name] || null),
+				name,
+				eui: (ids[name] || null),
 				model: drive?.model_name,
 				serialNumber: drive?.serial_number,
 				capacity: drive?.user_capacity,
 				temperature: drive?.temperature?.current,
-				temperatureWarningThreshold: (nvme.length > 0 ? nvme[index]?.wctemp : 99),
-				temperatureCriticalThreshold: (nvme.length > 0 ? nvme[index]?.cctemp : 99)
+				temperatureWarningThreshold: (Number.isFinite(limits?.wctemp) ? limits.wctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD),
+				temperatureCriticalThreshold: (Number.isFinite(limits?.cctemp) ? limits.cctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD)
 			};
 		}));
+		module.setState('drives', drives.filter(Boolean));
 	} catch (error) {
 		console.error('getDrives:', error);
 		module.setState('drives', false);
@@ -118,7 +136,7 @@ const getStorage = async (module) => {
 		const [{ stdout: zpoolList }, { stdout: zpoolStatus }, { stdout: zfsList }] = await Promise.all([
 			execa('zpool', ['list', '-j', '--json-int']).catch(() => ({ stdout: '{"pools":{}}' })),
 			execa('zpool', ['status', '-j', '--json-int']).catch(() => ({ stdout: '{"pools":{}}' })),
-			execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots', '-r', '-j', '--json-int']).catch(() => ({ stdout: '{"datasets":{}}' }))
+			execa('zfs', ['list', '-o', 'usedbydataset,usedbysnapshots,used,logicalused', '-r', '-j', '--json-int']).catch(() => ({ stdout: '{"datasets":{}}' }))
 		]);
 		const pools = JSON.parse(zpoolList || '{}')?.pools || {};
 		const statuses = JSON.parse(zpoolStatus || '{}')?.pools || {};
@@ -134,8 +152,14 @@ const getStorage = async (module) => {
 			const snapshotsSize = poolDatasets.reduce((sum, dataset) => {
 				return sum + (dataset?.properties?.usedbysnapshots?.value || 0);
 			}, 0);
+			const rootDataset = poolDatasets.find((dataset) => { return dataset?.name === pool?.name; });
+			const used = (rootDataset?.properties?.used?.value || 0);
+			const logicalUsed = (rootDataset?.properties?.logicalused?.value || 0);
 			pool.properties.usedbydatasets = { value: datasetsSize };
 			pool.properties.usedbysnapshots = { value: snapshotsSize };
+			pool.properties.logicalused = { value: logicalUsed };
+			pool.properties.compressratio = { value: (used > 0 ? logicalUsed / used : 1) };
+			pool.properties.savedbycompression = { value: Math.max(logicalUsed - used, 0) };
 			storage.push({ ...pool, ...statuses[pool.name] });
 		}
 		const filesystems = await si.fsSize();
