@@ -73,20 +73,22 @@ const getMemory = async (module) => {
 	module.nsp.emit('host:memory', module.getState('memory'));
 };
 
-/** Maps each drive's controller device to its `/dev/disk/by-id/nvme-eui.*` entry. Device names are
- * assigned in probe order and can move between boots, so this is the identifier anything pointing at
- * a specific drive — zpool above all — has to use. */
+/** Maps each drive's controller device to every `/dev/disk/by-id` alias pointing at it. Device names
+ * are assigned in probe order and can move between boots, so these are the identifiers anything
+ * pointing at a specific drive — zpool above all — has to use, and a pool records whichever alias it
+ * was created with (`wwn-*` and `ata-*` for SATA, `nvme-eui.*` for NVMe). */
 const getDriveIds = async () => {
 	const ids = {};
 	try {
 		for (const entry of await fs.readdir(BY_ID_DIR)) {
-			if (!entry.startsWith('nvme-eui.') || entry.includes('-part')) {
+			if (entry.includes('-part')) {
 				continue;
 			}
 
 			// The link points at the namespace (/dev/nvme0n1); smartctl reports the controller (/dev/nvme0).
 			const device = await fs.realpath(path.join(BY_ID_DIR, entry));
-			ids[device.replace(/n\d+$/, '')] = entry;
+			const controller = device.replace(/n\d+$/, '');
+			ids[controller] = [...(ids[controller] || []), entry];
 		}
 	} catch (error) {
 		console.error('getDriveIds:', error);
@@ -97,7 +99,7 @@ const getDriveIds = async () => {
 
 const getDrives = async (module) => {
 	try {
-		const ids = await getDriveIds();
+		const driveIds = await getDriveIds();
 		const { stdout: smartctlScan } = await execa('smartctl', ['--scan'], { reject: false });
 		const devices = (smartctlScan.match(/^\/dev\/\S+/gm) || []);
 		const drives = await Promise.all(devices.map(async (device) => {
@@ -112,9 +114,11 @@ const getDrives = async (module) => {
 				return null;
 			}
 
+			const aliases = (driveIds[name] || []);
 			return {
 				name,
-				eui: (ids[name] || null),
+				ids: aliases,
+				eui: (aliases.find((alias) => { return alias.startsWith('nvme-eui.'); }) || null),
 				model: drive?.model_name,
 				serialNumber: drive?.serial_number,
 				capacity: drive?.user_capacity,
