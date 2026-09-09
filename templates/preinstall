@@ -3,10 +3,23 @@
 set -o pipefail
 
 if ! ischroot; then
+	tmp=$(mktemp)
+	if curl -fsSL -o "$tmp" https://raw.githubusercontent.com/tj/n/master/bin/n; then
+		chmod 0755 "$tmp"
+		mv "$tmp" /usr/local/bin/n
+	else
+		rm -f "$tmp"
+		if [ ! -x /usr/local/bin/n ]; then
+			echo "Failed to download n and none is installed." >&2
+			exit 1
+		fi
+		echo "Failed to refresh n, using the installed version."
+	fi
+
 	latest_version=$(/usr/local/bin/n ls-remote 24 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-	installed_versions=$(/usr/local/bin/node -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-	if echo "$installed_versions" | grep -qx "$latest_version"; then
-		echo "Node $latest_version is already installed. Nothing no update."
+	installed_version=$(/usr/local/bin/node -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+	if [ -n "$latest_version" ] && [ "$installed_version" = "$latest_version" ]; then
+		echo "Node $latest_version is already installed. Nothing to update."
 	else
 		echo "Updating Node..."
 		/usr/local/bin/n 24
