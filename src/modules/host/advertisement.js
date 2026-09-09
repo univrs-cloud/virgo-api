@@ -115,8 +115,10 @@ const writeServiceFile = async (document) => {
 
 /** Serialize advertisements so multiple events cannot race on the temporary file. */
 const advertise = () => {
-	advertiseQueue = advertiseQueue
-		.then(async () => {
+	const previous = advertiseQueue;
+	advertiseQueue = (async () => {
+		try {
+			await previous;
 			const document = buildDocument(await buildRecords());
 
 			if (await readServiceFile() === document) {
@@ -124,10 +126,10 @@ const advertise = () => {
 			}
 
 			await writeServiceFile(document);
-		})
-		.catch((error) => {
+		} catch (error) {
 			console.warn(`Could not publish the discovery service: ${error.shortMessage || error.message}`);
-		});
+		}
+	})();
 
 	return advertiseQueue;
 };

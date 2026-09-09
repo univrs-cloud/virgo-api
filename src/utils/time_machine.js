@@ -7,9 +7,10 @@ class TimeMachine {
 
 	constructor(backupPath) {
 		this.#backupPath = backupPath;
-		this.#plistParserPromise = import('plist').then((plistModule) => {
+		this.#plistParserPromise = (async () => {
+			const plistModule = await import('plist');
 			return plistModule.parse;
-		});
+		})();
 	}
 
 	static async getMachines(backupPath) {

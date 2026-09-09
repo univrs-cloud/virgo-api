@@ -449,10 +449,12 @@ const register = (module) => {
 	hostModule = module;
 	attachNamespace();
 	publishPeers();
-	module.eventEmitter.on('host:discovery:updated', (nodes) => {
-		reconcileVisible(nodes).catch((error) => {
+	module.eventEmitter.on('host:discovery:updated', async (nodes) => {
+		try {
+			await reconcileVisible(nodes);
+		} catch (error) {
 			console.warn(`Could not reconcile adopted nodes: ${error.message}`);
-		});
+		}
 	});
 };
 

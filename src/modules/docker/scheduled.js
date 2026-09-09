@@ -62,7 +62,9 @@ const getRegistryDigest = async (image) => {
 		let authHeader = null;
 
 		if (challengeResponse.status === 401) {
-			await challengeResponse.arrayBuffer().catch(() => {});
+			try {
+				await challengeResponse.arrayBuffer();
+			} catch { }
 			const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
 
 			if (wwwAuth.toLowerCase().startsWith('basic')) {
@@ -86,7 +88,9 @@ const getRegistryDigest = async (image) => {
 				const tokenResponse = await fetch(tokenUrl.toString());
 				if (!tokenResponse.ok) {
 					// Token request failed — likely a private repo, skip silently
-					await tokenResponse.arrayBuffer().catch(() => {});
+					try {
+						await tokenResponse.arrayBuffer();
+					} catch { }
 					return null;
 				}
 				const { token, access_token } = await tokenResponse.json();
@@ -97,7 +101,9 @@ const getRegistryDigest = async (image) => {
 				authHeader = `Bearer ${resolved}`;
 			}
 		} else {
-			await challengeResponse.arrayBuffer().catch(() => {});
+			try {
+				await challengeResponse.arrayBuffer();
+			} catch { }
 		}
 
 		// Step 2: HEAD the manifest — cheap, returns digest in response header
@@ -114,18 +120,24 @@ const getRegistryDigest = async (image) => {
 		if (manifestResponse.status === 429) {
 			const retryAfter = manifestResponse.headers.get('Retry-After');
 			console.warn(`Rate limited by registry for ${image}${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
-			await manifestResponse.arrayBuffer().catch(() => {});
+			try {
+				await manifestResponse.arrayBuffer();
+			} catch { }
 			return null;
 		}
 
 		if (manifestResponse.status === 401 || manifestResponse.status === 403) {
 			// Private registry — skip silently
-			await manifestResponse.arrayBuffer().catch(() => {});
+			try {
+				await manifestResponse.arrayBuffer();
+			} catch { }
 			return null;
 		}
 
 		if (!manifestResponse.ok) {
-			await manifestResponse.arrayBuffer().catch(() => {});
+			try {
+				await manifestResponse.arrayBuffer();
+			} catch { }
 			throw new Error(`HTTP ${manifestResponse.status} fetching manifest for ${image}`);
 		}
 
