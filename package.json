@@ -35,7 +35,8 @@
 	},
 	"type": "module",
 	"cpu": [
-		"arm64"
+		"arm64",
+		"x64"
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
