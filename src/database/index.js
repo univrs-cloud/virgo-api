@@ -10,13 +10,10 @@ const READ = sqlite3.OPEN_READWRITE;
 const READ_WRITE_CREATE = sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE;
 
 let opened = false;
+let opening = null;
 
 const hasPool = () => {
 	return fs.existsSync(path.dirname(POOL_DATABASE_FILE));
-};
-
-const isOpen = () => {
-	return opened;
 };
 
 const sequelize = new Sequelize({
@@ -39,8 +36,24 @@ const open = async () => {
 	opened = true;
 };
 
+const ensureOpen = async () => {
+	if (opened) {
+		return true;
+	}
+
+	if (!hasPool()) {
+		return false;
+	}
+
+	opening = opening ?? open()
+		.catch((error) => { console.error('Unable to open the database on the pool:', error); })
+		.finally(() => { opening = null; });
+	await opening;
+	return opened;
+};
+
 if (hasPool()) {
 	await open();
 }
 
-export { sequelize, open, isOpen };
+export { sequelize, open, ensureOpen };
