@@ -33,10 +33,12 @@ const register = (program) => {
 		.description('Index ZFS datasets and snapshots (uses configured indexer paths)')
 		.action(async (options) => {
 			const indexer = await import('../indexer/index.js');
-			indexer.run(options).catch((err) => {
+			try {
+				await indexer.run(options);
+			} catch (err) {
 				console.error(err);
 				process.exitCode = 1;
-			});
+			}
 		});
 
 	// ─── reindex ────────────────────────────────────────────────────────────

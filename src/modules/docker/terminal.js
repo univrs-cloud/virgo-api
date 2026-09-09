@@ -85,13 +85,15 @@ const terminalConnect = async (socket, containerId) => {
 				terminalStream.write(data);
 			}
 		};
-		const resizeHandler = (size) => {
-			containerExec.resize({
-				h: size.rows,
-				w: size.cols
-			}).catch(() => {
+		const resizeHandler = async (size) => {
+			try {
+				await containerExec.resize({
+					h: size.rows,
+					w: size.cols
+				});
+			} catch {
 				// Container or exec session may no longer exist - ignore
-			});
+			}
 		};
 		const disconnectHandler = () => {
 			cleanupSession(socket);

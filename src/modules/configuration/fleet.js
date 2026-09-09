@@ -94,11 +94,13 @@ const reportDomainToFleet = async () => {
 
 const scheduleDomainReport = () => {
 	clearTimeout(domainReportTimer);
-	domainReportTimer = setTimeout(() => {
+	domainReportTimer = setTimeout(async () => {
 		domainReportTimer = null;
-		reportDomainToFleet().catch((error) => {
+		try {
+			await reportDomainToFleet();
+		} catch (error) {
 			console.error('Error reporting the node address to fleet:', error);
-		});
+		}
 	}, DOMAIN_REPORT_DELAY_MS);
 	domainReportTimer.unref();
 };
@@ -385,16 +387,17 @@ const startIfEnabled = async () => {
 		if (fleet?.enabled && fleet?.token) {
 			// Jitter only the boot-time auto-connect; user-initiated register/enable stay immediate.
 			const delay = randomStartupDelay();
-			setTimeout(() => {
+			setTimeout(async () => {
 				// A registration during the wait already opened the socket; leave it alone.
 				if (fleetSocket) {
 					return;
 				}
 
-				connect({ token: fleet.token, nodeId: fleet.nodeId })
-					.catch((error) => {
-						console.error('Error starting fleet connection:', error);
-					});
+				try {
+					await connect({ token: fleet.token, nodeId: fleet.nodeId });
+				} catch (error) {
+					console.error('Error starting fleet connection:', error);
+				}
 			}, delay);
 		}
 	} catch (error) {
@@ -429,11 +432,13 @@ const register = (module) => {
 		lastUps = ups;
 		reportUpsToFleet();
 	});
-	module.eventEmitter.on('host:peers:updated', (peers) => {
+	module.eventEmitter.on('host:peers:updated', async (peers) => {
 		lastPeers = peers;
-		reportPeersToFleet().catch((error) => {
+		try {
+			await reportPeersToFleet();
+		} catch (error) {
 			console.error('Error reporting peers to fleet:', error);
-		});
+		}
 	});
 	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
 	module.eventEmitter.on('host:network:interface:updated', scheduleDomainReport);

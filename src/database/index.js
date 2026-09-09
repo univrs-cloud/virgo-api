@@ -45,9 +45,15 @@ const ensureOpen = async () => {
 		return false;
 	}
 
-	opening = opening ?? open()
-		.catch((error) => { console.error('Unable to open the database on the pool:', error); })
-		.finally(() => { opening = null; });
+	opening = opening ?? (async () => {
+		try {
+			await open();
+		} catch (error) {
+			console.error('Unable to open the database on the pool:', error);
+		} finally {
+			opening = null;
+		}
+	})();
 	await opening;
 	return opened;
 };

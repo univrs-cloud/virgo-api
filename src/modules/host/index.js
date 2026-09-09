@@ -121,7 +121,9 @@ class HostModule extends BaseModule {
 	async awaitUpdateCompletion() {
 		const pending = this.#updateCompletionPromise;
 		if (pending) {
-			await pending.catch(() => {});
+			try {
+				await pending;
+			} catch { }
 		}
 	}
 
@@ -392,13 +394,14 @@ class HostModule extends BaseModule {
 			updateLogsWatcherPromise = watcherPlugin.watchUpdateLog(this);
 		}
 
-		this.#updateCompletionPromise = updateLogsWatcherPromise
-			.then((updateLogsWatcher) => {
-				return this.#waitForUpdateCompletion(updateLogsWatcher, generation);
-			})
-			.finally(() => {
+		this.#updateCompletionPromise = (async () => {
+			try {
+				const updateLogsWatcher = await updateLogsWatcherPromise;
+				return await this.#waitForUpdateCompletion(updateLogsWatcher, generation);
+			} finally {
 				this.#updateCompletionPromise = null;
-			});
+			}
+		})();
 	}
 
 	async #readUpdateExitCode() {
