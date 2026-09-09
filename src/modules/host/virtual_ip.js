@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
-import { ensureOpen } from '../../database/index.js';
+import * as database from '../../database/index.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
 import * as discovery from './discovery.js';
 import * as peer from './peer.js';
@@ -55,7 +55,7 @@ const removeEnvironmentFile = async () => {
 };
 
 const readConfiguration = async () => {
-	if (!await ensureOpen()) {
+	if (!await database.ensureOpen()) {
 		return await readEnvironmentFile();
 	}
 
