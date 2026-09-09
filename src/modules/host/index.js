@@ -507,9 +507,7 @@ class HostModule extends BaseModule {
 			const configuration = await virtualIp.readConfiguration();
 			this.setState('system', {
 				...this.getState('system'),
-				virtualIp: (configuration?.address
-					? { ...configuration, holding: await virtualIp.isEnabled() }
-					: null)
+				virtualIp: (configuration?.address ? { ...configuration, holding: await virtualIp.isEnabled() } : null)
 			});
 		} catch (error) {
 			console.error('Error reading the virtual IP configuration:', error);

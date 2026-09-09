@@ -1,4 +1,4 @@
-import { sequelize, ensureOpen } from './index.js';
+import * as database from './index.js';
 import Configuration from './models/Configuration.js';
 import { Application, Shortcut, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
@@ -16,7 +16,7 @@ const DEFAULT_CONFIGURATION = {
 
 class DataService {
 	static async initialize() {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -35,7 +35,7 @@ class DataService {
 	}
 
 	static async getConfiguration() {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return structuredClone(DEFAULT_CONFIGURATION);
 		}
 
@@ -58,7 +58,7 @@ class DataService {
 	}
 
 	static async setConfiguration(key, value) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -76,7 +76,7 @@ class DataService {
 	}
 
 	static async deleteConfiguration(key) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -90,7 +90,7 @@ class DataService {
 	}
 
 	static async updateConfiguration(updates) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -107,7 +107,7 @@ class DataService {
 
 	// Application methods
 	static async getApplications() {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return [];
 		}
 
@@ -123,7 +123,7 @@ class DataService {
 	}
 
 	static async getApplication(name) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return null;
 		}
 
@@ -140,7 +140,7 @@ class DataService {
 	}
 
 	static async setApplication(applicationData) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -163,7 +163,7 @@ class DataService {
 	}
 	
 	static async deleteApplication(name) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -188,7 +188,7 @@ class DataService {
 
 	// Shortcut methods
 	static async getShortcuts() {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return [];
 		}
 
@@ -204,7 +204,7 @@ class DataService {
 	}
 
 	static async getShortcut(name) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return null;
 		}
 
@@ -221,7 +221,7 @@ class DataService {
 	}
 
 	static async setShortcut(shortcutData) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -278,7 +278,7 @@ class DataService {
 	}
 	
 	static async deleteShortcut(name) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -310,7 +310,7 @@ class DataService {
 	}
 
 	static async setItemOrder(itemId, type, order) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -328,7 +328,7 @@ class DataService {
 	}
 
 	static async deleteItemOrder(itemId, type) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return false;
 		}
 
@@ -347,7 +347,7 @@ class DataService {
 	}
 
 	static async getConfigured() {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return [];
 		}
 
@@ -383,7 +383,7 @@ class DataService {
 	}
 
 	static async getNextOrderForCategory(category) {
-		if (!await ensureOpen()) {
+		if (!await database.ensureOpen()) {
 			return 1;
 		}
 
@@ -415,7 +415,7 @@ class DataService {
 
 	static async close() {
 		try {
-			await sequelize.close();
+			await database.sequelize.close();
 			console.log(`Database connection closed.`);
 		} catch (error) {
 			console.error(`Error closing database connection:`, error);

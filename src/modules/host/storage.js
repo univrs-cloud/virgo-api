@@ -2,9 +2,9 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import config from '../../../config.js';
-import { open as openDatabase } from '../../database/index.js';
+import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
-import { adoptEnvironmentConfiguration } from './virtual_ip.js';
+import * as virtualIp from './virtual_ip.js';
 import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
@@ -311,9 +311,9 @@ const prepare = async (job, module) => {
 	await createDirectories();
 	// The service booted without a pool to keep its database on, so it takes the one just prepared.
 	await module.updateJobProgress(job, 'Opening the database...');
-	await openDatabase();
+	await database.open();
 	await DataService.initialize();
-	await adoptEnvironmentConfiguration();
+	await virtualIp.adoptEnvironmentConfiguration();
 	// Everything these modules read lives on the pool and was unreachable when they started, so they
 	// are told to look again: an imported pool arrives with apps, shortcuts, shares and an enrolment
 	// already in it, and samba was configured before its share files existed.
