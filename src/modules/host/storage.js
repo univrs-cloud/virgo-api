@@ -4,6 +4,7 @@ import { execa } from 'execa';
 import config from '../../../config.js';
 import { open as openDatabase } from '../../database/index.js';
 import DataService from '../../database/data_service.js';
+import { adoptEnvironmentConfiguration } from './virtual_ip.js';
 import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
@@ -312,6 +313,7 @@ const prepare = async (job, module) => {
 	await module.updateJobProgress(job, 'Opening the database...');
 	await openDatabase();
 	await DataService.initialize();
+	await adoptEnvironmentConfiguration();
 	// Everything these modules read lives on the pool and was unreachable when they started, so they
 	// are told to look again: an imported pool arrives with apps, shortcuts, shares and an enrolment
 	// already in it, and samba was configured before its share files existed.
@@ -320,6 +322,7 @@ const prepare = async (job, module) => {
 	module.eventEmitter.emit('configuration:location:updated');
 	module.eventEmitter.emit('configured:updated');
 	module.eventEmitter.emit('users:updated');
+	module.eventEmitter.emit('host:network:virtualIp:updated');
 	await execa('smbcontrol', ['all', 'reload-config'], { reject: false });
 	module.eventEmitter.emit('shares:updated');
 	await scanImportablePools(module);

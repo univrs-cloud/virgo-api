@@ -42,6 +42,7 @@ class HostModule extends BaseModule {
 				version: ''
 			}
 		});
+		this.#loadVirtualIp();
 		si.system(async (system) => {
 			try {
 				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json']);
@@ -437,8 +438,7 @@ class HostModule extends BaseModule {
 			this.#loadSetupCompleted(),
 			this.#loadUpdate(),
 			this.#loadNetworkIdentifier(),
-			this.#loadNetworkInterfaces(),
-			this.#loadVirtualIp()
+			this.#loadNetworkInterfaces()
 		]);
 	}
 
@@ -503,13 +503,17 @@ class HostModule extends BaseModule {
 	}
 
 	async #loadVirtualIp() {
-		const configuration = await virtualIp.readConfiguration();
-		this.setState('system', {
-			...this.getState('system'),
-			virtualIp: (configuration?.address
-				? { ...configuration, holding: await virtualIp.isEnabled() }
-				: null)
-		});
+		try {
+			const configuration = await virtualIp.readConfiguration();
+			this.setState('system', {
+				...this.getState('system'),
+				virtualIp: (configuration?.address
+					? { ...configuration, holding: await virtualIp.isEnabled() }
+					: null)
+			});
+		} catch (error) {
+			console.error('Error reading the virtual IP configuration:', error);
+		}
 	}
 
 	async #loadNetworkInterfaces() {

@@ -1,11 +1,25 @@
-import { sequelize } from './index.js';
+import { sequelize, isOpen } from './index.js';
 import Configuration from './models/Configuration.js';
 import { Application, Shortcut, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
 import { getCoreApps } from '../utils/core_apps.js';
 
+const DEFAULT_CONFIGURATION = {
+	location: {
+		latitude: '45.749',
+		longitude: '21.227'
+	},
+	smtp: null,
+	trustedProxies: [],
+	indexer: []
+};
+
 class DataService {
 	static async initialize() {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			await Configuration.sync({ force: false });
 			await Application.sync({ force: false });
@@ -21,6 +35,10 @@ class DataService {
 	}
 
 	static async getConfiguration() {
+		if (!isOpen()) {
+			return structuredClone(DEFAULT_CONFIGURATION);
+		}
+
 		try {
 			const configs = await Configuration.findAll();
 			const configuration = {};
@@ -35,19 +53,15 @@ class DataService {
 		} catch (error) {
 			console.error(`Error reading configuration from database:`, error);
 			// Return default configuration if database read fails
-			return {
-				location: {
-					latitude: '45.749',
-					longitude: '21.227'
-				},
-				smtp: null,
-				trustedProxies: [],
-				indexer: []
-			};
+			return structuredClone(DEFAULT_CONFIGURATION);
 		}
 	}
 
 	static async setConfiguration(key, value) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
 			await Configuration.upsert({
@@ -62,6 +76,10 @@ class DataService {
 	}
 
 	static async deleteConfiguration(key) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			await Configuration.destroy({ where: { key } });
 			return true;
@@ -72,6 +90,10 @@ class DataService {
 	}
 
 	static async updateConfiguration(updates) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			for (const [key, value] of Object.entries(updates)) {
 				await this.setConfiguration(key, value);
@@ -85,6 +107,10 @@ class DataService {
 
 	// Application methods
 	static async getApplications() {
+		if (!isOpen()) {
+			return [];
+		}
+
 		try {
 			const applications = await Application.findAll({
 				raw: true
@@ -97,6 +123,10 @@ class DataService {
 	}
 
 	static async getApplication(name) {
+		if (!isOpen()) {
+			return null;
+		}
+
 		try {
 			const application = await Application.findOne({
 				where: { name },
@@ -110,6 +140,10 @@ class DataService {
 	}
 
 	static async setApplication(applicationData) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const [ entry ] = await Application.upsert({
 				name: applicationData.name,
@@ -129,6 +163,10 @@ class DataService {
 	}
 	
 	static async deleteApplication(name) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const application = await Application.findOne({
 				where: { name }
@@ -150,6 +188,10 @@ class DataService {
 
 	// Shortcut methods
 	static async getShortcuts() {
+		if (!isOpen()) {
+			return [];
+		}
+
 		try {
 			const shortcuts = await Shortcut.findAll({
 				raw: true
@@ -162,6 +204,10 @@ class DataService {
 	}
 
 	static async getShortcut(name) {
+		if (!isOpen()) {
+			return null;
+		}
+
 		try {
 			const shortcut = await Shortcut.findOne({
 				where: { name },
@@ -175,6 +221,10 @@ class DataService {
 	}
 
 	static async setShortcut(shortcutData) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const { traefik, ...shortcutFields } = shortcutData;
 			
@@ -228,6 +278,10 @@ class DataService {
 	}
 	
 	static async deleteShortcut(name) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const shortcut = await Shortcut.findOne({
 				where: { name }
@@ -256,6 +310,10 @@ class DataService {
 	}
 
 	static async setItemOrder(itemId, type, order) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			await ItemOrder.upsert({
 				itemId: itemId,
@@ -270,6 +328,10 @@ class DataService {
 	}
 
 	static async deleteItemOrder(itemId, type) {
+		if (!isOpen()) {
+			return false;
+		}
+
 		try {
 			const deleted = await ItemOrder.destroy({
 				where: { 
@@ -285,6 +347,10 @@ class DataService {
 	}
 
 	static async getConfigured() {
+		if (!isOpen()) {
+			return [];
+		}
+
 		try {
 			const applications = await Application.findAll({
 				include: [{
@@ -317,6 +383,10 @@ class DataService {
 	}
 
 	static async getNextOrderForCategory(category) {
+		if (!isOpen()) {
+			return 1;
+		}
+
 		try {
 			const appOrderEntries = await ItemOrder.findAll({
 				include: [{

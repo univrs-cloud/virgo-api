@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
+import { isOpen } from '../../database/index.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
 import * as discovery from './discovery.js';
 import * as peer from './peer.js';
@@ -26,8 +27,52 @@ const isSameSubnet = (first, second, prefixLength) => {
 	return ((toInteger(first) & mask) >>> 0) === ((toInteger(second) & mask) >>> 0);
 };
 
+const readEnvironmentFile = async () => {
+	try {
+		const contents = await fs.readFile(ENVIRONMENT_FILE, 'utf8');
+		const values = Object.fromEntries(contents.split('\n').filter(Boolean).map((line) => {
+			const [key, ...rest] = line.split('=');
+			return [key.trim(), rest.join('=').trim()];
+		}));
+		if (!values.VIRTUAL_IP_ADDR) {
+			return null;
+		}
+
+		return {
+			address: values.VIRTUAL_IP_ADDR,
+			netmask: (values.VIRTUAL_IP_CIDR || '').split('/')[1] || '',
+			device: values.VIRTUAL_IP_DEV || BOND_NAME
+		};
+	} catch (error) {
+		return null;
+	}
+};
+
+const removeEnvironmentFile = async () => {
+	try {
+		await fs.unlink(ENVIRONMENT_FILE);
+	} catch (error) {}
+};
+
 const readConfiguration = async () => {
+	if (!isOpen()) {
+		return await readEnvironmentFile();
+	}
+
 	return (await DataService.getConfiguration()).virtualIp || null;
+};
+
+const adoptEnvironmentConfiguration = async () => {
+	if ((await DataService.getConfiguration()).virtualIp?.address) {
+		return;
+	}
+
+	const configured = await readEnvironmentFile();
+	if (!configured) {
+		return;
+	}
+
+	await DataService.setConfiguration('virtualIp', configured);
 };
 
 const isEnabled = async () => {
@@ -148,6 +193,7 @@ const apply = async (virtualIp, config, module) => {
 	if (!virtualIp) {
 		if (await readConfiguration()) {
 			await standDown();
+			await removeEnvironmentFile();
 			await DataService.setConfiguration('virtualIp', null);
 			module.eventEmitter.emit('host:network:virtualIp:updated');
 		}
@@ -366,4 +412,4 @@ export default {
 	}
 };
 
-export { apply, validate, validateAgainstPeers, readConfiguration, isEnabled };
+export { apply, validate, validateAgainstPeers, readConfiguration, adoptEnvironmentConfiguration, isEnabled };

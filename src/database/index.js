@@ -9,8 +9,14 @@ const POOL_DATABASE_FILE = '/messier/.config/virgo.db';
 const READ = sqlite3.OPEN_READWRITE;
 const READ_WRITE_CREATE = sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE;
 
+let opened = false;
+
 const hasPool = () => {
 	return fs.existsSync(path.dirname(POOL_DATABASE_FILE));
+};
+
+const isOpen = () => {
+	return opened;
 };
 
 const sequelize = new Sequelize({
@@ -30,10 +36,11 @@ const open = async () => {
 	await sequelize.query('PRAGMA journal_mode = WAL;');
 	await sequelize.query('PRAGMA busy_timeout = 5000;');
 	await sequelize.query('PRAGMA synchronous = NORMAL;');
+	opened = true;
 };
 
 if (hasPool()) {
 	await open();
 }
 
-export { sequelize, open };
+export { sequelize, open, isOpen };
