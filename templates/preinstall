@@ -4,9 +4,11 @@ set -o pipefail
 
 if ! ischroot; then
 	tmp=$(mktemp)
+	echo "Updating n..."
 	if curl -fsSL -o "$tmp" https://raw.githubusercontent.com/tj/n/master/bin/n; then
 		chmod 0755 "$tmp"
 		mv "$tmp" /usr/local/bin/n
+		echo "n updated."
 	else
 		rm -f "$tmp"
 		if [ ! -x /usr/local/bin/n ]; then
@@ -34,13 +36,17 @@ fi
 if ! ischroot; then
 	rules_file="/etc/iptables/rules.v4"
 	acme_rule="-A INPUT -p tcp -m tcp --dport 2999 -j ACCEPT"
-	if [ -f "$rules_file" ] && ! grep -qF -- "--dport 2999" "$rules_file"; then
-		sed -i "/--dport 3000 -j ACCEPT/i $acme_rule" "$rules_file"
-		echo "Added ACME hook firewall rule to $rules_file."
+	if [ -f "$rules_file" ] && ! grep -qE -- '^-A INPUT .*--dport 2999 -j ACCEPT$' "$rules_file"; then
+		sed -i "0,/^COMMIT$/s|^COMMIT$|$acme_rule\nCOMMIT|" "$rules_file"
+		if grep -qF -- "$acme_rule" "$rules_file"; then
+			echo "Added ACME hook firewall rule to $rules_file."
+		else
+			echo "Failed to add the ACME hook firewall rule to $rules_file." >&2
+		fi
 	fi
 
 	if ! iptables -C INPUT -p tcp --dport 2999 -j ACCEPT 2>/dev/null; then
-		iptables -I INPUT -p tcp --dport 2999 -j ACCEPT
+		iptables -A INPUT -p tcp --dport 2999 -j ACCEPT
 		echo "Opened port 2999 for the ACME hook."
 	fi
 fi
