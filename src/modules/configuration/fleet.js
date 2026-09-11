@@ -337,16 +337,16 @@ const registerFleet = async (job, module) => {
 		throw new Error('Fleet email cannot be changed');
 	}
 
-	const email = registeredEmail || submittedEmail;
+	const fleetEmail = registeredEmail || submittedEmail;
 	const { nodeId, token } = await registerNode({
-		email,
+		email: fleetEmail,
 		password: config.password,
 		nodeId: await resolveNodeId(configuration),
 		name: await getNodeName(),
 		...await getNodeIdentifier()
 	});
 
-	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email });
+	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email: fleetEmail });
 	module.eventEmitter.emit('configuration:updated');
 	await connect({ token, nodeId });
 	return 'Fleet registered.';
