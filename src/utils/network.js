@@ -1,6 +1,72 @@
+import fs from 'fs/promises';
 import { execa } from 'execa';
 
 const BOND_NAME = 'bond0';
+const SYS_CLASS_NET = '/sys/class/net';
+const ARPHRD_ETHER = '1';
+
+const pathExists = async (path) => {
+	try {
+		await fs.access(path);
+		return true;
+	} catch (error) {
+		return false;
+	}
+};
+
+const readInterfaceAttribute = async (interfaceName, attribute) => {
+	try {
+		return (await fs.readFile(`${SYS_CLASS_NET}/${interfaceName}/${attribute}`, 'utf8')).trim();
+	} catch (error) {
+		return null;
+	}
+};
+
+const isStackedInterface = async (interfaceName) => {
+	try {
+		return (await fs.readdir(`${SYS_CLASS_NET}/${interfaceName}`)).some((entry) => { return entry.startsWith('lower_'); });
+	} catch (error) {
+		return true;
+	}
+};
+
+const isPhysicalInterface = async (interfaceName) => {
+	if (!await pathExists(`${SYS_CLASS_NET}/${interfaceName}/device`)) {
+		return false;
+	}
+
+	if (await pathExists(`${SYS_CLASS_NET}/${interfaceName}/wireless`) || await pathExists(`${SYS_CLASS_NET}/${interfaceName}/phy80211`)) {
+		return false;
+	}
+
+	if (await readInterfaceAttribute(interfaceName, 'type') !== ARPHRD_ETHER) {
+		return false;
+	}
+
+	const ifindex = await readInterfaceAttribute(interfaceName, 'ifindex');
+	if (!ifindex || await readInterfaceAttribute(interfaceName, 'iflink') !== ifindex) {
+		return false;
+	}
+
+	return !await isStackedInterface(interfaceName);
+};
+
+const getPhysicalInterfaceNames = async () => {
+	try {
+		const names = (await fs.readdir(SYS_CLASS_NET)).sort((first, second) => {
+			return first.localeCompare(second, 'en', { numeric: true });
+		});
+		const physical = [];
+		for (const name of names) {
+			if (await isPhysicalInterface(name)) {
+				physical.push(name);
+			}
+		}
+		return physical;
+	} catch (error) {
+		return [];
+	}
+};
 
 const getDefaultInterfaceName = async () => {
 	try {
@@ -64,6 +130,7 @@ const holdsAddress = async (address) => {
 
 export {
 	BOND_NAME,
+	getPhysicalInterfaceNames,
 	getDefaultInterfaceName,
 	isAddressInUse,
 	getAddresses,
