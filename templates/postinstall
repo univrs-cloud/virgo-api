@@ -40,21 +40,15 @@ configure_nonlocal_bind() {
 	echo "Wrote $sysctl_file."
 }
 
-configure_avahi_interfaces() {
-	local avahi_file="/etc/avahi/avahi-daemon.conf"
-	local interfaces="bond0,eth0,eth1"
-	if [ ! -f "$avahi_file" ] || grep -Fxq "allow-interfaces=$interfaces" "$avahi_file"; then
-		return
-	fi
+install_avahi_interfaces() {
+	install -v -m 755 "$app_dir/systemd/avahi-allow-interfaces" /usr/local/sbin/avahi-allow-interfaces
+	install -v -m 644 "$app_dir/systemd/avahi-allow-interfaces.service" /lib/systemd/system/avahi-allow-interfaces.service
+	systemctl daemon-reload
+	systemctl enable avahi-allow-interfaces.service
 
-	sed -i "s/^#\?allow-interfaces=.*/allow-interfaces=$interfaces/" "$avahi_file"
-	if ! grep -Fxq "allow-interfaces=$interfaces" "$avahi_file"; then
-		echo "Warning: could not set allow-interfaces in $avahi_file; node discovery may not work."
-		return
+	if [ -n "$(/usr/local/sbin/avahi-allow-interfaces)" ]; then
+		systemctl restart avahi-daemon
 	fi
-
-	systemctl restart avahi-daemon
-	echo "Set allow-interfaces=$interfaces in $avahi_file."
 }
 
 install_mdns_dispatcher() {
@@ -83,7 +77,7 @@ if ! ischroot; then
 	generate_certificate
 	install_virtual_ip_unit
 	configure_nonlocal_bind
-	configure_avahi_interfaces
+	install_avahi_interfaces
 	install_mdns_dispatcher
 	configure_gateway_wait
 	run_migrations
