@@ -6,6 +6,7 @@ import * as virtualIp from './virtual_ip.js';
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const FALLBACK_INTERFACES = ['eth0', 'eth1'];
 const BOND_SLAVE_LIMIT = 2;
+const BOND_SLAVES_PATH = `/sys/class/net/${BOND_NAME}/bonding/slaves`;
 const WAIT_DEVICE_TIMEOUT = '10000';
 
 // Bringing the connection back up drops the browser watching this job, and a job that finishes while
@@ -157,7 +158,7 @@ const createBondConnection = async (primaryInterface) => {
 
 const updateBondConnection = async (config, primaryInterface) => {
 	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', getBondOptions(primaryInterface)]);
-	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
+	const args = ['connection', 'modify', BOND_NAME, 'connection.autoconnect-slaves', 'yes', 'ipv4.method', config.method];
 	if (config.method === 'manual') {
 		const dnsServers = normalizeDnsServers(config.dnsServers);
 		args.push('ipv4.addresses', `${config.ipAddress}/${config.netmask}`);
@@ -173,21 +174,32 @@ const updateBondConnection = async (config, primaryInterface) => {
 	await execa('nmcli', args);
 };
 
+const getBondSlaveNames = async () => {
+	try {
+		const slaves = await fs.readFile(BOND_SLAVES_PATH, 'utf8');
+		return slaves.trim().split(/\s+/).filter(Boolean);
+	} catch (error) {
+		return null;
+	}
+};
+
+const getBondSlaveConnectionNames = async () => {
+	try {
+		const { stdout } = await execa('nmcli', ['-g', 'NAME', 'connection', 'show']);
+		return stdout.trim().split('\n').filter(Boolean).filter((name) => { return name.startsWith(`${BOND_NAME}-`); });
+	} catch (error) {
+		return [];
+	}
+};
+
 const addBondSlave = async (interfaceName) => {
 	const slaveName = `${BOND_NAME}-${interfaceName}`;
-	
-	if (await connectionExists(slaveName)) {
-		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', WAIT_DEVICE_TIMEOUT]);
-		return true;
-	}
-	
-	try {
+	if (!await connectionExists(slaveName)) {
 		await execa('nmcli', ['connection', 'add', 'type', 'ethernet', 'con-name', slaveName, 'ifname', interfaceName, 'master', BOND_NAME]);
-		await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', WAIT_DEVICE_TIMEOUT]);
-		return true;
-	} catch (error) {
-		return false;
 	}
+
+	await execa('nmcli', ['connection', 'modify', slaveName, 'connection.wait-device-timeout', WAIT_DEVICE_TIMEOUT]);
+	return slaveName;
 };
 
 const updateInterface = async (job, module) => {
@@ -215,42 +227,51 @@ const updateInterface = async (job, module) => {
 		virtualIp.validate(config.virtualIp, config);
 	}
 
+	const staleSlaveNames = await getBondSlaveNames();
+	if (staleSlaveNames && staleSlaveNames.length === 0) {
+		const names = [BOND_NAME, ...await getBondSlaveConnectionNames()].join(' ');
+		throw new Error(`${BOND_NAME} exists with no ports. Delete it and retry: nmcli connection delete ${names}`);
+	}
+
 	await module.updateJobProgress(job, `Network interface updating...`);
+	const interfaces = await getBondInterfaces();
 	try {
-		const bondExists = await connectionExists(BOND_NAME);
-		const interfaces = await getBondInterfaces();
 		const primaryInterface = await getBondPrimary(interfaces);
 		const connectionNames = new Map();
 		for (const interfaceName of interfaces) {
 			connectionNames.set(interfaceName, await getConnectionNameForInterface(interfaceName));
 		}
-		if (!bondExists) {
-			let dnsSearch = null;
-			let dns = null;
-			const primaryConnectionName = connectionNames.get(primaryInterface);
-			if (primaryConnectionName && !primaryConnectionName.startsWith(`${BOND_NAME}-`)) {
-				dnsSearch = await getConnectionProperty(primaryConnectionName, 'ipv4.dns-search');
-				dns = await getConnectionProperty(primaryConnectionName, 'ipv4.dns');
-			}
-			for (const connectionName of connectionNames.values()) {
-				if (connectionName && !connectionName.startsWith(`${BOND_NAME}-`)) {
-					await deleteConnection(connectionName);
-				}
-			}
+		let dnsSearch = null;
+		let dns = null;
+		const primaryConnectionName = connectionNames.get(primaryInterface);
+		if (primaryConnectionName && !primaryConnectionName.startsWith(`${BOND_NAME}-`)) {
+			dnsSearch = await getConnectionProperty(primaryConnectionName, 'ipv4.dns-search');
+			dns = await getConnectionProperty(primaryConnectionName, 'ipv4.dns');
+		}
+		if (!await connectionExists(BOND_NAME)) {
 			await createBondConnection(primaryInterface);
-			if (dnsSearch) {
-				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns-search', dnsSearch]);
-			}
-			if (dns) {
-				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns', dns]);
-			}
+		}
+		if (dnsSearch && !await getConnectionProperty(BOND_NAME, 'ipv4.dns-search')) {
+			await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns-search', dnsSearch]);
+		}
+		if (dns && !await getConnectionProperty(BOND_NAME, 'ipv4.dns')) {
+			await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns', dns]);
 		}
 		await updateBondConnection(config, primaryInterface);
+		const slaveConnectionNames = [];
 		for (const interfaceName of interfaces) {
-			await addBondSlave(interfaceName);
+			slaveConnectionNames.push(await addBondSlave(interfaceName));
+		}
+		for (const connectionName of connectionNames.values()) {
+			if (connectionName && !connectionName.startsWith(`${BOND_NAME}-`)) {
+				await deleteConnection(connectionName);
+			}
 		}
 		await execa('nmcli', ['connection', 'reload']);
 		await execa('nmcli', ['connection', 'up', BOND_NAME]);
+		for (const slaveConnectionName of slaveConnectionNames) {
+			await execa('nmcli', ['connection', 'up', slaveConnectionName]);
+		}
 		let ip = config.ipAddress;
 		if (config.method !== 'manual') {
 			await sleep(DHCP_LEASE_WAIT_MS);
@@ -259,6 +280,11 @@ const updateInterface = async (job, module) => {
 		await updateEtcHosts(module, ip, system.osInfo.hostname, system.osInfo.fqdn);
 	} catch (error) {
 		throw new Error(`Network interface was not updated.`);
+	}
+
+	const slaveNames = await getBondSlaveNames();
+	if (!slaveNames || slaveNames.length === 0) {
+		throw new Error(`Network interface was not updated. ${BOND_NAME} came up with no ports: ${interfaces.join(', ')} could not be enslaved.`);
 	}
 
 	await virtualIp.apply(config.virtualIp, config, module);
