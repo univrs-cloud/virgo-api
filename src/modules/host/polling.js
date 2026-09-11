@@ -6,8 +6,14 @@ import camelcaseKeys from 'camelcase-keys';
 import Poller from '../../utils/poller.js';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
+import { getTopologies } from './topology.js';
 
 const BY_ID_DIR = '/dev/disk/by-id';
+const ID_PREFIXES = ['nvme-eui.', 'wwn-', 'ata-', 'scsi-', 'virtio-'];
+const SYSTEM_MOUNTPOINTS = ['/', '[SWAP]'];
+// Memory-backed block devices. lsblk types these as disks, and a zram holding no swap looks like an
+// empty drive, so nothing but the name tells them apart from something a pool can be built on.
+const VOLATILE_DEVICE = /^(?:zram|ram)\d+$/;
 const CERTIFICATE_INTERVAL_MS = 10000;
 const KELVIN_OFFSET = 273;
 const DEFAULT_TEMPERATURE_THRESHOLD = 99;
@@ -85,10 +91,8 @@ const getDriveIds = async () => {
 				continue;
 			}
 
-			// The link points at the namespace (/dev/nvme0n1); smartctl reports the controller (/dev/nvme0).
 			const device = await fs.realpath(path.join(BY_ID_DIR, entry));
-			const controller = device.replace(/n\d+$/, '');
-			ids[controller] = [...(ids[controller] || []), entry];
+			ids[device] = [...(ids[device] || []), entry];
 		}
 	} catch (error) {
 		console.error('getDriveIds:', error);
@@ -97,43 +101,85 @@ const getDriveIds = async () => {
 	return ids;
 };
 
+/** A pool member has to be named by something that survives a reboot. Device names are assigned in
+ * probe order, so a `/dev/disk/by-id` alias is used wherever the drive has one; a virtual disk with
+ * no serial has none, and its device path is all there is to name it by. */
+const getPreferredId = (aliases, devicePath) => {
+	for (const prefix of ID_PREFIXES) {
+		const alias = aliases.find((entry) => { return entry.startsWith(prefix); });
+		if (alias) {
+			return alias;
+		}
+	}
+
+	return aliases[0] || devicePath;
+};
+
+const isSystemMountpoint = (mountpoint) => {
+	return Boolean(mountpoint) && (SYSTEM_MOUNTPOINTS.includes(mountpoint) || mountpoint.startsWith('/boot'));
+};
+
+/** Whether the system lives on this disk, asked of the whole tree: the root and boot filesystems sit
+ * on partitions, so the disk carrying them only shows it through its children. */
+const isSystemDevice = (device) => {
+	if ((device.mountpoints || [device.mountpoint]).some(isSystemMountpoint)) {
+		return true;
+	}
+
+	return (device.children || []).some(isSystemDevice);
+};
+
+const listBlockDevices = async () => {
+	try {
+		const { stdout } = await execa('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,RM,RO,MODEL,SERIAL,MOUNTPOINTS']);
+		return JSON.parse(stdout || '{}').blockdevices || [];
+	} catch (error) {
+		console.error('listBlockDevices:', error);
+		return [];
+	}
+};
+
 const getDrives = async (module) => {
 	try {
 		const driveIds = await getDriveIds();
-		const { stdout: smartctlScan } = await execa('smartctl', ['--scan'], { reject: false });
-		const devices = (smartctlScan.match(/^\/dev\/\S+/gm) || []);
+		const devices = (await listBlockDevices()).filter((device) => {
+			return device.type === 'disk' && !device.rm && !device.ro && !VOLATILE_DEVICE.test(device.name) && !isSystemDevice(device);
+		});
 		const drives = await Promise.all(devices.map(async (device) => {
+			const isNvme = device.name.startsWith('nvme');
 			const [{ stdout: smartctl }, { stdout: nvme }] = await Promise.all([
-				execa('smartctl', ['-a', '-j', device], { reject: false }),
-				execa('nvme', ['id-ctrl', '-o', 'json', device], { reject: false })
+				execa('smartctl', ['-a', '-j', device.path], { reject: false }),
+				(isNvme ? execa('nvme', ['id-ctrl', '-o', 'json', device.path], { reject: false }) : { stdout: '' })
 			]);
 			const drive = parseJson(smartctl);
 			const limits = parseJson(nvme);
-			const name = drive?.device?.name;
-			if (!name) {
-				return null;
-			}
-
-			const aliases = (driveIds[name] || []);
+			const aliases = (driveIds[device.path] || []);
+			const size = Number(device.size) || drive?.user_capacity?.bytes || null;
 			return {
-				name,
+				name: device.name,
+				path: device.path,
+				id: getPreferredId(aliases, device.path),
 				ids: aliases,
-				eui: (aliases.find((alias) => { return alias.startsWith('nvme-eui.'); }) || null),
-				model: drive?.model_name,
-				serialNumber: drive?.serial_number,
-				capacity: drive?.user_capacity,
+				model: (drive?.model_name || device.model || null),
+				serialNumber: (drive?.serial_number || device.serial || null),
+				size,
+				capacity: (drive?.user_capacity || { bytes: size }),
 				temperature: drive?.temperature?.current,
 				temperatureWarningThreshold: (Number.isFinite(limits?.wctemp) ? limits.wctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD),
 				temperatureCriticalThreshold: (Number.isFinite(limits?.cctemp) ? limits.cctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD)
 			};
 		}));
-		module.setState('drives', drives.filter(Boolean));
+		module.setState('drives', drives);
 	} catch (error) {
 		console.error('getDrives:', error);
 		module.setState('drives', false);
 	}
+	module.setState('topologies', getTopologies(module.getState('drives') || []));
 	module.emitChanged('host:drives', module.getState('drives'));
+	module.emitChanged('host:storage:topologies', module.getState('topologies'));
 };
+
+;
 
 const getStorage = async (module) => {
 	try {

@@ -6,18 +6,11 @@ import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
 import * as virtualIp from './virtual_ip.js';
 import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
+import { getTopology, getVdevArguments } from './topology.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
 const POOL_OPTIONS = ['-o', 'ashift=13', '-o', 'autotrim=on', '-O', 'compression=lz4', '-O', 'atime=off'];
-// Vdev layouts a pool may be asked for, and the drives each one needs. The name doubles as the zpool
-// keyword. Only redundant layouts: this pool holds the node's data, so a stripe is never offered.
-const REDUNDANCY = {
-	mirror: 2,
-	raidz1: 3,
-	raidz2: 4,
-	raidz3: 5
-};
 // Parents before children: a dataset cannot be created under one that does not exist yet.
 const DATASETS = [
 	{ name: `${POOL_NAME}/docker`, options: ['-o', 'mountpoint=/var/lib/docker'] },
@@ -328,22 +321,23 @@ const prepare = async (job, module) => {
 	await scanImportablePools(module);
 };
 
-/** Drives are named by the `nvme-eui.*` entry the drive list reports; a pool is built from the by-id
- * paths so it survives the device names moving between boots. Each one is checked to still be there:
- * the list a client acted on may be minutes old. */
-const resolveDrives = async (euis) => {
+/** A pool is built from the identifier the drive list reports: a `/dev/disk/by-id` alias where the
+ * drive has one, and its device path where it does not. Both are taken as given, so both are checked
+ * against the drive list rather than trusted from the browser. */
+const resolveDrives = async (ids, drives) => {
 	const paths = [];
-	for (const eui of euis) {
-		if (!eui?.startsWith('nvme-eui.') || eui.includes('/')) {
-			throw new Error(`${eui} is not a drive identifier.`);
+	for (const id of ids) {
+		const drive = drives.find((entry) => { return entry.id === id; });
+		if (!drive) {
+			throw new Error(`${id} is not an available drive.`);
 		}
 
-		const path = `${BY_ID_DIR}/${eui}`;
-		if (!await exists(path)) {
-			throw new Error(`Drive ${eui} is no longer attached.`);
+		const drivePath = (drive.id === drive.path ? drive.path : `${BY_ID_DIR}/${drive.id}`);
+		if (!await exists(drivePath)) {
+			throw new Error(`Drive ${id} is no longer attached.`);
 		}
 
-		paths.push(path);
+		paths.push(drivePath);
 	}
 
 	return paths;
@@ -380,23 +374,21 @@ const createPool = async (job, module) => {
 		throw new Error(`Pool ${POOL_NAME} already exists.`);
 	}
 
-	const minimumDrives = REDUNDANCY[config?.type];
-	if (!minimumDrives) {
-		throw new Error(`${config?.type || 'No'} redundancy is not supported.`);
+	const available = module.getState('drives') || [];
+	const selected = available.filter((drive) => { return (config?.drives || []).includes(drive.id); });
+	const topology = getTopology(selected, config?.type);
+	if (!topology) {
+		throw new Error(`${config?.type || 'No'} redundancy is not supported by ${selected.length} drives of this size.`);
 	}
 
-	const drives = await resolveDrives(config?.drives || []);
-	if (drives.length < minimumDrives) {
-		throw new Error(`A ${config.type} pool needs at least ${minimumDrives} drives, ${drives.length} given.`);
-	}
-
+	const drives = await resolveDrives(config.drives, available);
 	await module.updateJobProgress(job, 'Stopping Docker...');
 	await stopDocker();
 	await backupDockerData();
 	await module.updateJobProgress(job, `Creating pool ${POOL_NAME}...`);
 	// -f because the wizard offers this as the deliberate "start over" path: whatever labels these
 	// drives carry, including an older pool the user chose not to import, are being replaced.
-	await execa('zpool', ['create', '-f', POOL_NAME, config.type, ...drives, ...POOL_OPTIONS]);
+	await execa('zpool', ['create', '-f', POOL_NAME, ...getVdevArguments(topology, drives), ...POOL_OPTIONS]);
 	await prepare(job, module);
 	return `Pool ${POOL_NAME} created.`;
 };
