@@ -179,6 +179,9 @@ class HostModule extends BaseModule {
 		if (this.getState('drives')) {
 			socket.emit('host:drives', this.getState('drives'));
 		}
+		if (this.getState('topologies')) {
+			socket.emit('host:storage:topologies', this.getState('topologies'));
+		}
 		if (this.getState('storage')) {
 			socket.emit('host:storage', this.getState('storage'));
 		}
