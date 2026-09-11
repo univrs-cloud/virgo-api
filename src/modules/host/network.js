@@ -1,11 +1,11 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
-import { BOND_NAME, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
+import { BOND_NAME, getPhysicalInterfaceNames, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
 import * as virtualIp from './virtual_ip.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
-const PRIMARY_INTERFACE = 'eth0';
-const SECONDARY_INTERFACE = 'eth1';
+const FALLBACK_INTERFACES = ['eth0', 'eth1'];
+const BOND_SLAVE_LIMIT = 2;
 const WAIT_DEVICE_TIMEOUT = '10000';
 
 // Bringing the connection back up drops the browser watching this job, and a job that finishes while
@@ -122,14 +122,41 @@ const normalizeDnsServers = (dnsServers) => {
 	return (dnsServers || []).map((dnsServer) => { return dnsServer?.toString().trim(); }).filter(Boolean);
 };
 
-const createBondConnection = async () => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},primary_reselect=failure,miimon=100,updelay=10000`;
-	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', bondOptions]);
+const getBondInterfaces = async () => {
+	const interfaces = await getPhysicalInterfaceNames();
+	return (interfaces.length > 0 ? interfaces : FALLBACK_INTERFACES).slice(0, BOND_SLAVE_LIMIT);
 };
 
-const updateBondConnection = async (config) => {
-	const bondOptions = `mode=active-backup,primary=${PRIMARY_INTERFACE},primary_reselect=failure,miimon=100,updelay=10000`;
-	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', bondOptions]);
+const getConfiguredBondPrimary = async () => {
+	const bondOptions = await getConnectionProperty(BOND_NAME, 'bond.options');
+	const option = (bondOptions || '').split(',').map((option) => { return option.trim(); }).find((option) => { return option.startsWith('primary='); });
+	return option ? option.slice('primary='.length) : null;
+};
+
+const getBondPrimary = async (interfaces) => {
+	const configured = await getConfiguredBondPrimary();
+	if (configured && interfaces.includes(configured)) {
+		return configured;
+	}
+
+	const defaultInterface = await getDefaultInterfaceName();
+	if (defaultInterface && interfaces.includes(defaultInterface)) {
+		return defaultInterface;
+	}
+
+	return interfaces[0];
+};
+
+const getBondOptions = (primaryInterface) => {
+	return `mode=active-backup,primary=${primaryInterface},primary_reselect=failure,miimon=100,updelay=10000`;
+};
+
+const createBondConnection = async (primaryInterface) => {
+	await execa('nmcli', ['connection', 'add', 'type', 'bond', 'con-name', BOND_NAME, 'ifname', BOND_NAME, 'bond.options', getBondOptions(primaryInterface)]);
+};
+
+const updateBondConnection = async (config, primaryInterface) => {
+	await execa('nmcli', ['connection', 'modify', BOND_NAME, 'bond.options', getBondOptions(primaryInterface)]);
 	const args = ['connection', 'modify', BOND_NAME, 'ipv4.method', config.method];
 	if (config.method === 'manual') {
 		const dnsServers = normalizeDnsServers(config.dnsServers);
@@ -191,22 +218,26 @@ const updateInterface = async (job, module) => {
 	await module.updateJobProgress(job, `Network interface updating...`);
 	try {
 		const bondExists = await connectionExists(BOND_NAME);
-		const eth0ConnectionName = await getConnectionNameForInterface(PRIMARY_INTERFACE);
-		const eth1ConnectionName = await getConnectionNameForInterface(SECONDARY_INTERFACE);
+		const interfaces = await getBondInterfaces();
+		const primaryInterface = await getBondPrimary(interfaces);
+		const connectionNames = new Map();
+		for (const interfaceName of interfaces) {
+			connectionNames.set(interfaceName, await getConnectionNameForInterface(interfaceName));
+		}
 		if (!bondExists) {
 			let dnsSearch = null;
 			let dns = null;
-			if (eth0ConnectionName && !eth0ConnectionName.startsWith(`${BOND_NAME}-`)) {
-				dnsSearch = await getConnectionProperty(eth0ConnectionName, 'ipv4.dns-search');
-				dns = await getConnectionProperty(eth0ConnectionName, 'ipv4.dns');
+			const primaryConnectionName = connectionNames.get(primaryInterface);
+			if (primaryConnectionName && !primaryConnectionName.startsWith(`${BOND_NAME}-`)) {
+				dnsSearch = await getConnectionProperty(primaryConnectionName, 'ipv4.dns-search');
+				dns = await getConnectionProperty(primaryConnectionName, 'ipv4.dns');
 			}
-			if (eth0ConnectionName && !eth0ConnectionName.startsWith(`${BOND_NAME}-`)) {
-				await deleteConnection(eth0ConnectionName);
+			for (const connectionName of connectionNames.values()) {
+				if (connectionName && !connectionName.startsWith(`${BOND_NAME}-`)) {
+					await deleteConnection(connectionName);
+				}
 			}
-			if (eth1ConnectionName && !eth1ConnectionName.startsWith(`${BOND_NAME}-`)) {
-				await deleteConnection(eth1ConnectionName);
-			}
-			await createBondConnection();
+			await createBondConnection(primaryInterface);
 			if (dnsSearch) {
 				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns-search', dnsSearch]);
 			}
@@ -214,9 +245,10 @@ const updateInterface = async (job, module) => {
 				await execa('nmcli', ['connection', 'modify', BOND_NAME, 'ipv4.dns', dns]);
 			}
 		}
-		await updateBondConnection(config);
-		await addBondSlave(PRIMARY_INTERFACE);
-		await addBondSlave(SECONDARY_INTERFACE);
+		await updateBondConnection(config, primaryInterface);
+		for (const interfaceName of interfaces) {
+			await addBondSlave(interfaceName);
+		}
 		await execa('nmcli', ['connection', 'reload']);
 		await execa('nmcli', ['connection', 'up', BOND_NAME]);
 		let ip = config.ipAddress;
