@@ -277,7 +277,7 @@ const registerNode = ({ email, password, nodeId, name, hostname, domainName, add
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
-			auth: { role: 'node' },
+			auth: { role: 'node', transient: true },
 			rejectUnauthorized: true,
 			reconnection: false,
 			timeout: 10000
@@ -304,7 +304,7 @@ const checkDomainAvailability = async (label) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
-			auth: { role: 'node', ...(token ? { secret: token } : {}) },
+			auth: { role: 'node', transient: true, ...(token ? { secret: token } : {}) },
 			rejectUnauthorized: true,
 			reconnection: false,
 			timeout: 10000
