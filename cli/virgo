@@ -10,7 +10,7 @@ const program = new Command();
 
 program
 	.name('virgo')
-	.description('Virgo CLI')
+	.description('virgoOS CLI')
 	.version(pkg.version);
 
 registerIndexer(program);

@@ -1,7 +1,7 @@
 {
 	"name": "virgo-api",
 	"version": "2.18.53",
-	"description": "virgo API",
+	"description": "virgoOS API",
 	"author": "univrs",
 	"license": "UNLICENSED",
 	"main": "index.js",
