@@ -34,12 +34,13 @@ const getVdevWidth = (count, parity) => {
 };
 
 const getTopologies = (drives) => {
-	const count = drives?.length || 0;
-	if (count < MIRROR_WIDTH || !areSameSize(drives)) {
+	const poolDrives = (drives || []).filter((drive) => { return !drive?.system; });
+	const count = poolDrives.length;
+	if (count < MIRROR_WIDTH || !areSameSize(poolDrives)) {
 		return [];
 	}
 
-	const size = Math.min(...drives.map(getSize));
+	const size = Math.min(...poolDrives.map(getSize));
 	const topologies = [];
 	for (const [type, parity] of Object.entries(PARITY)) {
 		const width = getVdevWidth(count, parity);

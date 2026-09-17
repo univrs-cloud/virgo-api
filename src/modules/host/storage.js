@@ -4,9 +4,8 @@ import { execa } from 'execa';
 import config from '../../../config.js';
 import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
-import * as virtualIp from './virtual_ip.js';
 import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
-import { getTopology, getVdevArguments } from './topology.js';
+import { getTopology, getVdevArguments } from '../../utils/topology.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -306,7 +305,7 @@ const prepare = async (job, module) => {
 	await module.updateJobProgress(job, 'Opening the database...');
 	await database.open();
 	await DataService.initialize();
-	await virtualIp.adoptEnvironmentConfiguration();
+	await module.getPlugin('virtual_ip')?.adoptEnvironmentConfiguration();
 	// Everything these modules read lives on the pool and was unreachable when they started, so they
 	// are told to look again: an imported pool arrives with apps, shortcuts, shares and an enrolment
 	// already in it, and samba was configured before its share files existed.
@@ -374,7 +373,7 @@ const createPool = async (job, module) => {
 		throw new Error(`Pool ${POOL_NAME} already exists.`);
 	}
 
-	const available = module.getState('drives') || [];
+	const available = (module.getState('drives') || []).filter((drive) => { return !drive.system; });
 	const selected = available.filter((drive) => { return (config?.drives || []).includes(drive.id); });
 	const topology = getTopology(selected, config?.type);
 	if (!topology) {

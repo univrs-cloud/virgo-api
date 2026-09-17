@@ -462,10 +462,11 @@ export default {
 	name: 'peer',
 	register,
 	onConnection,
+	call,
+	broadcast,
+	findHolder,
 	jobs: {
 		'host:peer:adopt': adopt,
 		'host:peer:remove': remove
 	}
 };
-
-export { call, broadcast, findHolder };
