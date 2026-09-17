@@ -19,7 +19,7 @@ const checkUps = async (module) => {
 					module.setState('ups', status);
 				} catch (error) {
 					console.error('UPS socket response parse error:', error.message);
-					module.setState('ups', 'remote i/o error');
+					module.setState('ups', { error: 'invalid', message: error.message });
 				}
 			}
 		}
@@ -28,7 +28,7 @@ const checkUps = async (module) => {
 	});
 	socket.on('error', (error) => {
 		console.error('UPS socket error:', error.message);
-		module.setState('ups', 'remote i/o error');
+		module.setState('ups', { error: 'unreachable', message: error.message });
 		module.nsp.emit('host:ups', module.getState('ups'));
 		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
