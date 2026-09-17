@@ -41,9 +41,9 @@ const update = async (socket, module) => {
 	module.resetUpdateTracking();
 
 	let updateLogsWatcher;
-	const watcherPlugin = module.getPlugin('watcher');
-	if (watcherPlugin) {
-		updateLogsWatcher = await watcherPlugin.watchUpdateLog(module);
+	const watcher = module.getPlugin('watcher');
+	if (watcher) {
+		updateLogsWatcher = await watcher?.watchUpdateLog(module);
 	}
 
 	module.setState('update', {

@@ -4,7 +4,6 @@ import DataService from '../../database/data_service.js';
 import * as database from '../../database/index.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
 import * as discovery from './discovery.js';
-import * as peer from './peer.js';
 
 const ENVIRONMENT_FILE = '/etc/default/virgo-virtual-ip';
 const UNIT = 'virgo-virtual-ip.service';
@@ -281,7 +280,7 @@ const propagate = async (module) => {
 		return;
 	}
 
-	await peer.broadcast('virtualIp:configure', {
+	await module.getPlugin('peer')?.broadcast('virtualIp:configure', {
 		virtualIp: (configuration?.address ? { address: configuration.address, netmask: configuration.netmask } : null)
 	});
 };
@@ -296,10 +295,11 @@ const promote = async (job, module) => {
 		return `${configuration.address} is already held by this node.`;
 	}
 
-	const holder = await peer.findHolder(configuration.address);
+	const peer = module.getPlugin('peer');
+	const holder = await peer?.findHolder(configuration.address);
 	if (holder) {
 		await module.updateJobProgress(job, `Asking ${holder.name || holder.address} to release ${configuration.address}...`);
-		await peer.call(holder.id, 'virtualIp:release');
+		await peer?.call(holder.id, 'virtualIp:release');
 		if (!await waitForRelease(configuration.address)) {
 			throw new Error(`${holder.name || holder.address} did not release ${configuration.address}.`);
 		}
@@ -327,8 +327,9 @@ const handover = async (job, module) => {
 		throw new Error(`This node is not holding ${configuration.address}.`);
 	}
 
+	const peer = module.getPlugin('peer');
 	await module.updateJobProgress(job, `Handing ${configuration.address} over...`);
-	await peer.call(config.peerId, 'virtualIp:promote');
+	await peer?.call(config.peerId, 'virtualIp:promote');
 	return `${configuration.address} handed over.`;
 };
 
@@ -405,6 +406,10 @@ export default {
 	name: 'virtual_ip',
 	register,
 	onConnection,
+	apply,
+	validate,
+	validateAgainstPeers,
+	adoptEnvironmentConfiguration,
 	jobs: {
 		'host:network:virtualIp:promote': promote,
 		'host:network:virtualIp:handover': handover,
@@ -412,4 +417,4 @@ export default {
 	}
 };
 
-export { apply, validate, validateAgainstPeers, readConfiguration, adoptEnvironmentConfiguration, isEnabled };
+export { readConfiguration, isEnabled };

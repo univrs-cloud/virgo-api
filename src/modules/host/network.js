@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import { BOND_NAME, getPhysicalInterfaceNames, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
-import * as virtualIp from './virtual_ip.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const FALLBACK_INTERFACES = ['eth0', 'eth1'];
@@ -219,12 +218,14 @@ const updateInterface = async (job, module) => {
 		}
 	}
 
+	const virtualIp = module.getPlugin('virtual_ip');
+
 	if (config.method === 'manual') {
-		virtualIp.validateAgainstPeers(config);
+		virtualIp?.validateAgainstPeers(config);
 	}
 
 	if (config.virtualIp) {
-		virtualIp.validate(config.virtualIp, config);
+		virtualIp?.validate(config.virtualIp, config);
 	}
 
 	const staleSlaveNames = await getBondSlaveNames();
@@ -287,7 +288,7 @@ const updateInterface = async (job, module) => {
 		throw new Error(`Network interface was not updated. ${BOND_NAME} came up with no ports: ${interfaces.join(', ')} could not be enslaved.`);
 	}
 
-	await virtualIp.apply(config.virtualIp, config, module);
+	await virtualIp?.apply(config.virtualIp, config, module);
 	await sleep(RECONNECT_GRACE_MS);
 	module.eventEmitter.emit('host:network:interface:updated');
 	return `Network interface updated.`;

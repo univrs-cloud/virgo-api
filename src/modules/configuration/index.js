@@ -1,6 +1,5 @@
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
-import configurationManager from './configuration_manager.js';
 import * as trustedProxy from '../../utils/trusted_proxy.js';
 import * as fleetState from '../../utils/fleet_state.js';
 
@@ -10,18 +9,46 @@ class ConfigurationModule extends BaseModule {
 
 		(async () => {
 			await this.#loadConfiguration();
-			configurationManager.broadcast(this);
+			this.#broadcastConfiguration();
 		})();
 
 		this.eventEmitter
 			.on('configuration:updated', async () => {
 				await this.#loadConfiguration();
-				configurationManager.broadcast(this);
+				this.#broadcastConfiguration();
 			});
 	}
 
 	onConnection(socket) {
-		configurationManager.emitToSocket(socket, this);
+		this.#emitConfiguration(socket);
+	}
+
+	#configurationFor(socket) {
+		const configuration = this.getState('configuration') || {};
+		if (!socket.isAuthenticated || !socket.isAdmin) {
+			delete configuration.smtp;
+			delete configuration.trustedProxies;
+		}
+
+		return configuration;
+	}
+
+	#emitConfiguration(socket) {
+		try {
+			socket.emit('configuration', this.#configurationFor(socket));
+		} catch (error) {
+			console.error(`Error emitting configuration to socket:`, error);
+		}
+	}
+
+	#broadcastConfiguration() {
+		try {
+			for (const socket of this.nsp.sockets.values()) {
+				socket.emit('configuration', this.#configurationFor(socket));
+			}
+		} catch (error) {
+			console.error(`Error broadcasting configuration:`, error);
+		}
 	}
 
 	async #loadConfiguration() {

@@ -6,7 +6,7 @@ import camelcaseKeys from 'camelcase-keys';
 import Poller from '../../utils/poller.js';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
-import { getTopologies } from './topology.js';
+import { getTopologies } from '../../utils/topology.js';
 
 const BY_ID_DIR = '/dev/disk/by-id';
 const ID_PREFIXES = ['nvme-eui.', 'wwn-', 'ata-', 'scsi-', 'virtio-'];
@@ -17,6 +17,25 @@ const VOLATILE_DEVICE = /^(?:zram|ram)\d+$/;
 const CERTIFICATE_INTERVAL_MS = 10000;
 const KELVIN_OFFSET = 273;
 const DEFAULT_TEMPERATURE_THRESHOLD = 99;
+const ATA_PREFAIL_ATTRIBUTES = new Map([
+	[5, 'reallocated sectors'],
+	[187, 'uncorrectable errors reported'],
+	[188, 'command timeouts'],
+	[197, 'sectors pending reallocation'],
+	[198, 'offline uncorrectable sectors']
+]);
+const NVME_CRITICAL_WARNINGS = new Map([
+	['spare_below_threshold', 'spare capacity below threshold'],
+	['temperature_above_or_below_threshold', 'temperature out of range'],
+	['reliability_degraded', 'reliability degraded'],
+	['media_read_only', 'media switched to read-only'],
+	['volatile_memory_backup_failed', 'volatile memory backup failed'],
+	['persistent_memory_region_unreliable', 'persistent memory region unreliable']
+]);
+const WEAR_WARNING_PERCENT = 80;
+const WEAR_CRITICAL_PERCENT = 90;
+const HEALTH_CRITICAL = 'critical';
+const HEALTH_WARNING = 'warning';
 const polls = [];
 let certificatePoll = null;
 
@@ -139,10 +158,144 @@ const listBlockDevices = async () => {
 	}
 };
 
+const getAttributeLabel = (attribute) => {
+	const known = ATA_PREFAIL_ATTRIBUTES.get(attribute?.id);
+	if (known) {
+		return known;
+	}
+
+	if (attribute?.name) {
+		return attribute.name.replace(/_/g, ' ').toLowerCase();
+	}
+
+	return `attribute ${attribute?.id}`;
+};
+
+const getNvmeProblems = (smart) => {
+	const problems = [];
+	const log = smart?.nvme_smart_health_information_log;
+	const warnings = smart?.smart_status?.nvme;
+	if (!log) {
+		return problems;
+	}
+
+	const spareBelowThreshold = (Number.isFinite(log.available_spare) && Number.isFinite(log.available_spare_threshold) && log.available_spare <= log.available_spare_threshold);
+	if (spareBelowThreshold) {
+		problems.push({ severity: HEALTH_CRITICAL, text: `spare capacity down to ${log.available_spare}%` });
+	}
+
+	for (const [key, label] of NVME_CRITICAL_WARNINGS) {
+		if (warnings?.[key] && !(key === 'spare_below_threshold' && spareBelowThreshold)) {
+			problems.push({ severity: HEALTH_CRITICAL, text: label });
+		}
+	}
+
+	if (Number.isFinite(log.percentage_used) && log.percentage_used >= WEAR_WARNING_PERCENT) {
+		const severity = (log.percentage_used >= WEAR_CRITICAL_PERCENT ? HEALTH_CRITICAL : HEALTH_WARNING);
+		problems.push({ severity, text: `${log.percentage_used}% of rated endurance used` });
+	}
+
+	if (Number.isFinite(log.media_errors) && log.media_errors > 0) {
+		problems.push({ severity: HEALTH_WARNING, text: `${log.media_errors} media errors` });
+	}
+
+	return problems;
+};
+
+const getAtaProblems = (smart) => {
+	const problems = [];
+	const table = smart?.ata_smart_attributes?.table;
+	if (!Array.isArray(table)) {
+		return problems;
+	}
+
+	for (const attribute of table) {
+		const whenFailed = attribute?.when_failed;
+		const label = getAttributeLabel(attribute);
+		if (whenFailed === 'now') {
+			problems.push({ severity: HEALTH_CRITICAL, text: `${label} failing now` });
+			continue;
+		}
+
+		if (whenFailed) {
+			problems.push({ severity: HEALTH_WARNING, text: `${label} failed in the past` });
+			continue;
+		}
+
+		const raw = attribute?.raw?.value;
+		if (ATA_PREFAIL_ATTRIBUTES.has(attribute?.id) && Number.isFinite(raw) && raw > 0) {
+			problems.push({ severity: HEALTH_WARNING, text: `${raw} ${label}` });
+		}
+	}
+
+	return problems;
+};
+
+const getHealthMessage = (problems) => {
+	const text = problems.map((problem) => { return problem.text; }).join(', ');
+	return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+const getDriveHealth = (smart) => {
+	const passed = smart?.smart_status?.passed;
+	const problems = [...getNvmeProblems(smart), ...getAtaProblems(smart)];
+	if (passed === false) {
+		problems.unshift({ severity: HEALTH_CRITICAL, text: 'SMART self-assessment failed' });
+	}
+
+	if (problems.length > 0) {
+		const isCritical = problems.some((problem) => { return problem.severity === HEALTH_CRITICAL; });
+		return {
+			status: (isCritical ? HEALTH_CRITICAL : HEALTH_WARNING),
+			problems: problems.map((problem) => { return problem.text; }),
+			message: getHealthMessage(problems)
+		};
+	}
+
+	if (typeof passed === 'boolean') {
+		return { status: 'ok', problems: [], message: null };
+	}
+
+	const readable = Boolean(smart?.ata_smart_attributes?.table?.length) || Boolean(smart?.nvme_smart_health_information_log);
+	const failed = (smart?.smartctl?.messages || []).some((message) => { return message?.severity === 'error'; });
+	return { status: (!readable && failed ? 'unsupported' : 'unknown'), problems: [], message: null };
+};
+
+const isSystemDisk = (device) => {
+	return device.type === 'disk' && !VOLATILE_DEVICE.test(device.name) && isSystemDevice(device);
+};
+
+const readSystemDrive = async (device) => {
+	if (!device) {
+		return null;
+	}
+
+	try {
+		const { stdout } = await execa('smartctl', ['-a', '-j', device.path], { reject: false });
+		const smart = parseJson(stdout);
+		const size = Number(device.size) || smart?.user_capacity?.bytes || null;
+		return {
+			name: device.name,
+			path: device.path,
+			system: true,
+			model: (smart?.model_name || device.model || null),
+			serialNumber: (smart?.serial_number || device.serial || null),
+			size,
+			capacity: (smart?.user_capacity || { bytes: size }),
+			temperature: smart?.temperature?.current,
+			health: getDriveHealth(smart)
+		};
+	} catch (error) {
+		console.error('readSystemDrive:', error);
+		return null;
+	}
+};
+
 const getDrives = async (module) => {
 	try {
 		const driveIds = await getDriveIds();
-		const devices = (await listBlockDevices()).filter((device) => {
+		const blockDevices = await listBlockDevices();
+		const devices = blockDevices.filter((device) => {
 			return device.type === 'disk' && !device.rm && !device.ro && !VOLATILE_DEVICE.test(device.name) && !isSystemDevice(device);
 		});
 		const drives = await Promise.all(devices.map(async (device) => {
@@ -166,14 +319,17 @@ const getDrives = async (module) => {
 				capacity: (drive?.user_capacity || { bytes: size }),
 				temperature: drive?.temperature?.current,
 				temperatureWarningThreshold: (Number.isFinite(limits?.wctemp) ? limits.wctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD),
-				temperatureCriticalThreshold: (Number.isFinite(limits?.cctemp) ? limits.cctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD)
+				temperatureCriticalThreshold: (Number.isFinite(limits?.cctemp) ? limits.cctemp - KELVIN_OFFSET : DEFAULT_TEMPERATURE_THRESHOLD),
+				health: getDriveHealth(drive)
 			};
 		}));
-		module.setState('drives', drives);
+		const systemDrive = await readSystemDrive(blockDevices.find(isSystemDisk));
+		module.setState('drives', (systemDrive ? [...drives, systemDrive] : drives));
 	} catch (error) {
 		console.error('getDrives:', error);
 		module.setState('drives', false);
 	}
+
 	module.setState('topologies', getTopologies(module.getState('drives') || []));
 	module.emitChanged('host:drives', module.getState('drives'));
 	module.emitChanged('host:storage:topologies', module.getState('topologies'));
