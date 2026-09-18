@@ -64,7 +64,7 @@ let scanning = null;
 const SECTION_HEADERS = { dedup: 'dedup', special: 'special', logs: 'logs', cache: 'l2cache', spares: 'spares' };
 
 const vdevTypeOf = (name) => {
-	const match = /^(mirror|raidz\d?|draid\d?|replacing|spare)(?:[:-]|$)/.exec(name);
+	const match = /^(mirror|raidz\d?|replacing|spare)(?:-|$)/.exec(name);
 	if (!match) {
 		return 'disk';
 	}
@@ -379,11 +379,6 @@ const resolveDrives = async (ids, drives) => {
 };
 
 const importPool = async (job, module) => {
-	const { config } = job.data;
-	if (config?.name !== POOL_NAME) {
-		throw new Error(`Only the ${POOL_NAME} pool can be imported.`);
-	}
-
 	if ((await listPools()).includes(POOL_NAME)) {
 		throw new Error(`Pool ${POOL_NAME} is already imported.`);
 	}
@@ -401,10 +396,6 @@ const importPool = async (job, module) => {
 
 const createPool = async (job, module) => {
 	const { config } = job.data;
-	if (config?.name !== POOL_NAME) {
-		throw new Error(`Only the ${POOL_NAME} pool can be created.`);
-	}
-
 	if ((await listPools()).includes(POOL_NAME)) {
 		throw new Error(`Pool ${POOL_NAME} already exists.`);
 	}
@@ -452,12 +443,12 @@ const onConnection = (socket, module) => {
 		await module.addJob('host:apps:core:install', { username: socket.username });
 	});
 
-	socket.on('host:storage:pool:import', async (config) => {
+	socket.on('host:storage:pool:import', async () => {
 		if (!socket.isAuthenticated || !socket.isAdmin) {
 			return;
 		}
 
-		await module.addJob('host:storage:pool:import', { config, username: socket.username });
+		await module.addJob('host:storage:pool:import', { username: socket.username });
 	});
 
 	socket.on('host:storage:pool:create', async (config) => {
