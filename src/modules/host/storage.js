@@ -48,7 +48,7 @@ const CORE_APP_ENV = {
 let scanning = null;
 
 /** `zpool import` is the only way to see pools that aren't imported yet and it has no JSON output,
- * so its report is parsed by indentation:
+ * so its report is parsed by indentation into the shape `zpool status -j` gives an imported pool:
  *
  *    pool: messier
  *      id: 1234567890
@@ -57,34 +57,70 @@ let scanning = null;
  *  config:
  *
  *         messier          ONLINE      <- depth 0, the pool itself
- *           mirror-0       ONLINE      <- depth 1, a vdev
- *             nvme-eui.01  ONLINE      <- depth 2, a member drive
+ *           mirror-0       ONLINE      <- depth 2, a vdev
+ *             nvme-eui.01  ONLINE      <- depth 4, a member drive
+ *         logs                         <- depth 0, a class header; cache and spares list bare names
  */
-const parseConfig = (lines, poolName) => {
-	const vdevs = [];
-	let baseIndent = null;
-	for (const line of lines) {
-		const [name, state] = line.trim().split(/\s+/);
-		if (!name || name === poolName) {
-			continue;
-		}
+const SECTION_HEADERS = { dedup: 'dedup', special: 'special', logs: 'logs', cache: 'l2cache', spares: 'spares' };
 
-		const indent = line.search(/\S/);
-		if (baseIndent === null) {
-			baseIndent = indent;
-		}
-
-		// Anything deeper than the first entry belongs to the vdev above it; a pool of bare drives has
-		// no deeper level, so those drives become their own single-device entries.
-		if (indent > baseIndent && vdevs.length > 0) {
-			vdevs[vdevs.length - 1].devices.push({ name, state });
-			continue;
-		}
-
-		vdevs.push({ name, state, devices: [] });
+const vdevTypeOf = (name) => {
+	const match = /^(mirror|raidz\d?|draid\d?|replacing|spare)(?:[:-]|$)/.exec(name);
+	if (!match) {
+		return 'disk';
 	}
 
-	return vdevs;
+	return match[1].replace(/\d+$/, '');
+};
+
+const parseConfig = (lines, poolName) => {
+	const pool = {};
+	const stack = [];
+	let section = null;
+	let started = false;
+	for (const line of lines) {
+		if (!line.trim()) {
+			if (started) {
+				break;
+			}
+
+			continue;
+		}
+
+		started = true;
+		const depth = line.replace(/^\t/, '').search(/\S/);
+		const [name, state] = line.trim().split(/\s+/);
+		if (depth === 0 && Object.hasOwn(SECTION_HEADERS, name) && !state) {
+			section = SECTION_HEADERS[name];
+			pool[section] = {};
+			stack.length = 0;
+			continue;
+		}
+
+		const vdev = { name, vdevType: vdevTypeOf(name), state: (state || null) };
+		if (depth === 0 && name === poolName) {
+			section = null;
+			vdev.vdevType = 'root';
+			pool.vdevs = { [name]: vdev };
+			stack.length = 0;
+			stack.push({ depth, vdev });
+			continue;
+		}
+
+		while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
+			stack.pop();
+		}
+
+		const parent = stack[stack.length - 1]?.vdev;
+		if (parent) {
+			parent.vdevs = { ...parent.vdevs, [name]: vdev };
+		} else if (section) {
+			pool[section][name] = vdev;
+		}
+
+		stack.push({ depth, vdev });
+	}
+
+	return pool;
 };
 
 const parseImportablePools = (output) => {
@@ -102,7 +138,7 @@ const parseImportablePools = (output) => {
 			state: field('state'),
 			status: field('status'),
 			action: field('action'),
-			vdevs: (configIndex === -1 ? [] : parseConfig(lines.slice(configIndex + 1), name))
+			...(configIndex === -1 ? {} : parseConfig(lines.slice(configIndex + 1), name))
 		};
 	}).filter((pool) => { return Boolean(pool.name); });
 };
