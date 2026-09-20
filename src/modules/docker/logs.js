@@ -77,17 +77,11 @@ const logsConnect = async (socket, containerId) => {
 	}
 };
 
-const onConnection = (socket, module) => {
-	socket.on('docker:container:logs:connect', (containerId) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		logsConnect(socket, containerId); 
-	});
-};
-
 export default {
 	name: 'logs',
-	onConnection
+	commands: {
+		'docker:container:logs:connect': {
+			handler: (containerId, socket) => { return logsConnect(socket, containerId); }
+		}
+	}
 };

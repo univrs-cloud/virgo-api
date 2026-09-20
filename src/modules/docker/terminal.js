@@ -151,17 +151,11 @@ const findContainerShell = async (id) => {
 	return null;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('docker:container:terminal:connect', (containerId) => { 
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		terminalConnect(socket, containerId); 
-	});
-};
-
 export default {
 	name: 'terminal',
-	onConnection
+	commands: {
+		'docker:container:terminal:connect': {
+			handler: (containerId, socket) => { return terminalConnect(socket, containerId); }
+		}
+	}
 };

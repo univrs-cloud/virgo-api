@@ -242,9 +242,7 @@ const checkForUpdates = async (module) => {
 
 	module.setState('updates', updates);
 	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
-	module.emitChanged('app:updates', module.getState('updates'), {
-		filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
-	});
+	module.emitState('updates');
 };
 
 const fetchStackFiles = async (module) => {
@@ -335,18 +333,9 @@ const register = (module) => {
 	);
 };
 
-const onConnection = (socket, module) => {
-	if (socket.isAuthenticated && socket.isAdmin) {
-		if (module.getState('updates')) {
-			socket.emit('app:updates', module.getState('updates'));
-		}
-	}
-};
-
 export default {
 	name: 'scheduled',
 	register,
-	onConnection,
 	jobs: {
 		'app:updates:check': async (job, module) => {
 			await checkForUpdates(module);

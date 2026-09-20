@@ -5,6 +5,7 @@ import { Queue, Worker } from 'bullmq';
 import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
 import { digest } from '../utils/state_digest.js';
+import Poller from '../utils/poller.js';
 import * as socket from '../socket.js';
 import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
@@ -17,14 +18,37 @@ import { getQueueName, getScheduledQueueName } from '../queues.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // How long a socket goes on trusting the identity it resolved before checking it again.
 const IDENTITY_TTL = 30000;
-// What a socket is told before anyone knows who is holding it: the three answers the shell reads to
-// decide which app to build — including the login screen it builds for a stranger. Everything else
-// waits until the node knows the socket belongs to somebody, or to somewhere it lets in unasked.
-const PUBLIC_EVENTS = ['role', 'host:setupCompleted', 'host:update'];
+// What a socket is told before anyone knows who is holding it: the answers the shell reads to decide
+// which app to build — including the login screen it builds for a stranger, and the maintenance screen
+// that replaces it while the node is updating, rebooting or shutting down, which is everybody's
+// business. Everything else waits until the node knows the socket belongs to somebody, or to somewhere
+// it lets in unasked.
+const PUBLIC_EVENTS = ['role', 'host:setupCompleted', 'host:update', 'host:reboot', 'host:shutdown'];
 const ADMIN_GROUP = 'admins';
 
 const isVisible = (socket, event) => {
 	return (PUBLIC_EVENTS.includes(event) || socket.isAuthenticated || socket.isLocal);
+};
+
+const AUDIENCES = new Map([
+	['any', () => { return true; }],
+	['local', (socket) => { return socket.isLocal; }],
+	['authenticated', (socket) => { return socket.isAuthenticated; }],
+	['admin', (socket) => { return socket.isAuthenticated && socket.isAdmin; }]
+]);
+
+const tierOf = (socket) => {
+	if (socket.isAuthenticated && socket.isAdmin) {
+		return 'admin';
+	}
+	if (socket.isAuthenticated) {
+		return 'user';
+	}
+	if (socket.isLocal) {
+		return 'local';
+	}
+
+	return 'stranger';
 };
 
 /** The client, as opposed to whatever forwarded it. The last hop a trusted proxy recorded is the one
@@ -47,6 +71,8 @@ class BaseModule {
 	#scheduledQueue;
 	#scheduledWorker;
 	#plugins = [];
+	#stateDeclarations = new Map();
+	#pollers = [];
 
 	constructor(name) {
 		this.#name = name;
@@ -83,14 +109,6 @@ class BaseModule {
 		return nlp;
 	}
 
-	getState(key) {
-		return structuredClone(this.#state[key]);
-	}
-
-	setState(key, state) {
-		this.#state[key] = state;
-	}
-
 	getPlugins() {
 		return this.#plugins;
 	}
@@ -99,11 +117,133 @@ class BaseModule {
 		return this.#plugins.find((plugin) => { return plugin.name === name; });
 	}
 
+	tierOf(socket) {
+		return tierOf(socket);
+	}
+
+	matches(socket, audience = 'any') {
+		const predicate = AUDIENCES.get(audience);
+		if (!predicate) {
+			throw new Error(`[${this.#name}] Unknown audience: ${audience}`);
+		}
+
+		return predicate(socket);
+	}
+
+	hasAudience(audience = 'any') {
+		for (const socket of this.#nsp.sockets.values()) {
+			if (this.matches(socket, audience)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Broadcast only when the payload differs from the one last sent for this event, so a poll that
+	 * finds nothing new costs nothing on the wire. State is still written unconditionally, so
+	 * onConnection replays keep late joiners correct regardless of what was suppressed.
+	 * @param {string} event - The event name, also the digest key unless `key` is given
+	 * @param {*} payload - The payload to emit
+	 * @param {object} [options]
+	 * @param {string} [options.key] - Digest key, for events emitted from more than one payload shape
+	 * @param {Function} [options.normalize] - Projection applied before digesting only, to drop volatile fields
+	 * @param {Function} [options.filter] - Per-socket predicate; omit to broadcast to the namespace
+	 * @param {boolean} [options.sortArrays] - Digest arrays as sets, for sources that return them reordered
+	 * @returns {boolean} - Whether the payload changed and was emitted
+	 */
+	emitChanged(event, payload, { key = event, normalize, filter, audience, sortArrays } = {}) {
+		const next = digest(normalize ? normalize(payload) : payload, { sortArrays });
+		if (this.#digests.get(key) === next) {
+			return false;
+		}
+
+		this.#digests.set(key, next);
+		const allowed = filter ?? (audience ? (socket) => { return this.matches(socket, audience); } : null);
+		for (const socket of this.#nsp.sockets.values()) {
+			if ((!allowed || allowed(socket)) && socket.emit(event, payload)) {
+				this.#rememberDelivered(socket, event, next);
+			}
+		}
+		return true;
+	}
+
+	emitTo(audience, event, payload) {
+		for (const socket of this.#nsp.sockets.values()) {
+			if (this.matches(socket, audience)) {
+				socket.emit(event, payload);
+			}
+		}
+	}
+
+	getState(key) {
+		return structuredClone(this.#state[key]);
+	}
+
+	setState(key, state) {
+		this.#state[key] = state;
+	}
+
+	mergeState(key, patch) {
+		this.#state[key] = { ...(this.#state[key] ?? {}), ...patch };
+	}
+
+	declareState(declarations) {
+		for (const [key, declaration] of Object.entries(declarations)) {
+			this.#stateDeclarations.set(key, declaration);
+		}
+	}
+
+	emitState(key) {
+		const declaration = this.#stateDeclarations.get(key);
+		if (!declaration) {
+			throw new Error(`[${this.#name}] Undeclared state: ${key}`);
+		}
+
+		const value = this.getState(key);
+		if (!this.#isSendable(declaration, value)) {
+			return;
+		}
+
+		const projections = new Map();
+		for (const socket of this.#nsp.sockets.values()) {
+			if (!this.matches(socket, declaration.audience ?? 'any')) {
+				continue;
+			}
+
+			const { payload, digested } = this.#projectionFor(declaration, value, socket, projections);
+			this.#deliver(socket, declaration.event, payload, digested, declaration.gated ?? false);
+		}
+	}
+
+	replayState(socket) {
+		for (const [key, declaration] of this.#stateDeclarations) {
+			const value = this.getState(key);
+			if (!this.matches(socket, declaration.audience ?? 'any') || !this.#isSendable(declaration, value)) {
+				continue;
+			}
+
+			const { payload, digested } = this.#projectionFor(declaration, value, socket, new Map());
+			this.#deliver(socket, declaration.event, payload, digested, true);
+		}
+	}
+
+	registerPoller(run, interval, { audience = 'any', name } = {}) {
+		const poller = new Poller(this, run, interval, { audience, name });
+		this.#pollers.push(poller);
+		return poller;
+	}
+
+	getPoller(name) {
+		return this.#pollers.find((poller) => { return poller.name === name; });
+	}
+
 	async addJob(name, data) {
 		try {
-			await this.#queue.add(name, data);
+			return await this.#queue.add(name, data);
 		} catch (error) {
 			console.error(`Error starting job:`, error);
+			return null;
 		}
 	}
 
@@ -138,31 +278,48 @@ class BaseModule {
 		return Array.isArray(value) ? value : [];
 	}
 
-	/**
-	 * Broadcast only when the payload differs from the one last sent for this event, so a poll that
-	 * finds nothing new costs nothing on the wire. State is still written unconditionally, so
-	 * onConnection replays keep late joiners correct regardless of what was suppressed.
-	 * @param {string} event - The event name, also the digest key unless `key` is given
-	 * @param {*} payload - The payload to emit
-	 * @param {object} [options]
-	 * @param {string} [options.key] - Digest key, for events emitted from more than one payload shape
-	 * @param {Function} [options.normalize] - Projection applied before digesting only, to drop volatile fields
-	 * @param {Function} [options.filter] - Per-socket predicate; omit to broadcast to the namespace
-	 * @param {boolean} [options.sortArrays] - Digest arrays as sets, for sources that return them reordered
-	 * @returns {boolean} - Whether the payload changed and was emitted
-	 */
-	emitChanged(event, payload, { key = event, normalize, filter, sortArrays } = {}) {
-		const next = digest(normalize ? normalize(payload) : payload, { sortArrays });
-		if (this.#digests.get(key) === next) {
+	#isSendable(declaration, value) {
+		const when = declaration.when ?? ((current) => { return current !== undefined; });
+		return when(value);
+	}
+
+	#projectionFor(declaration, value, socket, projections) {
+		const tier = tierOf(socket);
+		if (declaration.perSocket || declaration.project?.length >= 3) {
+			const payload = declaration.project(value, tier, socket);
+			return { payload, digested: this.#digestOf(payload, declaration) };
+		}
+
+		const cacheKey = (declaration.project ? tier : 'shared');
+		if (!projections.has(cacheKey)) {
+			const payload = (declaration.project ? declaration.project(value, tier, socket) : value);
+			projections.set(cacheKey, { payload, digested: this.#digestOf(payload, declaration) });
+		}
+
+		return projections.get(cacheKey);
+	}
+
+	#digestOf(payload, { normalize, sortArrays } = {}) {
+		return digest(normalize ? normalize(payload) : payload, { sortArrays });
+	}
+
+	#rememberDelivered(socket, event, digested) {
+		if (!socket.data.delivered) {
+			socket.data.delivered = new Map();
+		}
+		socket.data.delivered.set(event, digested);
+	}
+
+	#deliver(socket, event, payload, digested, gated) {
+		if (gated && socket.data.delivered?.get(event) === digested) {
 			return false;
 		}
 
-		this.#digests.set(key, next);
-		for (const socket of this.#nsp.sockets.values()) {
-			if (!filter || filter(socket)) {
-				socket.emit(event, payload);
-			}
+		if (!socket.emit(event, payload)) {
+			return false;
 		}
+
+		this.#rememberDelivered(socket, event, digested);
 		return true;
 	}
 
@@ -220,13 +377,35 @@ class BaseModule {
 			// the answer is renewed as the socket is used: a read past its age starts the next check and
 			// keeps going with what it has, since nothing here can wait.
 			let resolvedAt = Date.now();
+			const tierFrom = (current) => {
+				if (!setup.isCompleted()) {
+					return 'admin';
+				}
+				if (current?.isAuthenticated && current?.isAdmin) {
+					return 'admin';
+				}
+				if (current?.isAuthenticated) {
+					return 'user';
+				}
+				if (current?.isLocal) {
+					return 'local';
+				}
+
+				return 'stranger';
+			};
 			const renew = () => {
 				if ((Date.now() - resolvedAt) < IDENTITY_TTL) {
 					return;
 				}
 
 				resolvedAt = Date.now();
-				resolve().then((current) => { account = current; }).catch(() => {});
+				const previous = tierFrom(account);
+				resolve().then((current) => {
+					account = current;
+					if (tierFrom(current) !== previous) {
+						socket.data.onTierChange?.();
+					}
+				}).catch(() => {});
 			};
 
 			// First-run setup has no account to authenticate against, so the wizard's sockets act as an
@@ -261,10 +440,26 @@ class BaseModule {
 				return (isVisible(socket, event) ? emit(event, ...args) : false);
 			};
 
+			socket.data.onTierChange = () => {
+				this.#pollers.forEach((poller) => { poller.start(); });
+				this.replayState(socket);
+				if (typeof this.onTierChange === 'function') {
+					this.onTierChange(socket);
+				}
+				this.#plugins.forEach((plugin) => {
+					if (typeof plugin.onTierChange === 'function') {
+						plugin.onTierChange(socket, this);
+					}
+				});
+			};
+
+			this.#pollers.forEach((poller) => { poller.start(); });
+			this.replayState(socket);
 			if (typeof this.onConnection === 'function') {
 				this.onConnection(socket);
 			}
 			this.#plugins.forEach((plugin) => {
+				this.#bindCommands(socket, plugin);
 				if (typeof plugin.onConnection === 'function') {
 					plugin.onConnection(socket, this);
 				}
@@ -281,6 +476,32 @@ class BaseModule {
 				});
 			});
 		});
+	}
+
+	#bindCommands(socket, plugin) {
+		for (const [event, command] of Object.entries(plugin.commands ?? {})) {
+			socket.on(event, async (...args) => {
+				const ack = (typeof args[args.length - 1] === 'function' ? args.pop() : () => {});
+				const config = args[0];
+				const isAllowed = (command.authorize ? command.authorize(socket, config) : this.matches(socket, command.audience ?? 'admin'));
+				if (!isAllowed) {
+					ack({ status: 'failed', message: 'Unauthorized' });
+					return;
+				}
+
+				try {
+					if (command.job) {
+						const job = await this.addJob(command.job, { config, username: socket.username });
+						ack(job ? { status: 'succeeded' } : { status: 'failed', message: 'Could not start job' });
+						return;
+					}
+
+					ack(await command.handler(config, socket, this));
+				} catch (error) {
+					ack({ status: 'failed', message: error.message });
+				}
+			});
+		}
 	}
 
 	async #processJob(job) {
@@ -361,6 +582,11 @@ class BaseModule {
 				this.#plugins.push(plugin);
 				if (typeof plugin.register === 'function') {
 					plugin.register(this);
+				}
+				if (Array.isArray(plugin.pollers)) {
+					plugin.pollers.forEach(({ run, interval, audience, name }) => {
+						this.registerPoller(run, interval, { audience, name });
+					});
 				}
 			} catch (error) {
 				console.error(`[${this.#name}] Failed to load plugin ${file}:`, error);

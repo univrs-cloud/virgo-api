@@ -6,6 +6,11 @@ const register = (module) => {
 		'host:updates:check',
 		{ pattern: '0 0 0 * * *' }
 	);
+
+	module.addJobSchedule(
+		'host:storage:refresh',
+		{ pattern: '0 */5 * * * *' }
+	);
 };
 
 export default {
@@ -14,6 +19,14 @@ export default {
 	jobs: {
 		'host:updates:check': async (job, module) => {
 			module.generateUpdates();
+			return ``;
+		},
+		'host:storage:refresh': async (job, module) => {
+			if (module.getPoller('storage')?.isRunning) {
+				return ``;
+			}
+
+			await module.getPlugin('polling')?.refreshStorage(module);
 			return ``;
 		}
 	}

@@ -26,6 +26,14 @@ class DockerModule extends BaseModule {
 		super('docker');
 		
 		this.#appsDir = `/${this.#appsDataset}`;
+
+		this.declareState({
+			configured: { event: 'app:configured', when: (value) => { return Boolean(value); } },
+			containers: { event: 'app:containers', gated: true, normalize: withoutRenderedStatus, sortArrays: true },
+			templates: { event: 'app:templates', gated: true, when: (value) => { return Boolean(value); } },
+			appsResourceMetrics: { event: 'app:resourceMetrics', audience: 'admin' },
+			updates: { event: 'app:updates', audience: 'admin', gated: true }
+		});
 		
 		(async () => {
 			await Promise.all([
@@ -38,14 +46,10 @@ class DockerModule extends BaseModule {
 
 		this.eventEmitter
 			.on('app:containers:fetched', async () => {
-				this.emitChanged('app:containers', this.getState('containers'), { normalize: withoutRenderedStatus, sortArrays: true });
+				this.emitState('containers');
 			})
 			.on('app:resourceMetrics:fetched', async () => {
-				for (const socket of this.nsp.sockets.values()) {
-					if (socket.isAuthenticated && socket.isAdmin) {
-						socket.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
-					}
-				}
+				this.emitState('appsResourceMetrics');
 			})
 			.on('configured:updated', async () => {
 				await this.#loadConfigured();
@@ -136,26 +140,6 @@ class DockerModule extends BaseModule {
 			.sort((first, second) => { return first.title.localeCompare(second.title); });
 	}
 
-	async onConnection(socket) {
-		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin?.startPolling(this);
-
-		if (this.getState('configured')) {
-			socket.emit('app:configured', this.getState('configured'));
-		}
-		if (this.getState('containers')) {
-			socket.emit('app:containers', this.getState('containers'));
-		}
-		if (this.getState('templates')) {
-			socket.emit('app:templates', this.getState('templates'));
-		}
-		if (socket.isAuthenticated && socket.isAdmin) {
-			if (this.getState('appsResourceMetrics')) {
-				socket.emit('app:resourceMetrics', this.getState('appsResourceMetrics'));
-			}
-		}
-	}
-
 	async #loadConfigured() {
 		try {
 			const configured = await DataService.getConfigured();
@@ -183,19 +167,11 @@ class DockerModule extends BaseModule {
 	}
 
 	#emitConfigured() {
-		if (!this.getState('configured')) {
-			return;
-		}
-
-		this.nsp.emit('app:configured', this.getState('configured'));
+		this.emitState('configured');
 	}
 
 	#emitTemplates() {
-		if (!this.getState('templates')) {
-			return;
-		}
-
-		this.emitChanged('app:templates', this.getState('templates'));
+		this.emitState('templates');
 	}
 }
 

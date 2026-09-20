@@ -34,6 +34,26 @@ class HostModule extends BaseModule {
 				next(error);
 			}
 		});
+		this.declareState({
+			setupCompleted: { event: 'host:setupCompleted' },
+			update: { event: 'host:update' },
+			system: { event: 'host:system' },
+			certificate: { event: 'host:certificate' },
+			networkStats: { event: 'host:network:stats' },
+			cpuStats: { event: 'host:cpu:stats' },
+			memory: { event: 'host:memory' },
+			drives: { event: 'host:drives' },
+			topologies: { event: 'host:storage:topologies' },
+			storage: { event: 'host:storage' },
+			importable: { event: 'host:storage:importable' },
+			snapshots: { event: 'host:storage:snapshots', audience: 'admin' },
+			time: { event: 'host:time' },
+			updates: {
+				event: 'host:updates',
+				gated: true,
+				project: (value, tier) => { return (tier === 'admin' ? value : []); }
+			}
+		});
 		this.setState('system', {
 			api: {
 				version: version
@@ -46,8 +66,7 @@ class HostModule extends BaseModule {
 		si.system(async (system) => {
 			try {
 				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json']);
-				this.setState('system', {
-					...this.getState('system'),
+				this.mergeState('system', {
 					...system,
 					zfs: { version: JSON.parse(zfsVesion).zfs_version.kernel.replace('zfs-kmod-', '') }
 				});
@@ -56,27 +75,23 @@ class HostModule extends BaseModule {
 			}
 		});
 		si.cpu((cpu) => {
-			this.setState('system', { ...this.getState('system'), cpu });
+			this.mergeState('system', { cpu });
 		});
 		this.eventEmitter
 			.on('host:updates:updated', () => {
-				for (const socket of this.nsp.sockets.values()) {
-					if (socket.isAuthenticated && socket.isAdmin) {
-						socket.emit('host:updates', this.getState('updates'));
-					}
-				};
+				this.emitState('updates');
 			})
 			.on('host:network:identifier:updated', async () => {
 				await this.#loadNetworkIdentifier();
-				this.nsp.emit('host:system', this.getState('system'));
+				this.emitState('system');
 			})
 			.on('host:network:interface:updated', async () => {
 				await this.#loadNetworkInterfaces();
-				this.nsp.emit('host:system', this.getState('system'));
+				this.emitState('system');
 			})
 			.on('host:network:virtualIp:updated', async () => {
 				await this.#loadVirtualIp();
-				this.nsp.emit('host:system', this.getState('system'));
+				this.emitState('system');
 			});
 	}
 
@@ -133,9 +148,7 @@ class HostModule extends BaseModule {
 			return;
 		}
 
-		for (const socket of this.nsp.sockets.values()) {
-			socket.emit('host:update', update);
-		}
+		this.emitState('update');
 		this.eventEmitter.emit('host:update:updated', update);
 	}
 
@@ -152,48 +165,6 @@ class HostModule extends BaseModule {
 	}
 
 	async onConnection(socket) {
-		const pollingPlugin = this.getPlugin('polling');
-		pollingPlugin?.startPolling(this);
-
-		if (this.getState('setupCompleted') !== undefined) {
-			socket.emit('host:setupCompleted', this.getState('setupCompleted'));
-		}
-		if (this.getState('update') !== undefined) {
-			socket.emit('host:update', this.getState('update'));
-		}
-		if (this.getState('system')) {
-			socket.emit('host:system', this.getState('system'));
-		}
-		if (this.getState('certificate')) {
-			socket.emit('host:certificate', this.getState('certificate'));
-		}
-		if (this.getState('networkStats')) {
-			socket.emit('host:network:stats', this.getState('networkStats'));
-		}
-		if (this.getState('cpuStats')) {
-			socket.emit('host:cpu:stats', this.getState('cpuStats'));
-		}
-		if (this.getState('memory')) {
-			socket.emit('host:memory', this.getState('memory'));
-		}
-		if (this.getState('drives')) {
-			socket.emit('host:drives', this.getState('drives'));
-		}
-		if (this.getState('topologies')) {
-			socket.emit('host:storage:topologies', this.getState('topologies'));
-		}
-		if (this.getState('storage')) {
-			socket.emit('host:storage', this.getState('storage'));
-		}
-		if (this.getState('importable')) {
-			socket.emit('host:storage:importable', this.getState('importable'));
-		}
-		if (this.getState('snapshots')) {
-			socket.emit('host:storage:snapshots', this.getState('snapshots'));
-		}
-		if (this.getState('time')) {
-			socket.emit('host:time', this.getState('time'));
-		}
 		if (this.getState('reboot') === undefined) {
 			socket.emit('host:reboot', false);
 		}
@@ -472,9 +443,9 @@ class HostModule extends BaseModule {
 			} catch (error) {
 				osInfo.domainName = false;
 			}
-			this.setState('system', { ...this.getState('system'), osInfo });
+			this.mergeState('system', { osInfo });
 		} catch (error) {
-			this.setState('system', { ...this.getState('system'), osInfo: false });
+			this.mergeState('system', { osInfo: false });
 		}
 	}
 
@@ -511,9 +482,9 @@ class HostModule extends BaseModule {
 	async #loadVirtualIp() {
 		try {
 			const configuration = await virtualIp.readConfiguration();
-			this.setState('system', {
-				...this.getState('system'),
-				virtualIp: (configuration?.address ? { ...configuration, holding: await virtualIp.isEnabled() } : null)
+			const holding = (configuration?.address ? await virtualIp.isEnabled() : false);
+			this.mergeState('system', {
+				virtualIp: (configuration?.address ? { ...configuration, holding } : null)
 			});
 		} catch (error) {
 			console.error('Error reading the virtual IP configuration:', error);
@@ -542,9 +513,9 @@ class HostModule extends BaseModule {
 					iface.speed = await this.#getInterfaceSpeed(iface.ifname);
 				}
 			}
-			this.setState('system', { ...this.getState('system'), networkInterfaces });
+			this.mergeState('system', { networkInterfaces });
 		} catch (error) {
-			this.setState('system', { ...this.getState('system'), networkInterfaces: false });
+			this.mergeState('system', { networkInterfaces: false });
 		}
 	}
 

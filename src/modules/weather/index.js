@@ -9,6 +9,10 @@ class WeatherModule extends BaseModule {
 	constructor() {
 		super('weather');
 
+		this.declareState({
+			weather: { event: 'weather', when: (value) => { return Boolean(value); } }
+		});
+
 		this.fetchWeather();
 
 		this.eventEmitter
@@ -35,12 +39,6 @@ class WeatherModule extends BaseModule {
 
 	set request(value) {
 		this.#request = value;
-	}
-
-	onConnection(socket) {
-		if (this.getState('weather')) {
-			socket.emit('weather', this.getState('weather'));
-		}
 	}
 
 	async fetchWeather() {
@@ -95,7 +93,7 @@ class WeatherModule extends BaseModule {
 		if (weather) {
 			this.fetchRetries = 3;
 			this.setState('weather', weather);
-			this.nsp.emit('weather', this.getState('weather'));
+			this.emitState('weather');
 		} else {
 			console.error(`Failed to fetch weather data after all retry attempts`);
 		}

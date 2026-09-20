@@ -61,17 +61,11 @@ const serviceLogsConnect = async (socket, serviceName) => {
 	}
 };
 
-const onConnection = (socket, module) => {
-	socket.on('host:service:logs:connect', (serviceName) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		serviceLogsConnect(socket, serviceName);
-	});
-};
-
 export default {
 	name: 'service_logs',
-	onConnection
+	commands: {
+		'host:service:logs:connect': {
+			handler: (serviceName, socket) => { return serviceLogsConnect(socket, serviceName); }
+		}
+	}
 };

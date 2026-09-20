@@ -70,9 +70,7 @@ const resolveAddress = async (peer) => {
 const publishPeers = async () => {
 	const peers = await readConfiguration();
 	hostModule?.setState('peers', peers);
-	hostModule?.emitChanged('host:peers', peers, {
-		filter: (connection) => { return connection.isAuthenticated && connection.isAdmin; }
-	});
+	hostModule?.emitChanged('host:peers', peers, { audience: 'admin' });
 	hostModule?.eventEmitter.emit('host:peers:updated', peers.map((peer) => { return peer.id; }));
 };
 
@@ -429,20 +427,6 @@ const onConnection = (socket, module) => {
 		readConfiguration().then((peers) => { socket.emit('host:peers', peers); });
 	}
 
-	socket.on('host:peer:adopt', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:peer:adopt', { config, username: socket.username });
-	});
-	socket.on('host:peer:remove', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:peer:remove', { config, username: socket.username });
-	});
 };
 
 const register = (module) => {
@@ -460,6 +444,10 @@ const register = (module) => {
 
 export default {
 	name: 'peer',
+	commands: {
+		'host:peer:remove': { job: 'host:peer:remove' },
+		'host:peer:adopt': { job: 'host:peer:adopt' }
+	},
 	register,
 	onConnection,
 	call,

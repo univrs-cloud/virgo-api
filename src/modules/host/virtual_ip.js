@@ -377,23 +377,6 @@ const announce = async () => {
 	}
 };
 
-const onConnection = (socket, module) => {
-	socket.on('host:network:virtualIp:promote', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:network:virtualIp:promote', { username: socket.username });
-	});
-	socket.on('host:network:virtualIp:handover', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:network:virtualIp:handover', { config, username: socket.username });
-	});
-};
-
 const register = (module) => {
 	announce();
 	module.eventEmitter.on('host:peer:virtualIp:received', (received) => { adoptConfiguration(received, module); });
@@ -404,8 +387,11 @@ const register = (module) => {
 
 export default {
 	name: 'virtual_ip',
+	commands: {
+		'host:network:virtualIp:handover': { job: 'host:network:virtualIp:handover' },
+		'host:network:virtualIp:promote': { job: 'host:network:virtualIp:promote' }
+	},
 	register,
-	onConnection,
 	apply,
 	validate,
 	validateAgainstPeers,

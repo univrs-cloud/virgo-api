@@ -29,11 +29,7 @@ const register = (module) => {
 				try {
 					let job = await queue.getJob(response.jobId);
 					if (job) {
-						for (const socket of module.nsp.sockets.values()) {
-							if (socket.isAuthenticated && socket.isAdmin) {
-								socket.emit('job', job);
-							}
-						}
+						module.emitTo('admin', 'job', job);
 						if (isAppUpdateJob(job)) {
 							module.eventEmitter.emit('app:update:job:updated', job);
 						}

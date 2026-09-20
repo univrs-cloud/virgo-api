@@ -94,19 +94,11 @@ const deleteShare = async (job, module) => {
 	throw new Error(`Share type "${type}" is not yet implemented.`);
 };
 
-const onConnection = (socket, module) => {
-	socket.on('share:delete', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('share:delete', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'delete',
-	onConnection,
+	commands: {
+		'share:delete': { job: 'share:delete' }
+	},
 	jobs: {
 		'share:delete': deleteShare
 	}

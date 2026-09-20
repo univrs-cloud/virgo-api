@@ -7,6 +7,11 @@ class IndexerModule extends BaseModule {
 	constructor() {
 		super('indexer');
 
+		this.declareState({
+			datasets: { event: 'indexer:datasets', audience: 'admin', gated: true, sortArrays: true, when: (value) => { return Boolean(value); } },
+			stats: { event: 'indexer:stats', audience: 'admin', gated: true, when: (value) => { return Boolean(value); } }
+		});
+
 		(async () => {
 			await Promise.all([
 				this.#loadDatasets(),
@@ -25,17 +30,6 @@ class IndexerModule extends BaseModule {
 				await this.#loadDatasets();
 				this.#emitDatasets();
 			});
-	}
-
-	onConnection(socket) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			if (this.getState('stats')) {
-				socket.emit('indexer:stats', this.getState('stats'));
-			}
-			if (this.getState('datasets')) {
-				socket.emit('indexer:datasets', this.getState('datasets'));
-			}
-		}
 	}
 
 	async #loadDatasets() {
@@ -58,24 +52,11 @@ class IndexerModule extends BaseModule {
 	}
 
 	#emitDatasets() {
-		if (!this.getState('datasets')) {
-			return;
-		}
-
-		this.emitChanged('indexer:datasets', this.getState('datasets'), {
-			sortArrays: true,
-			filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
-		});
+		this.emitState('datasets');
 	}
 
 	#emitStats() {
-		if (!this.getState('stats')) {
-			return;
-		}
-
-		this.emitChanged('indexer:stats', this.getState('stats'), {
-			filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
-		});
+		this.emitState('stats');
 	}
 }
 

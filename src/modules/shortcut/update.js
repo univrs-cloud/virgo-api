@@ -40,19 +40,11 @@ const updateShortcut = async (job, module) => {
 	return `${existingShortcut.title} shortcut updated.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('shortcut:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await module.addJob('shortcut:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'update',
-	onConnection,
+	commands: {
+		'shortcut:update': { job: 'shortcut:update' }
+	},
 	jobs: {
 		'shortcut:update': updateShortcut
 	}

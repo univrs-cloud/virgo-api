@@ -1,17 +1,12 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Queue } from 'bullmq';
 import config from '../config.js';
 
-const MODULES = [
-	'job',
-	'configuration',
-	'host',
-	'user',
-	'docker',
-	'shortcut',
-	'share',
-	'indexer',
-	'weather'
-];
+const MODULES = fs.readdirSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'modules'), { withFileTypes: true })
+	.filter((entry) => { return entry.isDirectory() && fs.existsSync(path.join(entry.parentPath, entry.name, 'index.js')); })
+	.map((entry) => { return entry.name; });
 
 const getQueueName = (moduleName) => `${moduleName}-jobs`;
 

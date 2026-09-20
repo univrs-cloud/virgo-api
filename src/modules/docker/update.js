@@ -72,27 +72,15 @@ const updateApp = async (job, module) => {
 	});
 	module.setState('updates', updates);
 	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('app:updates', module.getState('updates'));
-		}
-	}
+	module.emitState('updates');
 	return `${existingApp.title} updated.`;
-};
-
-const onConnection = (socket, module) => {
-	socket.on('app:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('app:update', { config, username: socket.username });
-	});
 };
 
 export default {
 	name: 'update',
-	onConnection,
+	commands: {
+		'app:update': { job: 'app:update' }
+	},
 	jobs: {
 		'app:update': updateApp
 	}

@@ -425,43 +425,21 @@ const register = (module) => {
 };
 
 const onConnection = (socket, module) => {
-	socket.on('host:storage:importable:fetch', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
 
-		// Drives can settle after boot and disks get plugged in mid-wizard, so the answer is re-taken
-		// on request rather than trusting the one from startup.
-		scanImportablePools(module);
-	});
 
-	socket.on('host:apps:core:install', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
 
-		await module.addJob('host:apps:core:install', { username: socket.username });
-	});
-
-	socket.on('host:storage:pool:import', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:storage:pool:import', { username: socket.username });
-	});
-
-	socket.on('host:storage:pool:create', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:storage:pool:create', { config, username: socket.username });
-	});
 };
 
 export default {
 	name: 'storage',
+	commands: {
+		// Drives can settle after boot and disks get plugged in mid-wizard, so the answer is re-taken
+		// on request rather than trusting the one from startup.
+		'host:storage:importable:fetch': { handler: (config, socket, module) => { scanImportablePools(module); } },
+		'host:apps:core:install': { job: 'host:apps:core:install' },
+		'host:storage:pool:import': { job: 'host:storage:pool:import' },
+		'host:storage:pool:create': { job: 'host:storage:pool:create' }
+	},
 	register,
 	onConnection,
 	jobs: {

@@ -2,9 +2,7 @@ import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
-import Poller from '../../utils/poller.js';
 
-const polls = [];
 let appsNetworkSnapshot = {};
 
 const getContainers = async (module) => {
@@ -188,19 +186,14 @@ const register = (module) => {
 			await getAppsComputeResourceMetrics(module);
 		});
 	
-	polls.push(new Poller(module, getContainers, 2000));
-	polls.push(new Poller(module, getAppsComputeResourceMetrics, 2000));
-	polls.push(new Poller(module, getAppsStorageResouceMetrics, 60000));
-};
-
-const startPolling = () => {
-	polls.forEach((poll) => {
-		poll.start();
-	});
 };
 
 export default {
 	name: 'polling',
 	register,
-	startPolling
+	pollers: [
+		{ run: getContainers, interval: 2000 },
+		{ run: getAppsComputeResourceMetrics, interval: 2000 },
+		{ run: getAppsStorageResouceMetrics, interval: 60000 }
+	]
 };

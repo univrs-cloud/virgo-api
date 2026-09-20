@@ -99,19 +99,11 @@ const installApp = async (job, module) => {
 	return `${template.title} installed.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('app:install', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('app:install', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'install',
-	onConnection,
+	commands: {
+		'app:install': { job: 'app:install' }
+	},
 	jobs: {
 		'app:install': installApp
 	}

@@ -17,19 +17,11 @@ const unlockUser = async (job, module) => {
 	return `User ${config.username} unlocked.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('user:unlock', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await module.addJob('user:unlock', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'unlock',
-	onConnection,
+	commands: {
+		'user:unlock': { job: 'user:unlock' }
+	},
 	jobs: {
 		'user:unlock': unlockUser
 	}

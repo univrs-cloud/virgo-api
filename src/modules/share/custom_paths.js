@@ -68,17 +68,11 @@ const getCustomPaths = () => {
 	];
 };
 
-const onConnection = (socket) => {
-	socket.on('share:paths:custom', () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		socket.emit('share:paths:custom', getCustomPaths());
-	});
-};
-
 export default {
 	name: 'custom_paths',
-	onConnection
+	commands: {
+		'share:paths:custom': {
+			handler: (config, socket) => { socket.emit('share:paths:custom', getCustomPaths()); }
+		}
+	}
 };
