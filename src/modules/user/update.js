@@ -1,6 +1,10 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import * as yaml from 'js-yaml';
+const isSelfOrAdmin = (socket, config) => {
+	return (socket.isAuthenticated && (socket.isAdmin || socket.username === config?.username));
+};
+
 const updateUser = async (job, module) => {
 	const { config } = job.data;
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
@@ -38,23 +42,11 @@ const updateUser = async (job, module) => {
 	}
 };
 
-const onConnection = (socket, module) => {
-	socket.on('user:update', async (config) => {
-		if (!socket.isAuthenticated) {
-			return;
-		}
-
-		if (!socket.isAdmin && socket.username !== config.username) {
-			return;
-		}
-		
-		await module.addJob('user:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'update',
-	onConnection,
+	commands: {
+		'user:update': { job: 'user:update', authorize: isSelfOrAdmin }
+	},
 	jobs: {
 		'user:update': updateUser
 	}

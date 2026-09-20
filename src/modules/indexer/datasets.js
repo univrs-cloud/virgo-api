@@ -64,19 +64,11 @@ const updateDatasetConfig = async (job, module) => {
 	return config.optedIn ? `${name} added to indexer list.` : `${name} removed from indexer list.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('indexer:dataset:config:update', (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		module.addJob('indexer:dataset:config:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'datasets',
-	onConnection,
+	commands: {
+		'indexer:dataset:config:update': { job: 'indexer:dataset:config:update' }
+	},
 	jobs: {
 		'indexer:dataset:config:update': updateDatasetConfig
 	}

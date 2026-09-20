@@ -3,7 +3,6 @@ import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
-import Poller from '../../utils/poller.js';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
 import { getTopologies } from '../../utils/topology.js';
@@ -36,7 +35,6 @@ const WEAR_WARNING_PERCENT = 80;
 const WEAR_CRITICAL_PERCENT = 90;
 const HEALTH_CRITICAL = 'critical';
 const HEALTH_WARNING = 'warning';
-const polls = [];
 let certificatePoll = null;
 
 const parseJson = (stdout) => {
@@ -413,9 +411,7 @@ const getSnapshots = async (module) => {
 		console.error('getSnapshots:', error);
 		module.setState('snapshots', false);
 	}
-	module.emitChanged('host:storage:snapshots', module.getState('snapshots'), {
-		filter: (socket) => { return socket.isAuthenticated && socket.isAdmin; }
-	});
+	module.emitChanged('host:storage:snapshots', module.getState('snapshots'), { audience: 'admin' });
 };
 
 const getTime = (module) => {
@@ -447,27 +443,22 @@ const register = (module) => {
 			return;
 		}
 
-		certificatePoll = certificatePoll || new Poller(module, getCertificate, CERTIFICATE_INTERVAL_MS);
+		certificatePoll = certificatePoll || module.registerPoller(getCertificate, CERTIFICATE_INTERVAL_MS);
 		certificatePoll.start();
-	});
-
-	polls.push(new Poller(module, getNetworkStats, 2000));
-	polls.push(new Poller(module, getCpuStats, 5000));
-	polls.push(new Poller(module, getMemory, 10000));
-	polls.push(new Poller(module, getDrives, 60000));
-	polls.push(new Poller(module, getStorage, 60000));
-	polls.push(new Poller(module, getSnapshots, 60 * 60 * 1000));
-	polls.push(new Poller(module, getTime, 60000));
-};
-
-const startPolling = () => {
-	polls.forEach((poll) => {
-		poll.start();
 	});
 };
 
 export default {
 	name: 'polling',
 	register,
-	startPolling
+	refreshStorage: getStorage,
+	pollers: [
+		{ run: getNetworkStats, interval: 2000 },
+		{ run: getCpuStats, interval: 5000 },
+		{ run: getMemory, interval: 10000 },
+		{ run: getDrives, interval: 60000 },
+		{ run: getStorage, interval: 60000, name: 'storage' },
+		{ run: getSnapshots, interval: 60 * 60 * 1000, audience: 'admin' },
+		{ run: getTime, interval: 60000 }
+	]
 };

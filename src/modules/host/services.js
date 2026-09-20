@@ -90,11 +90,7 @@ const unitType = (serviceName) => { return serviceName.split('.').pop(); };
 
 const broadcastServices = async (module) => {
 	await loadServices(module);
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('host:system:services', module.getState('services'));
-		}
-	}
+	module.emitState('services');
 };
 
 const enableService = async (job, module) => {
@@ -209,6 +205,9 @@ const restartService = async (job, module) => {
 };
 
 const register = (module) => {
+	module.declareState({
+		services: { event: 'host:system:services', audience: 'admin' }
+	});
 	broadcastServices(module);
 
 	module.eventEmitter
@@ -217,82 +216,19 @@ const register = (module) => {
 		});
 };
 
-const onConnection = (socket, module) => {
-	if (socket.isAuthenticated && socket.isAdmin) {
-		if (module.getState('services')) {
-			socket.emit('host:system:services', module.getState('services'));
-		}
-	}
-
-	socket.on('host:system:services:fetch', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await broadcastServices(module);
-	});
-
-	socket.on('host:system:service:enable', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:enable', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:enable-start', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:enable-start', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:disable', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:disable', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:disable-stop', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:disable-stop', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:start', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:start', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:stop', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:stop', { config, username: socket.username });
-	});
-
-	socket.on('host:system:service:restart', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:system:service:restart', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'services',
+	commands: {
+		'host:system:services:fetch': { handler: (config, socket, module) => { return broadcastServices(module); } },
+		'host:system:service:enable': { job: 'host:system:service:enable' },
+		'host:system:service:enable-start': { job: 'host:system:service:enable-start' },
+		'host:system:service:disable': { job: 'host:system:service:disable' },
+		'host:system:service:disable-stop': { job: 'host:system:service:disable-stop' },
+		'host:system:service:start': { job: 'host:system:service:start' },
+		'host:system:service:stop': { job: 'host:system:service:stop' },
+		'host:system:service:restart': { job: 'host:system:service:restart' }
+	},
 	register,
-	onConnection,
 	jobs: {
 		'host:system:service:enable': enableService,
 		'host:system:service:enable-start': enableStartService,

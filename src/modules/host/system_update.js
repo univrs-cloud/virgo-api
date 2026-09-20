@@ -2,38 +2,22 @@ import fs from 'fs/promises';
 import { execa } from 'execa';
 
 const checkUpdates = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	if (module.getState('checkUpdates')) {
 		return;
 	}
 
 	module.setState('checkUpdates', true);
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('host:updates:check', module.getState('checkUpdates'));
-		}
-	}
+	module.emitState('checkUpdates');
 	try {
 		await execa('apt', ['update', '--allow-releaseinfo-change']);
 		await module.generateUpdates();
 	} catch (error) {
 	}
 	module.setState('checkUpdates', false);
-	for (const socket of module.nsp.sockets.values()) {
-		if (socket.isAuthenticated && socket.isAdmin) {
-			socket.emit('host:updates:check', module.getState('checkUpdates'));
-		}
-	}
+	module.emitState('checkUpdates');
 };
 
 const update = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	if (await module.isUpdateInProgress()) {
 		return;
 	}
@@ -79,10 +63,6 @@ const update = async (socket, module) => {
 };
 
 const completeUpdate = async (socket, module) => {
-	if (!socket.isAuthenticated || !socket.isAdmin) {
-		return;
-	}
-
 	module.resetUpdateTracking();
 	for (const file of [module.updateExitStatusFile, module.updatePidFile, module.updateFile, module.updateProgressFile]) {
 		await fs.writeFile(file, '');
@@ -91,28 +71,18 @@ const completeUpdate = async (socket, module) => {
 	module.emitUpdateState();
 };
 
-const onConnection = (socket, module) => {
-	if (module.getState('updates')) {
-		socket.emit('host:updates', (socket.isAuthenticated && socket.isAdmin ? module.getState('updates') : []));
-	}
-	if (socket.isAuthenticated && socket.isAdmin) {
-		if (module.getState('checkUpdates')) {
-			socket.emit('host:updates:check', module.getState('checkUpdates'));
-		}
-	}
-
-	socket.on('host:updates:check', () => { 
-		checkUpdates(socket, module); 
-	});
-	socket.on('host:update', () => {
-		update(socket, module);
-	});
-	socket.on('host:update:complete', async () => { 
-		await completeUpdate(socket, module); 
+const register = (module) => {
+	module.declareState({
+		checkUpdates: { event: 'host:updates:check', audience: 'admin' }
 	});
 };
 
 export default {
 	name: 'system_update',
-	onConnection
+	register,
+	commands: {
+		'host:updates:check': { handler: (config, socket, module) => { return checkUpdates(socket, module); } },
+		'host:update': { handler: (config, socket, module) => { return update(socket, module); } },
+		'host:update:complete': { handler: (config, socket, module) => { return completeUpdate(socket, module); } }
+	}
 };

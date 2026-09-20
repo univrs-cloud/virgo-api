@@ -294,27 +294,13 @@ const updateInterface = async (job, module) => {
 	return `Network interface updated.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('host:network:identifier:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:network:identifier:update', { config, username: socket.username });
-	});
-	socket.on('host:network:interface:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('host:network:interface:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'network',
+	commands: {
+		'host:network:interface:update': { job: 'host:network:interface:update' },
+		'host:network:identifier:update': { job: 'host:network:identifier:update' }
+	},
 	// register, // can't use register to load and emit on change because network is part of system state
-	onConnection,
 	jobs: {
 		'host:network:identifier:update': updateIdentifier,
 		'host:network:interface:update': updateInterface

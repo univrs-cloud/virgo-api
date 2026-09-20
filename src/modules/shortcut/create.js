@@ -33,19 +33,11 @@ const createShortcut = async (job, module) => {
 	return `${config.title} shortcut created.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('shortcut:create', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await module.addJob('shortcut:create', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'create',
-	onConnection,
+	commands: {
+		'shortcut:create': { job: 'shortcut:create' }
+	},
 	jobs: {
 		'shortcut:create': createShortcut
 	}

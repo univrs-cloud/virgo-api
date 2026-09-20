@@ -18,6 +18,10 @@ class ShareModule extends BaseModule {
 	constructor() {
 		super('share');
 
+		this.declareState({
+			shares: { event: 'shares', gated: true, when: (value) => { return Boolean(value); } }
+		});
+
 		(async () => {
 			await this.#loadShares();
 			this.#emitShares();
@@ -48,12 +52,6 @@ class ShareModule extends BaseModule {
 
 	get timeMachinesDataset() {
 		return this.#timeMachinesDataset;
-	}
-
-	onConnection(socket) {
-		if (this.getState('shares')) {
-			socket.emit('shares', this.getState('shares'));
-		}
 	}
 
 	async findFolderShareConfigFile(name) {
@@ -245,11 +243,7 @@ class ShareModule extends BaseModule {
 	}
 
 	#emitShares() {
-		if (!this.getState('shares')) {
-			return;
-		}
-
-		this.emitChanged('shares', this.getState('shares'));
+		this.emitState('shares');
 	}
 }
 

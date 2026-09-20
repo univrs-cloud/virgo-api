@@ -2,7 +2,7 @@ import BaseModule from '../base.js';
 import { QUEUE_NAMES } from '../../queues.js';
 
 // Exclude job-jobs (self) and weather-jobs from monitoring
-const EXCLUDED_FROM_MONITORING = ['job-jobs', 'weather-jobs'];
+const EXCLUDED_FROM_MONITORING = ['job-jobs', 'weather-jobs', 'runtime-jobs'];
 
 class JobModule extends BaseModule {
 	#queues = QUEUE_NAMES.filter((name) => {

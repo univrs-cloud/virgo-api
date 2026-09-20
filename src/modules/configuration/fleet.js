@@ -451,42 +451,6 @@ const register = (module) => {
 	startIfEnabled();
 };
 
-const onConnection = (socket, module) => {
-	socket.on('configuration:fleet:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		await module.addJob('fleet:register', { config, username: socket.username });
-	});
-
-	socket.on('configuration:fleet:enable', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		await module.addJob('fleet:enable', { username: socket.username });
-	});
-
-	socket.on('configuration:fleet:domain:availability', async ({ label } = {}, ack = () => {}) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			ack({ status: 'failed', message: 'Unauthorized' });
-			return;
-		}
-
-		try {
-			ack({ status: 'succeeded', ...await checkDomainAvailability(label) });
-		} catch (error) {
-			ack({ status: 'failed', message: error.message });
-		}
-	});
-
-	socket.on('configuration:fleet:disable', async () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		await module.addJob('fleet:disable', { username: socket.username });
-	});
-};
-
 const waitForFleet = async () => {
 	const deadline = Date.now() + ACME_CONNECT_TIMEOUT_MS;
 	while (!fleetSocket?.connected && Date.now() < deadline) {
@@ -513,8 +477,15 @@ export const relayAcmeChallenge = async (action, { fqdn, value }) => {
 
 export default {
 	name: 'fleet',
+	commands: {
+		'configuration:fleet:domain:availability': {
+			handler: async ({ label } = {}) => { return { status: 'succeeded', ...await checkDomainAvailability(label) }; }
+		},
+		'configuration:fleet:update': { job: 'fleet:register' },
+		'configuration:fleet:enable': { job: 'fleet:enable' },
+		'configuration:fleet:disable': { job: 'fleet:disable' }
+	},
 	register,
-	onConnection,
 	jobs: {
 		'fleet:register': registerFleet,
 		'fleet:enable': enableFleet,

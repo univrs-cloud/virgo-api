@@ -13,19 +13,11 @@ const deleteShortcut = async (job, module) => {
 	return `${existingShortcut.title} shortcut deleted.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('shortcut:delete', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await module.addJob('shortcut:delete', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'delete',
-	onConnection,
+	commands: {
+		'shortcut:delete': { job: 'shortcut:delete' }
+	},
 	jobs: {
 		'shortcut:delete': deleteShortcut
 	}

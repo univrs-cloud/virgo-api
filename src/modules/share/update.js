@@ -96,19 +96,11 @@ const updateShare = async (job, module) => {
 	throw new Error(`Share type "${type}" is not yet implemented.`);
 };
 
-const onConnection = (socket, module) => {
-	socket.on('share:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('share:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'update',
-	onConnection,
+	commands: {
+		'share:update': { job: 'share:update' }
+	},
 	jobs: {
 		'share:update': updateShare
 	}

@@ -1,17 +1,24 @@
 import { execa } from 'execa';
 
+const register = (module) => {
+	module.declareState({
+		reboot: { event: 'host:reboot' },
+		shutdown: { event: 'host:shutdown' }
+	});
+};
+
 const reboot = async (socket, module) => {
 	if (module.getState('reboot') !== undefined) {
 		return;
 	}
 
 	module.setState('reboot', true);
-	module.nsp.emit('host:reboot', true);
+	module.emitState('reboot');
 	try {
 		await execa('reboot');
 	} catch (error) {
 		module.setState('reboot', false);
-		module.nsp.emit('host:reboot', false);
+		module.emitState('reboot');
 	}
 };
 
@@ -21,33 +28,20 @@ const shutdown = async (socket, module) => {
 	}
 
 	module.setState('shutdown', true);
-	module.nsp.emit('host:shutdown', true);
+	module.emitState('shutdown');
 	try {
 		await execa('shutdown', ['-h', 'now']);
 	} catch (error) {
 		module.setState('shutdown', false);
-		module.nsp.emit('host:shutdown', false);
+		module.emitState('shutdown');
 	}
-};
-
-const onConnection = (socket, module) => {
-	socket.on('host:reboot', () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		reboot(socket, module); 
-	});
-	socket.on('host:shutdown', () => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		shutdown(socket, module); 
-	});
 };
 
 export default {
 	name: 'power_management',
-	onConnection
+	register,
+	commands: {
+		'host:reboot': { handler: (config, socket, module) => { return reboot(socket, module); } },
+		'host:shutdown': { handler: (config, socket, module) => { return shutdown(socket, module); } }
+	}
 };

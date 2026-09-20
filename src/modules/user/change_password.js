@@ -5,6 +5,10 @@ import linuxSysUser from 'linux-sys-user';
 import * as setup from '../../utils/setup_state.js';
 
 const linuxUser = linuxSysUser.promise();
+const isSelfOrAdmin = (socket, config) => {
+	return (socket.isAuthenticated && (socket.isAdmin || socket.username === config?.username));
+};
+
 const changePassword = async (job, module) => {
 	const { config } = job.data;
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
@@ -53,23 +57,11 @@ const changePassword = async (job, module) => {
 	}
 };
 
-const onConnection = (socket, module) => {
-	socket.on('user:password', async (config) => {
-		if (!socket.isAuthenticated) {
-			return;
-		}
-
-		if (!socket.isAdmin && socket.username !== config.username) {
-			return;
-		}
-		
-		await module.addJob('user:changePassword', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'change_password',
-	onConnection,
+	commands: {
+		'user:password': { job: 'user:changePassword', authorize: isSelfOrAdmin }
+	},
 	jobs: {
 		'user:changePassword': changePassword
 	}

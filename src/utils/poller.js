@@ -3,25 +3,47 @@ class Poller {
 	#module;
 	#callback;
 	#interval;
+	#audience;
+	#name;
+	#idleTtl;
 	#isRunning = false;
 	#idleTimeout = null;
 	#pollingTimeout = null;
-	
-	constructor(module, callback, interval) {
+	#generation = 0;
+
+	constructor(module, callback, interval, { audience = 'any', idleTtl, name } = {}) {
 		this.#module = module;
 		this.#callback = callback;
 		this.#interval = interval;
+		this.#audience = audience;
+		this.#name = name;
+		this.#idleTtl = idleTtl ?? this.#CACHE_TTL;
 
 		this.start();
 	}
 
+	get audience() {
+		return this.#audience;
+	}
+
+	get name() {
+		return this.#name;
+	}
+
+	get isRunning() {
+		return this.#isRunning;
+	}
+
 	start() {
+		clearTimeout(this.#idleTimeout);
+		this.#idleTimeout = null;
 		if (this.#isRunning) {
 			return;
 		}
 
 		this.#isRunning = true;
-		this.#loop();
+		this.#generation++;
+		this.#loop(this.#generation);
 	}
 
 	stop() {
@@ -29,6 +51,7 @@ class Poller {
 	}
 
 	#stop() {
+		this.#generation++;
 		this.#isRunning = false;
 		clearTimeout(this.#idleTimeout);
 		this.#idleTimeout = null;
@@ -36,11 +59,22 @@ class Poller {
 		this.#pollingTimeout = null;
 	}
 
-	async #loop() {
-		const hasClients = this.#module.nsp.server.engine.clientsCount > 0;
+	async #loop(generation) {
+		if (generation !== this.#generation) {
+			return;
+		}
+
+		const hasClients = this.#module.hasAudience(this.#audience);
 		if (!hasClients) {
 			if (this.#idleTimeout === null) {
-				this.#idleTimeout = setTimeout(() => { this.#stop(); }, this.#CACHE_TTL);
+				this.#idleTimeout = setTimeout(() => {
+					this.#idleTimeout = null;
+					if (this.#module.hasAudience(this.#audience)) {
+						return;
+					}
+
+					this.#stop();
+				}, this.#idleTtl);
 			}
 		} else {
 			if (this.#idleTimeout !== null) {
@@ -55,8 +89,8 @@ class Poller {
 			console.error(error);
 		}
 
-		if (this.#isRunning) {
-			this.#pollingTimeout = setTimeout(() => { this.#loop(); }, this.#interval);
+		if (this.#isRunning && generation === this.#generation) {
+			this.#pollingTimeout = setTimeout(() => { this.#loop(generation); }, this.#interval);
 		}
 	}
 }

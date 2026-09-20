@@ -88,20 +88,12 @@ const register = (module) => {
 		.on('configuration:updated', updateNotificationConfigurationFiles);
 };
 
-const onConnection = (socket, module) => {
-	socket.on('configuration:smtp:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('smtp:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'smtp',
+	commands: {
+		'configuration:smtp:update': { job: 'smtp:update' }
+	},
 	register,
-	onConnection,
 	updateNotificationConfigurationFiles,
 	jobs: {
 		'smtp:update': updateSmtpConfiguration

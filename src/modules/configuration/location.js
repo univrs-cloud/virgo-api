@@ -9,19 +9,11 @@ const updateLocation = async (job, module) => {
 	return `Location saved.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('configuration:location:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-		
-		await module.addJob('location:update', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'location',
-	onConnection,
+	commands: {
+		'configuration:location:update': { job: 'location:update' }
+	},
 	jobs: {
 		'location:update': updateLocation
 	}

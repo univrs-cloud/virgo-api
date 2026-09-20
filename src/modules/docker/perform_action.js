@@ -98,26 +98,12 @@ const performServiceAction = async (job, module) => {
 	return `${serviceName} service ${actionVerbs.pastTense}.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('app:performAction', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('app:performAction', { config, username: socket.username });
-	});
-	socket.on('app:service:performAction', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('app:service:performAction', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'perform_action',
-	onConnection,
+	commands: {
+		'app:service:performAction': { job: 'app:service:performAction' },
+		'app:performAction': { job: 'app:performAction' }
+	},
 	jobs: {
 		'app:performAction': performAppAction,
 		'app:service:performAction': performServiceAction

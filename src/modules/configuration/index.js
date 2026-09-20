@@ -3,9 +3,22 @@ import DataService from '../../database/data_service.js';
 import * as trustedProxy from '../../utils/trusted_proxy.js';
 import * as fleetState from '../../utils/fleet_state.js';
 
+const configurationFor = (configuration, tier) => {
+	const { smtp, trustedProxies, ...visible } = (configuration ?? {});
+	return (tier === 'admin' ? (configuration ?? {}) : visible);
+};
+
 class ConfigurationModule extends BaseModule {
 	constructor() {
 		super('configuration');
+
+		this.declareState({
+			configuration: {
+				event: 'configuration',
+				when: () => { return true; },
+				project: configurationFor
+			}
+		});
 
 		(async () => {
 			await this.#loadConfiguration();
@@ -19,33 +32,9 @@ class ConfigurationModule extends BaseModule {
 			});
 	}
 
-	onConnection(socket) {
-		this.#emitConfiguration(socket);
-	}
-
-	#configurationFor(socket) {
-		const configuration = this.getState('configuration') || {};
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			delete configuration.smtp;
-			delete configuration.trustedProxies;
-		}
-
-		return configuration;
-	}
-
-	#emitConfiguration(socket) {
-		try {
-			socket.emit('configuration', this.#configurationFor(socket));
-		} catch (error) {
-			console.error(`Error emitting configuration to socket:`, error);
-		}
-	}
-
 	#broadcastConfiguration() {
 		try {
-			for (const socket of this.nsp.sockets.values()) {
-				socket.emit('configuration', this.#configurationFor(socket));
-			}
+			this.emitState('configuration');
 		} catch (error) {
 			console.error(`Error broadcasting configuration:`, error);
 		}

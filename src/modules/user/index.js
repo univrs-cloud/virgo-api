@@ -13,6 +13,18 @@ class UserModule extends BaseModule {
 	constructor() {
 		super('user');
 
+		this.declareState({
+			users: {
+				event: 'users',
+				audience: 'authenticated',
+				perSocket: true,
+				when: (value) => { return Boolean(value); },
+				project: (users, tier, socket) => {
+					return (tier === 'admin' ? users : this.toArray(users).filter((user) => { return user.username === socket.username; }));
+				}
+			}
+		});
+
 		(async () => {
 			await this.#loadUsers();
 			this.#emitUsers();
@@ -31,14 +43,6 @@ class UserModule extends BaseModule {
 
 	get cost() {
 		return this.#cost;
-	}
-
-	onConnection(socket) {
-		if (!this.getState('users')) {
-			return;
-		}
-
-		this.#emitUsersToSocket(socket);
 	}
 
 	async setSambaUserPassword(username, password) {
@@ -98,26 +102,7 @@ class UserModule extends BaseModule {
 	}
 
 	#emitUsers() {
-		if (!this.getState('users')) {
-			return;
-		}
-
-		this.nsp.sockets.forEach((socket) => {
-			this.#emitUsersToSocket(socket);
-		});
-	}
-
-	#emitUsersToSocket(socket) {
-		if (!socket.isAuthenticated) {
-			return;
-		}
-
-		if (!socket.isAdmin) {
-			socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.username === socket.username; }));
-			return;
-		}
-
-		socket.emit('users', this.getState('users'));
+		this.emitState('users');
 	}
 }
 

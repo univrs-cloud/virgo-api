@@ -84,33 +84,13 @@ const deleteTrustedProxy = async (job, module) => {
 	return `Trusted proxy ${address} deleted.`;
 };
 
-const onConnection = (socket, module) => {
-	socket.on('configuration:trustedProxy:add', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('trustedProxy:add', { config, username: socket.username });
-	});
-	socket.on('configuration:trustedProxy:update', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('trustedProxy:update', { config, username: socket.username });
-	});
-	socket.on('configuration:trustedProxy:delete', async (config) => {
-		if (!socket.isAuthenticated || !socket.isAdmin) {
-			return;
-		}
-
-		await module.addJob('trustedProxy:delete', { config, username: socket.username });
-	});
-};
-
 export default {
 	name: 'trusted_proxy',
-	onConnection,
+	commands: {
+		'configuration:trustedProxy:update': { job: 'trustedProxy:update' },
+		'configuration:trustedProxy:add': { job: 'trustedProxy:add' },
+		'configuration:trustedProxy:delete': { job: 'trustedProxy:delete' }
+	},
 	jobs: {
 		'trustedProxy:add': addTrustedProxy,
 		'trustedProxy:update': updateTrustedProxy,
