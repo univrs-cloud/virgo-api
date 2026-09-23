@@ -32,6 +32,14 @@ function createApp() {
 function createAcmeApp() {
 	const app = express();
 	app.disable('x-powered-by');
+	app.use((request, response, next) => {
+		if (String(request.socket?.remoteAddress || '').replace(/^::ffff:/i, '') !== config.acme.caller) {
+			response.status(403).json({ message: 'Forbidden' });
+			return;
+		}
+
+		next();
+	});
 	app.use(express.json({ limit: '16kb' }));
 	app.post('/acme/present', challenge('present'));
 	app.post('/acme/cleanup', challenge('cleanup'));
