@@ -11,6 +11,10 @@ const isSelfOrAdmin = (socket, config) => {
 
 const changePassword = async (job, module) => {
 	const { config } = job.data;
+	if (/[\r\n]/.test(String(config.password ?? ''))) {
+		throw new Error('Password cannot contain line breaks.');
+	}
+
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);
