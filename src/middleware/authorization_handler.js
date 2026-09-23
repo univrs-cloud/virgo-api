@@ -57,7 +57,6 @@ const writeAccount = async (req, res, identity) => {
 };
 
 export default async (req, res, next) => {
-	res.header('Access-Control-Allow-Origin', '*');
 	// The login screen and the routes it signs in through answer whoever asks, so there is nothing to
 	// ask about them — and asking anyway leaves Authelia's log full of refusals nobody acted on.
 	const isPage = (req.method === 'GET' && req.headers.accept?.includes('text/html'));
