@@ -7,6 +7,10 @@ import linuxSysUser from 'linux-sys-user';
 const linuxUser = linuxSysUser.promise();
 const createUser = async (job, module) => {
 	const { config } = job.data;
+	if (/[\r\n]/.test(String(config.password ?? ''))) {
+		throw new Error('Password cannot contain line breaks.');
+	}
+
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (user) {
 		throw new Error(`User already exists.`);
