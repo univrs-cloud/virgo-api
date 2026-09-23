@@ -1,8 +1,28 @@
 import { Server } from 'socket.io';
 import * as readiness from './utils/readiness.js';
+import * as trustedProxy from './utils/trusted_proxy.js';
 import { isLoopbackAddress } from './utils/private_address.js';
 
 let io = null;
+
+const isSameOrigin = (request) => {
+	const origin = request?.headers?.origin;
+	if (!origin) {
+		return true;
+	}
+
+	const forwarded = (trustedProxy.isFromTrustedProxy(request.socket?.remoteAddress) ? request.headers['x-forwarded-host'] : undefined);
+	const host = (forwarded || request.headers.host || '').split(',')[0].trim();
+	if (!host) {
+		return false;
+	}
+
+	try {
+		return new URL(origin).host === host;
+	} catch (error) {
+		return false;
+	}
+};
 
 const gateStarting = (server) => {
 	const wrap = (event, deny) => {
@@ -34,10 +54,7 @@ const initializeSocket = (server) => {
 	
 	io = new Server(server, {
 		path: '/api',
-		cors: {
-			origin: true,
-			credentials: true
-		}
+		allowRequest: (request, callback) => { callback(null, isSameOrigin(request)); }
 	});
 	gateStarting(server);
 
