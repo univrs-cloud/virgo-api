@@ -9,6 +9,17 @@ import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
 
 const streamPipeline = promisify(stream.pipeline);
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const envLine = (key, value) => {
+	const escaped = String(value ?? '')
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/\$/g, '\\$')
+		.replace(/\r/g, '\\r')
+		.replace(/\n/g, '\\n');
+	return `${key}="${escaped}"`;
+};
 
 const installApp = async (job, module) => {
 	const { config } = job.data;
@@ -49,7 +60,15 @@ const installApp = async (job, module) => {
 	}
 	
 	const stack = await response.text();
-	let env = Object.entries(config?.env || {}).map(([key, value]) => `${key}='${value}'`).join('\n');
+	const env = Object.entries(config?.env || {})
+		.map(([key, value]) => {
+			if (!ENV_KEY_PATTERN.test(key)) {
+				throw new Error(`Invalid environment variable name: ${key}`);
+			}
+
+			return envLine(key, value);
+		})
+		.join('\n');
 	const composeProjectDir = path.join(module.composeDir, template.name);
 	await module.updateJobProgress(job, `Making ${template.title} project directory...`);
 	await fs.mkdir(composeProjectDir, { recursive: true });
