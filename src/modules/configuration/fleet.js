@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import si from 'systeminformation';
 import { io } from 'socket.io-client';
+import validator from 'validator';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as fleetProxy from '../../utils/fleet_proxy.js';
@@ -299,7 +300,7 @@ const registerNode = ({ email, password, nodeId, name, hostname, domainName, add
 	});
 };
 
-const checkDomainAvailability = async (label) => {
+export const checkDomainAvailability = async (label) => {
 	const token = (await DataService.getConfiguration())?.fleet?.token || '';
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
@@ -332,6 +333,10 @@ const registerFleet = async (job, module) => {
 
 	const configuration = await DataService.getConfiguration();
 	const submittedEmail = email.normalize(config?.email);
+	if (!validator.isEmail(submittedEmail)) {
+		throw new Error(`'${config?.email}' is not a valid email address.`);
+	}
+
 	const registeredEmail = email.normalize(configuration?.fleet?.token ? configuration?.fleet?.email : '');
 	if (registeredEmail && registeredEmail !== submittedEmail) {
 		throw new Error('Fleet email cannot be changed');

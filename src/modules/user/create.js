@@ -3,12 +3,17 @@ import { execa } from 'execa';
 import * as yaml from 'js-yaml';
 import bcrypt from 'bcryptjs';
 import linuxSysUser from 'linux-sys-user';
+import validator from 'validator';
 
 const linuxUser = linuxSysUser.promise();
 const createUser = async (job, module) => {
 	const { config } = job.data;
 	if (/[\r\n]/.test(String(config.password ?? ''))) {
 		throw new Error('Password cannot contain line breaks.');
+	}
+
+	if (!validator.isEmail(String(config.email ?? ''))) {
+		throw new Error(`'${config.email}' is not a valid email address.`);
 	}
 
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });

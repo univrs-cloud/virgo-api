@@ -1,8 +1,17 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import validator from 'validator';
+import appConfig from '../../../config.js';
+import { checkDomainAvailability } from '../configuration/fleet.js';
 import { BOND_NAME, getPhysicalInterfaceNames, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
+const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+const FLEET_ZONE = appConfig.fleet.zone;
+const RESERVED_LABELS = new Set([
+	'fleet', 'apps', 'packages', 'www', 'api', 'auth', 'admin', 'mail', 'smtp', 'imap',
+	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static'
+]);
 const FALLBACK_INTERFACES = ['eth0', 'eth1'];
 const BOND_SLAVE_LIMIT = 2;
 const BOND_SLAVES_PATH = `/sys/class/net/${BOND_NAME}/bonding/slaves`;
@@ -89,8 +98,53 @@ ${ip}	${fqdn} ${hostname}
 	await fs.writeFile(module.etcHosts, configuration, 'utf8');
 };
 
+const isFleetSubZone = (domainName) => {
+	return String(domainName || '').trim().toLowerCase().endsWith(`.${FLEET_ZONE}`);
+};
+
+const isFleetZone = (domainName) => {
+	return String(domainName || '').trim().toLowerCase() === FLEET_ZONE;
+};
+
+const assertIdentifierFormat = ({ hostname, domainName }) => {
+	if (!HOSTNAME_PATTERN.test(hostname || '')) {
+		throw new Error(`'${hostname}' is not a valid hostname, use letters, digits and hyphens only.`);
+	}
+
+	if (!validator.isFQDN(domainName || '', { require_tld: false })) {
+		throw new Error(`'${domainName}' is not a valid domain name.`);
+	}
+};
+
+const assertFleetNameAvailable = async (hostname) => {
+	if (RESERVED_LABELS.has(String(hostname || '').trim().toLowerCase())) {
+		throw new Error(`${hostname}.${FLEET_ZONE} is already taken.`);
+	}
+
+	let availability = null;
+	try {
+		availability = await checkDomainAvailability(hostname);
+	} catch (error) {
+		throw new Error(`A ${FLEET_ZONE} name has to be checked with the fleet first, and it could not be reached (${error.message}). Try again once this node is online.`);
+	}
+
+	if (!availability?.available) {
+		throw new Error(`${hostname}.${FLEET_ZONE} is already taken.`);
+	}
+};
+
 const updateIdentifier = async (job, module) => {
 	const { config } = job.data;
+	if (isFleetSubZone(config.domainName)) {
+		throw new Error(`Sub-domains of ${FLEET_ZONE} are not supported, use ${FLEET_ZONE} itself.`);
+	}
+
+	assertIdentifierFormat(config);
+
+	if (isFleetZone(config.domainName)) {
+		await assertFleetNameAvailable(config.hostname);
+	}
+
 	const system = module.getState('system');
 	await module.updateJobProgress(job, `Host updating...`);
 	try {

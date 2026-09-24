@@ -1,12 +1,18 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
 import * as yaml from 'js-yaml';
+import validator from 'validator';
+
 const isSelfOrAdmin = (socket, config) => {
 	return (socket.isAuthenticated && (socket.isAdmin || socket.username === config?.username));
 };
 
 const updateUser = async (job, module) => {
 	const { config } = job.data;
+	if (!validator.isEmail(String(config.email ?? ''))) {
+		throw new Error(`'${config.email}' is not a valid email address.`);
+	}
+
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (!user) {
 		throw new Error(`User ${config.username} not found.`);

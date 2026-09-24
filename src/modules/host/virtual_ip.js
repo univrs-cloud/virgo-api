@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import validator from 'validator';
 import DataService from '../../database/data_service.js';
 import * as database from '../../database/index.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
@@ -12,13 +13,6 @@ const HANDOVER_INTERVAL_MS = 500;
 
 const toInteger = (address) => {
 	return address.split('.').reduce((total, octet) => { return ((total << 8) >>> 0) + Number(octet); }, 0) >>> 0;
-};
-
-const isIPv4 = (address) => {
-	const octets = String(address || '').split('.');
-	return octets.length === 4 && octets.every((octet) => {
-		return /^\d{1,3}$/.test(octet) && Number(octet) <= 255;
-	});
 };
 
 const isSameSubnet = (first, second, prefixLength) => {
@@ -106,7 +100,7 @@ const standDown = async () => {
  * holds: the two are written in one job, and the virtual IP has to make sense on the addressing the
  * node is moving to. */
 const validate = (virtualIp, config) => {
-	if (!isIPv4(virtualIp)) {
+	if (!validator.isIP(virtualIp || '', 4)) {
 		throw new Error(`${virtualIp} is not a valid IPv4 address.`);
 	}
 
@@ -123,7 +117,7 @@ const validate = (virtualIp, config) => {
 		throw new Error(`${config.netmask} is not a valid netmask.`);
 	}
 
-	if (!isIPv4(config.ipAddress)) {
+	if (!validator.isIP(config.ipAddress || '', 4)) {
 		throw new Error(`${config.ipAddress} is not a valid IPv4 address.`);
 	}
 
