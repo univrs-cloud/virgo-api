@@ -1,9 +1,10 @@
 import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
-import { execa } from 'execa';
 import stream from 'stream';
 import { promisify } from 'util';
+import { execa } from 'execa';
 import dockerCompose from 'docker-compose';
+import validator from 'validator';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
@@ -64,6 +65,10 @@ const installApp = async (job, module) => {
 		.map(([key, value]) => {
 			if (!ENV_KEY_PATTERN.test(key)) {
 				throw new Error(`Invalid environment variable name: ${key}`);
+			}
+
+			if (key.toLowerCase() === 'domain' && !validator.isFQDN(String(value ?? ''), { require_tld: false })) {
+				throw new Error(`'${value}' is not a valid domain name.`);
 			}
 
 			return envLine(key, value);

@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import validator from 'validator';
 import DataService from '../../database/data_service.js';
 
 const msmtpConfigurationFile = '/etc/msmtprc';
@@ -48,6 +49,26 @@ no_network=true
 `;
 };
 
+const assertConfiguration = (config) => {
+	const address = String(config?.address ?? '');
+	if (!validator.isFQDN(address, { require_tld: false }) && !validator.isIP(address, 4)) {
+		throw new Error(`'${address}' is not a valid server address.`);
+	}
+
+	if (!validator.isPort(String(config?.port ?? ''))) {
+		throw new Error(`'${config?.port}' is not a valid port.`);
+	}
+
+	if (!validator.isEmail(String(config?.sender ?? ''))) {
+		throw new Error(`'${config?.sender}' is not a valid sender address.`);
+	}
+
+	const invalid = config.recipients.find((recipient) => { return !validator.isEmail(String(recipient ?? '')); });
+	if (invalid !== undefined) {
+		throw new Error(`'${invalid}' is not a valid recipient address.`);
+	}
+};
+
 const updateSmtpConfiguration = async (job, module) => {
 	let config = job.data.config;
 	await module.updateJobProgress(job, `Saving notification server...`);
@@ -59,6 +80,7 @@ const updateSmtpConfiguration = async (job, module) => {
 		config.recipients.push('voyager@univrs.cloud');
 	}
 
+	assertConfiguration(config);
 	await DataService.setConfiguration('smtp', config);
 	module.eventEmitter.emit('configuration:updated');
 	return `Notification server saved.`;

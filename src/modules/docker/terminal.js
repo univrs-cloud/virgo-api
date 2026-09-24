@@ -1,5 +1,5 @@
-import { execa } from 'execa';
 import stream from 'stream';
+import { execa } from 'execa';
 import docker from '../../utils/docker_client.js';
 
 // Track active terminal sessions per socket to clean up listeners
