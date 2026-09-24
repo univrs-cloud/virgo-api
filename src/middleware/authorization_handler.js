@@ -1,5 +1,6 @@
 import * as setup from '../utils/setup_state.js';
 import * as authelia from '../utils/authelia.js';
+import * as traefikConfig from '../utils/traefik_config.js';
 import { isPrivateAddress } from '../utils/private_address.js';
 
 /**
@@ -56,11 +57,39 @@ const writeAccount = async (req, res, identity) => {
 	});
 };
 
+const isOnDomain = (hostname, domain) => {
+	const host = String(hostname || '').toLowerCase();
+	const name = String(domain || '').toLowerCase();
+	return (host === name || host.endsWith(`.${name}`));
+};
+
+const domainRedirect = (req) => {
+	const domain = traefikConfig.getDomain();
+	if (!domain || isOnDomain(req.hostname, domain)) {
+		return null;
+	}
+
+	return `https://${domain.toLowerCase()}/`;
+};
+
 export default async (req, res, next) => {
 	// The login screen and the routes it signs in through answer whoever asks, so there is nothing to
 	// ask about them — and asking anyway leaves Authelia's log full of refusals nobody acted on.
 	const isPage = (req.method === 'GET' && req.headers.accept?.includes('text/html'));
-	if (!isPage || OPEN_PATHS.includes(req.path)) {
+	if (!isPage) {
+		next();
+		return;
+	}
+
+	if (setup.isCompleted()) {
+		const location = domainRedirect(req);
+		if (location) {
+			res.redirect(location);
+			return;
+		}
+	}
+
+	if (OPEN_PATHS.includes(req.path)) {
 		next();
 		return;
 	}
@@ -91,8 +120,8 @@ export default async (req, res, next) => {
 		res.redirect(location || `/login?rd=${encodeURIComponent(requestedUrl(req))}`);
 	} catch (error) {
 		// Nobody can be identified while Authelia is unreachable, so nobody is let in. The exception is
-		// the local network: Authelia lives on the pool, and the pages that repair a node whose apps are
-		// down are these ones — refusing them from the premises as well would leave no way back.
+		// the local network, which still gets the pages: its socket is only ever the local tier, so it can
+		// watch the node's state but not act on it, and nobody can sign in until Authelia is back.
 		if (isPrivateAddress(req.ip)) {
 			next();
 			return;
