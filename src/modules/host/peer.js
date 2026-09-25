@@ -1,6 +1,9 @@
 import crypto from 'crypto';
+import fs from 'fs/promises';
 import https from 'https';
+import path from 'path';
 import { io as ioClient } from 'socket.io-client';
+import si from 'systeminformation';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as database from '../../database/index.js';
@@ -18,6 +21,9 @@ const ADOPTION_GRACE_MS = 60000;
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_CHECK_TIMEOUT_MS = 5000;
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
+const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
+const PEER_ROUTE_PREFIX = 'peer.';
 
 let hostModule = null;
 let clock = null;
@@ -180,11 +186,96 @@ const withoutKeys = (peers) => {
 	return peers.map(({ key, ...peer }) => { return peer; });
 };
 
+const getClusterDomain = async () => {
+	const { hostname, fqdn } = await si.osInfo();
+	const prefix = `${hostname}.`;
+	const domainName = (hostname && String(fqdn || '').startsWith(prefix) ? fqdn.slice(prefix.length).toLowerCase() : '');
+	return (domainName.split('.').length >= 3 ? domainName : null);
+};
+
+const peerRoute = (id, name, address, clusterDomain) => {
+	const fqdn = `${name}.${clusterDomain}`.toLowerCase();
+	const router = `peer-${id}`;
+	return `tcp:
+  routers:
+    ${router}:
+      rule: 'HostSNI(\`${fqdn}\`) || HostSNIRegexp(\`^.+\\.${fqdn.replace(/\./g, '\\.')}$\`)'
+      entryPoints:
+        - "https"
+      service: "${router}"
+      tls:
+        passthrough: true
+  serversTransports:
+    ${router}:
+      proxyProtocol:
+        version: 2
+  services:
+    ${router}:
+      loadBalancer:
+        serversTransport: "${router}"
+        servers:
+          - address: "${address}:443"
+`;
+};
+
+const syncPeerRoutes = async () => {
+	try {
+		const clusterDomain = await getClusterDomain();
+		const own = await ownAddresses();
+		const wanted = new Map();
+		for (const peer of (clusterDomain ? await readConfiguration() : [])) {
+			if (!LABEL_PATTERN.test(peer.name || '') || !peer.address || own.includes(peer.address)) {
+				continue;
+			}
+
+			const id = String(peer.id).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+			wanted.set(`${PEER_ROUTE_PREFIX}${id}.yml`, peerRoute(id, peer.name, peer.address, clusterDomain));
+		}
+
+		const files = await fs.readdir(TRAEFIK_CONFIG_PATH);
+		for (const file of files.filter((entry) => { return entry.startsWith(PEER_ROUTE_PREFIX) && !wanted.has(entry); })) {
+			await fs.rm(path.join(TRAEFIK_CONFIG_PATH, file), { force: true });
+		}
+
+		for (const [file, content] of wanted) {
+			const filePath = path.join(TRAEFIK_CONFIG_PATH, file);
+			if (await fs.readFile(filePath, 'utf8').catch(() => { return null; }) !== content) {
+				await fs.writeFile(filePath, content, 'utf8');
+			}
+		}
+	} catch (error) {
+		console.warn(`Could not update the routes to adopted nodes: ${error.message}`);
+	}
+};
+
+const refreshPeers = async () => {
+	const own = await ownAddresses();
+	const visible = discovery.discover();
+	const updates = new Map();
+	for (const peer of await readConfiguration()) {
+		const node = visible.find((entry) => { return entry.id === peer.id; });
+		const name = (LABEL_PATTERN.test(node?.name || '') ? node.name : peer.name);
+		const address = (node?.address && !own.includes(node.address) ? node.address : peer.address);
+		if (name !== peer.name || address !== peer.address) {
+			updates.set(peer.id, { name, address });
+		}
+	}
+
+	if (!updates.size) {
+		return;
+	}
+
+	const peers = await readConfiguration();
+	await DataService.setConfiguration('peers', peers.map((peer) => { return (updates.has(peer.id) ? { ...peer, ...updates.get(peer.id) } : peer); }));
+	await publishPeers();
+};
+
 const publishPeers = async () => {
 	const peers = withoutKeys(await readConfiguration());
 	hostModule?.setState('peers', peers);
 	hostModule?.emitChanged('host:peers', peers, { audience: 'admin' });
 	hostModule?.eventEmitter.emit('host:peers:updated', peers.map((peer) => { return peer.id; }));
+	await syncPeerRoutes();
 };
 
 const forgetPeer = async (nodeId) => {
@@ -761,6 +852,8 @@ const scheduleReconcile = async () => {
 			reconcileAgain = false;
 			await reconcileVisible(discovery.discover());
 		} while (reconcileAgain);
+		await refreshPeers();
+		await syncPeerRoutes();
 	} catch (error) {
 		console.warn(`Could not reconcile adopted nodes: ${error.message}`);
 	} finally {
@@ -823,6 +916,7 @@ const register = (module) => {
 	attachNamespace();
 	publishPeers();
 	module.eventEmitter.on('host:discovery:updated', () => { scheduleReconcile(); });
+	module.eventEmitter.on('host:network:identifier:updated', () => { syncPeerRoutes(); });
 	setInterval(() => {
 		reconciled.clear();
 		scheduleReconcile();
