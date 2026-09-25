@@ -155,26 +155,29 @@ const getNodeIdentifier = async () => {
 	const hostname = osInfo?.hostname || '';
 	const fqdn = osInfo?.fqdn || '';
 	const prefix = `${hostname}.`;
+	const domainName = (hostname && fqdn.startsWith(prefix) ? fqdn.slice(prefix.length) : '');
 	return {
 		hostname,
-		domainName: (hostname && fqdn.startsWith(prefix) ? fqdn.slice(prefix.length) : ''),
-		address: await getNodeAddress()
+		domainName,
+		address: await getNodeAddress(domainName)
 	};
 };
 
 /** The virtual IP wins when this node is the one holding it: it is the address the router forwards to
  * and the one that survives a node being replaced, so it is what the fleet's LAN records should point
- * at. A node that has it configured but stood down answers on its own address instead. */
-const getNodeAddress = async () => {
+ * at. A node that has it configured but stood down answers on its own address instead — unless it
+ * carries a cluster name, whose one record every member shares and has to keep pointing at the virtual IP. */
+const getNodeAddress = async (domainName = '') => {
 	try {
 		const configured = await virtualIp.readConfiguration();
-		if (configured?.address && await virtualIp.isEnabled()) {
+		const clustered = (domainName.split('.').length >= 3);
+		if (configured?.address && (clustered || await virtualIp.isEnabled())) {
 			return configured.address;
 		}
 
 		const device = await network.getDefaultInterfaceName();
 		const addrInfo = (await network.getAddresses()).find((item) => { return item.ifname === device; })?.addr_info || [];
-		const address = addrInfo.find((info) => { return info.family === 'inet' && info.local !== virtualIp?.address; });
+		const address = addrInfo.find((info) => { return info.family === 'inet' && info.local !== configured?.address; });
 		return address?.local || '';
 	} catch (error) {
 		return '';

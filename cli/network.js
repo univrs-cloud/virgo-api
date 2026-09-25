@@ -27,6 +27,7 @@ const queueHostNetworkIdentifierJob = async (options) => {
 		{
 			config: {
 				hostname: options.hostname,
+				cluster: options.cluster,
 				domainName: options.domain
 			},
 			username: process.env.USER || 'cli'
@@ -88,7 +89,8 @@ const register = (program) => {
 		.command('update')
 		.description('Set hostname and DNS search domain')
 		.requiredOption('--hostname <name>', 'Short hostname')
-		.requiredOption('--domain <name>', 'DNS search domain')
+		.requiredOption('--cluster <name>', 'Cluster name, the label between the hostname and the domain')
+		.requiredOption('--domain <name>', 'Domain, without the cluster')
 		.action(queueHostNetworkIdentifierJob);
 
 	const interfaceCmd = networkCmd
