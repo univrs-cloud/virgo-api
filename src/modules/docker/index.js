@@ -21,6 +21,7 @@ class DockerModule extends BaseModule {
 	#appsDataset = 'messier/apps';
 	#appsDir;
 	#appIconsDir = '/messier/.config/assets/img/apps';
+	#platform = (process.arch === 'x64' ? 'amd64' : process.arch);
 
 	constructor() {
 		super('docker');
@@ -159,7 +160,10 @@ class DockerModule extends BaseModule {
 		try {
 			const response = await fetch(config.apps.templatesUrl);
 			const data = await response.json();
-			this.setState('templates', data.templates);
+			const templates = this.toArray(data.templates).filter((template) => {
+				return this.toArray(template.platforms).some((platform) => { return String(platform).toLowerCase() === this.#platform; });
+			});
+			this.setState('templates', templates);
 		} catch (error) {
 			this.setState('templates', false);
 			console.error(`Error loading templates:`, error);

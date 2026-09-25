@@ -93,7 +93,10 @@ const fetchTemplates = async () => {
 	if (!data || !Array.isArray(data.templates)) {
 		throw new Error('Could not read the app list (unexpected response).');
 	}
-	return data.templates;
+	const platform = process.arch === 'x64' ? 'amd64' : process.arch;
+	return data.templates.filter((template) => {
+		return (template.platforms || []).some((templatePlatform) => { return String(templatePlatform).toLowerCase() === platform; });
+	});
 };
 
 const listInstalledApps = async (options) => {
