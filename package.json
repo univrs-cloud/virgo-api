@@ -40,7 +40,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^6.3.8",
+		"bullmq": "^6.3.9",
 		"camelcase-keys": "^10.0.3",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
