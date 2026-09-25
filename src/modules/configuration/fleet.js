@@ -379,6 +379,11 @@ const disableFleet = async (job, module) => {
 		throw new Error('Fleet is not registered');
 	}
 
+	const { fqdn } = await si.osInfo();
+	if (String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`)) {
+		throw new Error(`Fleet cannot be disabled while the domain is ${config.fleet.zone}, its certificates depend on it.`);
+	}
+
 	await DataService.setConfiguration('fleet', { ...fleet, enabled: false });
 	module.eventEmitter.emit('configuration:updated');
 	disconnect();
