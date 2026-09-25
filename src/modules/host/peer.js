@@ -11,11 +11,16 @@ import { getOwnAddress } from '../../utils/network.js';
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
 const REQUEST_TIMEOUT_MS = 15000;
+const INTRODUCE_TIMEOUT_MS = REQUEST_TIMEOUT_MS * 2;
+const PAIRING_KEY_TTL_MS = REQUEST_TIMEOUT_MS * 2;
 const ADOPTION_GRACE_MS = 60000;
+const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 let hostModule = null;
+let clock = null;
 const reconciled = new Set();
 const pairing = new Map();
+const pairingKeys = new Map();
 
 const sign = (key, nonce) => {
 	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(String(nonce)).digest('hex');
@@ -35,13 +40,78 @@ const findPeer = async (nodeId) => {
 	return (await readConfiguration()).find((peer) => { return peer.id === nodeId; }) || null;
 };
 
+const loadClock = async () => {
+	if (clock === null) {
+		clock = (Number((await DataService.getConfiguration()).peerClock) || 0);
+	}
+
+	return clock;
+};
+
+const advanceClock = async (received) => {
+	await loadClock();
+	clock = Math.max(clock, (Number(received) || 0)) + 1;
+	await DataService.setConfiguration('peerClock', clock);
+	return clock;
+};
+
+const observeClock = async (received) => {
+	await loadClock();
+	if ((Number(received) || 0) > clock) {
+		clock = Number(received);
+		await DataService.setConfiguration('peerClock', clock);
+	}
+};
+
+const pairingKey = (nodeId) => {
+	const current = pairingKeys.get(nodeId);
+	if (current && current.expires > Date.now()) {
+		return current.key;
+	}
+
+	const key = crypto.randomBytes(KEY_BYTES).toString('hex');
+	pairingKeys.set(nodeId, { key, expires: Date.now() + PAIRING_KEY_TTL_MS });
+	return key;
+};
+
 const readRemoved = async () => {
 	return (await DataService.getConfiguration()).removedPeers || [];
 };
 
-const recordRemoval = async (nodeId, removedAt) => {
+const pruneRemovals = async () => {
+	const peerIds = (await readConfiguration()).map((peer) => { return peer.id; });
 	const removed = await readRemoved();
-	await DataService.setConfiguration('removedPeers', [...removed.filter((entry) => { return entry.id !== nodeId; }), { id: nodeId, removedAt }]);
+	const kept = removed.filter((entry) => {
+		return !peerIds.every((id) => { return (entry.confirmedBy || []).includes(id); });
+	});
+	if (kept.length !== removed.length) {
+		await DataService.setConfiguration('removedPeers', kept);
+	}
+};
+
+const recordRemoval = async (nodeId, removedClock, confirmedBy) => {
+	const removed = await readRemoved();
+	const existing = removed.find((entry) => { return entry.id === nodeId; });
+	const entry = {
+		id: nodeId,
+		clock: Math.max((Number(existing?.clock) || 0), removedClock),
+		confirmedBy: [...new Set([...(existing?.confirmedBy || []), ...confirmedBy])]
+	};
+	await DataService.setConfiguration('removedPeers', [...removed.filter((item) => { return item.id !== nodeId; }), entry]);
+	await pruneRemovals();
+};
+
+const confirmRemovals = async (peerId, nodeIds) => {
+	if (!nodeIds.length) {
+		return;
+	}
+
+	const removed = await readRemoved();
+	const updated = removed.map((entry) => {
+		return (nodeIds.includes(entry.id) ? { ...entry, confirmedBy: [...new Set([...(entry.confirmedBy || []), peerId])] } : entry);
+	});
+	await DataService.setConfiguration('removedPeers', updated);
+	await pruneRemovals();
 };
 
 const clearRemoval = async (nodeId) => {
@@ -94,6 +164,7 @@ const publishPeers = async () => {
 const forgetPeer = async (nodeId) => {
 	const peers = await readConfiguration();
 	await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== nodeId; }));
+	await pruneRemovals();
 	await publishPeers();
 	hostModule?.eventEmitter.emit('host:peer:updated');
 };
@@ -101,18 +172,22 @@ const forgetPeer = async (nodeId) => {
 /** Adopting one node does not preclude adopting another, so this appends rather than replaces. A node
  * already on the list is refreshed in place — re-adopting is how a peer that was rebuilt gets a new
  * key without first being removed. */
-const savePeer = async ({ id, name, address, key }) => {
+const savePeer = async ({ id, name, address, key }, receivedClock) => {
+	const pairedClock = await advanceClock(receivedClock);
 	const peers = await readConfiguration();
-	const peer = { id, name, address, key, pairedAt: new Date().toISOString() };
+	const peer = { id, name, address, key, pairedAt: new Date().toISOString(), pairedClock };
 	await DataService.setConfiguration('peers', [...peers.filter((entry) => { return entry.id !== id; }), peer]);
 	await clearRemoval(id);
 	await publishPeers();
 	hostModule?.eventEmitter.emit('host:peer:updated');
 };
 
-const removePeer = async (nodeId, removedAt) => {
+const removePeer = async (nodeId, removedClock, confirmedBy = []) => {
+	const stamp = (Number(removedClock) > 0 ? Number(removedClock) : await advanceClock());
+	await observeClock(stamp);
 	await forgetPeer(nodeId);
-	await recordRemoval(nodeId, (Number.isFinite(Date.parse(removedAt)) ? removedAt : new Date().toISOString()));
+	await recordRemoval(nodeId, stamp, confirmedBy);
+	return stamp;
 };
 
 const connectToPeer = (address, auth) => {
@@ -156,8 +231,15 @@ const attachNamespace = () => {
 	namespace.on('connection', (connection) => {
 		if (connection.identity.mode === 'pair') {
 			connection.on('pair:request', async (request, acknowledge) => {
-				const key = crypto.randomBytes(KEY_BYTES).toString('hex');
-				await savePeer({ id: request.id, name: request.name, address: request.address, key });
+				const self = await describeSelf();
+				const offered = (request?.id < self.id && KEY_PATTERN.test(String(request.key || '')));
+				if (!request?.id || request.id === self.id) {
+					acknowledge({ status: 'failed', message: 'Pairing was refused.' });
+					return;
+				}
+
+				const key = (offered ? request.key : pairingKey(request.id));
+				await savePeer({ id: request.id, name: request.name, address: request.address, key }, request.clock);
 				if (request.virtualIp?.address) {
 					hostModule?.eventEmitter.emit('host:peer:virtualIp:received', request.virtualIp);
 				}
@@ -165,7 +247,7 @@ const attachNamespace = () => {
 				// The virtual IP travels with the adoption. Without it the adopting node has no address
 				// of its own to take over later — it can see this one holds an address, but not which
 				// address it would be claiming or on what prefix.
-				acknowledge({ status: 'ok', node: await describeSelf(), key, virtualIp: await virtualIpConfiguration() });
+				acknowledge({ status: 'ok', node: self, key: (offered ? undefined : key), virtualIp: await virtualIpConfiguration(), clock: await loadClock() });
 			});
 			return;
 		}
@@ -173,8 +255,16 @@ const attachNamespace = () => {
 		// A recognised id is not proof. Every call carries a token over this connection's nonce, so the
 		// key authorises the action rather than merely knowing whose id to claim.
 		const nonce = crypto.randomBytes(16).toString('hex');
-		connection.on('peer:remove', async (payload, acknowledge) => {
+		const verify = async (payload) => {
 			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+				return false;
+			}
+
+			await observeClock(payload.clock);
+			return true;
+		};
+		connection.on('peer:remove', async (payload, acknowledge) => {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -183,7 +273,7 @@ const attachNamespace = () => {
 			acknowledge({ status: 'ok' });
 		});
 		connection.on('peer:introduce', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -193,35 +283,36 @@ const attachNamespace = () => {
 				return;
 			}
 
-			acknowledge({ status: 'ok' });
-			await joinIntroduced(payload.node);
+			const joined = await joinIntroduced(payload.node);
+			acknowledge(joined ? { status: 'ok', clock: await loadClock() } : { status: 'failed', message: `Could not pair with ${payload.node.name || payload.node.address}.` });
 		});
 		connection.on('peer:forget', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
 
 			const self = await describeSelf();
 			if (payload?.id && payload.id !== self.id && payload.id !== connection.identity.peer.id) {
-				await removePeer(payload.id, payload.removedAt);
+				await removePeer(payload.id, payload.removedClock, [connection.identity.peer.id, ...(Array.isArray(payload.confirmedBy) ? payload.confirmedBy : [])]);
 			}
 
-			acknowledge({ status: 'ok' });
+			acknowledge({ status: 'ok', clock: await loadClock() });
 		});
 		connection.on('peer:list', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
 
 			const peers = (await readConfiguration()).map((peer) => {
-				return { id: peer.id, name: peer.name, address: peer.address, pairedAt: peer.pairedAt };
+				return { id: peer.id, name: peer.name, address: peer.address, pairedClock: (Number(peer.pairedClock) || 0) };
 			});
-			acknowledge({ status: 'ok', peers, removed: await readRemoved() });
+			const removed = (await readRemoved()).map((entry) => { return { id: entry.id, clock: (Number(entry.clock) || 0) }; });
+			acknowledge({ status: 'ok', peers, removed, clock: await loadClock() });
 		});
 		connection.on('virtualIp:configure', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -232,7 +323,7 @@ const attachNamespace = () => {
 			acknowledge({ status: 'ok' });
 		});
 		connection.on('virtualIp:current', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -240,7 +331,7 @@ const attachNamespace = () => {
 			acknowledge({ status: 'ok', virtualIp: await virtualIpConfiguration() });
 		});
 		connection.on('virtualIp:promote', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -253,7 +344,7 @@ const attachNamespace = () => {
 			}
 		});
 		connection.on('virtualIp:release', async (payload, acknowledge) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
+			if (!await verify(payload)) {
 				acknowledge({ status: 'failed', message: 'Not authorised.' });
 				return;
 			}
@@ -283,7 +374,7 @@ const findHolder = async (address) => {
 
 /** Opened only when something has to be said to a peer, and closed again straight after. Whether a peer
  * is up is answered by mDNS, so there is nothing for a standing connection to add. */
-const call = async (peerId, event, payload = {}) => {
+const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) => {
 	const peer = await findPeer(peerId);
 	if (!peer) {
 		throw new Error(`That node is not adopted.`);
@@ -296,17 +387,20 @@ const call = async (peerId, event, payload = {}) => {
 	}
 
 	const connection = connectToPeer(address, { mode: 'call', nodeId: self.id });
+	const sent = await loadClock();
 	try {
-		return await new Promise((resolve, reject) => {
-			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, REQUEST_TIMEOUT_MS);
+		const answer = await new Promise((resolve, reject) => {
+			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, timeout);
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${peer.name || peer.address}.`)); });
 			connection.on('challenge', (nonce) => {
-				connection.emit(event, { token: sign(peer.key, nonce), ...payload }, (answer) => {
+				connection.emit(event, { ...payload, token: sign(peer.key, nonce), clock: sent }, (response) => {
 					clearTimeout(timer);
-					(answer?.status === 'ok' ? resolve(answer) : reject(new Error(answer?.message || `${peer.name || peer.address} refused.`)));
+					(response?.status === 'ok' ? resolve(response) : reject(new Error(response?.message || `${peer.name || peer.address} refused.`)));
 				});
 			});
 		});
+		await observeClock(answer?.clock);
+		return answer;
 	} finally {
 		connection.close();
 	}
@@ -324,9 +418,10 @@ const broadcast = async (event, payload = {}) => {
 	}
 };
 
-/** One call: the other node mints a key, keeps it, and hands back a copy. */
-const pairWith = async (address) => {
+/** One call: the node with the smaller id mints the key, and both keep it. */
+const pairWith = async (nodeId, address) => {
 	const self = await describeSelf();
+	const offered = (self.id < nodeId ? pairingKey(nodeId) : undefined);
 	// Sent as well as read back: the node holding the address is the one that adopts, so the config
 	// usually travels outward. Both directions are carried so it works whichever side initiates.
 	const configured = await virtualIpConfiguration();
@@ -335,14 +430,23 @@ const pairWith = async (address) => {
 		const response = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, REQUEST_TIMEOUT_MS);
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error('Could not reach that node.')); });
-			connection.on('connect', () => {
-				connection.emit('pair:request', { ...self, virtualIp: configured }, (answer) => {
+			connection.on('connect', async () => {
+				connection.emit('pair:request', { ...self, key: offered, virtualIp: configured, clock: await loadClock() }, (answer) => {
 					clearTimeout(timer);
 					(answer?.status === 'ok' ? resolve(answer) : reject(new Error(answer?.message || 'Pairing was refused.')));
 				});
 			});
 		});
-		await savePeer({ id: response.node.id, name: response.node.name, address, key: response.key });
+		if (response.node?.id !== nodeId) {
+			throw new Error('A different node answered.');
+		}
+
+		const key = (response.key || offered);
+		if (!KEY_PATTERN.test(String(key || ''))) {
+			throw new Error('Pairing was refused.');
+		}
+
+		await savePeer({ id: response.node.id, name: response.node.name, address, key }, response.clock);
 		if (response.virtualIp?.address) {
 			hostModule?.eventEmitter.emit('host:peer:virtualIp:received', response.virtualIp);
 		}
@@ -355,7 +459,7 @@ const pairWith = async (address) => {
 
 const pairOnce = (nodeId, address) => {
 	if (!pairing.has(nodeId)) {
-		pairing.set(nodeId, pairWith(address).finally(() => { pairing.delete(nodeId); }));
+		pairing.set(nodeId, pairWith(nodeId, address).finally(() => { pairing.delete(nodeId); }));
 	}
 
 	return pairing.get(nodeId);
@@ -364,27 +468,33 @@ const pairOnce = (nodeId, address) => {
 const joinIntroduced = async (node) => {
 	const self = await describeSelf();
 	if (node.id === self.id) {
-		return;
+		return true;
 	}
 
 	const address = (discovery.discover().find((candidate) => { return candidate.id === node.id; })?.address || node.address);
 	try {
 		await pairOnce(node.id, address);
+		return true;
 	} catch (error) {
 		console.warn(`Could not pair with ${node.name || address}: ${error.message}`);
+		return false;
 	}
 };
 
 const introduce = async (nodeId) => {
 	const newcomer = await findPeer(nodeId);
 	const others = (await readConfiguration()).filter((peer) => { return peer.id !== nodeId; });
+	const failed = [];
 	for (const peer of others) {
 		try {
-			await call(peer.id, 'peer:introduce', { node: { id: newcomer.id, name: newcomer.name, address: newcomer.address } });
+			await call(peer.id, 'peer:introduce', { node: { id: newcomer.id, name: newcomer.name, address: newcomer.address } }, INTRODUCE_TIMEOUT_MS);
 		} catch (error) {
 			console.warn(`Could not introduce ${newcomer.name || newcomer.address} to ${peer.name || peer.address}: ${error.message}`);
+			failed.push(peer.name || peer.address);
 		}
 	}
+
+	return failed;
 };
 
 const adopt = async (job, module) => {
@@ -404,7 +514,12 @@ const adopt = async (job, module) => {
 
 	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
 	const node = await pairOnce(peer.id, peer.address);
-	await introduce(node.id);
+	await module.updateJobProgress(job, `Introducing ${node.name || peer.address} to the other nodes...`);
+	const failed = await introduce(node.id);
+	if (failed.length) {
+		return `Adopted ${node.name || peer.address}. ${failed.join(', ')} could not be reached and will pair with it when they next see this node.`;
+	}
+
 	return `Adopted ${node.name || peer.address}.`;
 };
 
@@ -464,22 +579,25 @@ const reconcilePeers = async (peer, self) => {
 
 	for (const removal of (answer.removed || [])) {
 		const known = await findPeer(removal.id);
-		if (known && removal.id !== peer.id && Date.parse(removal.removedAt) > Date.parse(known.pairedAt)) {
+		if (known && removal.id !== peer.id && (Number(removal.clock) || 0) > (Number(known.pairedClock) || 0)) {
 			console.log(`${known.name || known.address} was removed while this node was away; forgetting it.`);
-			await removePeer(removal.id, removal.removedAt);
+			await removePeer(removal.id, removal.clock, [peer.id]);
 		}
 	}
+
+	const listed = (answer.peers || []).map((entry) => { return entry.id; });
+	await confirmRemovals(peer.id, (await readRemoved()).map((entry) => { return entry.id; }).filter((id) => { return !listed.includes(id); }));
 
 	const removed = await readRemoved();
 	const visible = discovery.discover();
 	for (const candidate of (answer.peers || [])) {
 		const tombstone = removed.find((entry) => { return entry.id === candidate.id; });
 		const node = visible.find((entry) => { return entry.id === candidate.id; });
-		if (candidate.id === self.id || self.id > candidate.id || await findPeer(candidate.id)) {
+		if (candidate.id === self.id || await findPeer(candidate.id)) {
 			continue;
 		}
 
-		if ((tombstone && Date.parse(tombstone.removedAt) > Date.parse(candidate.pairedAt)) || !node?.address || !node.setupCompleted) {
+		if ((tombstone && (Number(tombstone.clock) || 0) > (Number(candidate.pairedClock) || 0)) || !node?.address || !node.setupCompleted) {
 			continue;
 		}
 
@@ -549,7 +667,6 @@ const remove = async (job, module) => {
 	}
 
 	await module.updateJobProgress(job, `Removing ${peer.name || peer.address}...`);
-	const removedAt = new Date().toISOString();
 	// Best effort: a node that has died still has to be removable, so failing to reach it is not a
 	// reason to leave it adopted here. When it does answer, both sides forget each other.
 	try {
@@ -558,8 +675,26 @@ const remove = async (job, module) => {
 		console.warn(`Could not tell ${peer.name || peer.address} it was removed: ${error.message}`);
 	}
 
-	await removePeer(peer.id, removedAt);
-	await broadcast('peer:forget', { id: peer.id, removedAt });
+	const removedClock = await removePeer(peer.id);
+	const told = [];
+	for (const other of await readConfiguration()) {
+		try {
+			await call(other.id, 'peer:forget', { id: peer.id, removedClock });
+			await confirmRemovals(other.id, [peer.id]);
+			told.push(other.id);
+		} catch (error) {
+			console.warn(`Could not tell ${other.name || other.address} that ${peer.name || peer.address} was removed: ${error.message}`);
+		}
+	}
+
+	for (const id of (told.length > 1 ? told : [])) {
+		try {
+			await call(id, 'peer:forget', { id: peer.id, removedClock, confirmedBy: told });
+		} catch (error) {
+			console.warn(`Could not confirm the removal of ${peer.name || peer.address}: ${error.message}`);
+		}
+	}
+
 	return `${peer.name || peer.address} removed.`;
 };
 
