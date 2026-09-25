@@ -115,8 +115,9 @@ const register = (program) => {
 		.description('Virtual IP carried by this node');
 
 	virtualIpCmd
-		.command('promote')
-		.description('Claim the configured virtual IP for this node')
+		.command('take-over')
+		.alias('promote')
+		.description('Take over the virtual IP from the node holding it')
 		.action(() => {
 			return enqueueHostJob('host:network:virtualIp:promote', { username: process.env.USER || 'cli' }, 'Virtual IP promotion started.');
 		});
