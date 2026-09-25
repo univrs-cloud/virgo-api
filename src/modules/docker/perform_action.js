@@ -13,7 +13,7 @@ const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unp
  * reached leaves the existing file in place — recreating from it still fixes a container, and losing
  * that on a node with no internet would be worse than being a version behind. */
 const downloadComposeFile = async (job, module, name, composeProjectDir) => {
-	const template = module.toArray(module.getState('templates')).find((template) => { return template.name === name; });
+	const template = (await module.getTemplates()).find((template) => { return template.name === name; });
 	if (!template) {
 		return;
 	}
