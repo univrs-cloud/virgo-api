@@ -31,6 +31,11 @@ const getDomain = () => {
 	}
 };
 
+const getClusterDomain = () => {
+	const domain = getDomain();
+	return (domain ? domain.split('.').slice(1).join('.') : null);
+};
+
 /**
  * Reads the CERTRESOLVER value from the Traefik .env file
  * @returns {string}
@@ -155,7 +160,7 @@ const parse = (yamlContent) => {
  * @returns {boolean}
  */
 const match = (config, shortcut) => {
-	const domain = getDomain();
+	const domain = getClusterDomain();
 	if (!config?.subdomain || !shortcut?.url || !domain) {
 		return false;
 	}
@@ -200,7 +205,7 @@ const generate = (name, options) => {
 	return `http:
   routers:
     ${name}:
-      rule: "Host(\`${subdomain}.{{ env \`DOMAIN\` }}\`)"
+      rule: "Host(\`${subdomain}.{{ join \`.\` (rest (splitList \`.\` (env \`DOMAIN\`))) }}\`)"
       entryPoints:
         - "https"
       service: "${name}"

@@ -42,9 +42,9 @@ const OWNER = 'voyager:users';
 const SSL_EMAIL = 'voyager@univrs.cloud';
 const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
 const CORE_APP_ENV = {
-	authelia: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
-	traefik: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; },
-	wetty: (fqdn, address) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), SSHHOST: address }; }
+	authelia: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
+	traefik: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; },
+	wetty: ({ fqdn, address }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), SSHHOST: address }; }
 };
 
 let scanning = null;
@@ -322,7 +322,7 @@ const installCoreApps = async (job, module) => {
 	for (const name of getCoreApps()) {
 		const title = getCoreAppTitle(name);
 		await module.updateJobProgress(job, `Installing ${title}...`);
-		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn, address))], { reject: false });
+		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name]({ fqdn, address }))], { reject: false });
 		if (exitCode !== 0) {
 			failedApps.push(title);
 			console.error(`Could not install ${title}: ${stderr}`);

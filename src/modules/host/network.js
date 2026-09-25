@@ -8,9 +8,13 @@ import { BOND_NAME, getPhysicalInterfaceNames, getDefaultInterfaceName, isAddres
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 const FLEET_ZONE = appConfig.fleet.zone;
-const RESERVED_LABELS = new Set([
+const RESERVED_CLUSTER_NAMES = new Set([
 	'fleet', 'apps', 'packages', 'www', 'api', 'auth', 'admin', 'mail', 'smtp', 'imap',
 	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static'
+]);
+const RESERVED_NODE_NAMES = new Set([
+	'analytics', 'auth', 'autoconfig', 'autodiscover', 'dockhand', 'euro-office', 'gitea', 'mail',
+	'nextcloud', 'pihole', 'rspamd', 'talk', 'terminal', 'torrent', 'traefik', 'vpn'
 ]);
 const FALLBACK_INTERFACES = ['eth0', 'eth1'];
 const BOND_SLAVE_LIMIT = 2;
@@ -106,30 +110,38 @@ const isFleetZone = (domainName) => {
 	return String(domainName || '').trim().toLowerCase() === FLEET_ZONE;
 };
 
-const assertIdentifierFormat = ({ hostname, domainName }) => {
+const assertIdentifierFormat = ({ hostname, cluster, domainName }) => {
 	if (!HOSTNAME_PATTERN.test(hostname || '')) {
 		throw new Error(`'${hostname}' is not a valid hostname, use letters, digits and hyphens only.`);
 	}
 
-	if (!validator.isFQDN(domainName || '', { require_tld: false })) {
-		throw new Error(`'${domainName}' is not a valid domain name.`);
+	if (RESERVED_NODE_NAMES.has(String(hostname).toLowerCase())) {
+		throw new Error(`'${hostname}' is used by an app, choose another hostname.`);
+	}
+
+	if (!HOSTNAME_PATTERN.test(cluster || '')) {
+		throw new Error(`'${cluster}' is not a valid cluster name, use letters, digits and hyphens only.`);
+	}
+
+	if (!validator.isFQDN(domainName || '')) {
+		throw new Error(`'${domainName}' is not a valid domain name, use one with a TLD, like example.com.`);
 	}
 };
 
-const assertFleetNameAvailable = async (hostname) => {
-	if (RESERVED_LABELS.has(String(hostname || '').trim().toLowerCase())) {
-		throw new Error(`${hostname}.${FLEET_ZONE} is already taken.`);
+const assertFleetNameAvailable = async (cluster) => {
+	if (RESERVED_CLUSTER_NAMES.has(String(cluster || '').trim().toLowerCase())) {
+		throw new Error(`${cluster}.${FLEET_ZONE} is already taken.`);
 	}
 
 	let availability = null;
 	try {
-		availability = await checkDomainAvailability(hostname);
+		availability = await checkDomainAvailability(cluster);
 	} catch (error) {
 		throw new Error(`A ${FLEET_ZONE} name has to be checked with the fleet first, and it could not be reached (${error.message}). Try again once this node is online.`);
 	}
 
 	if (!availability?.available) {
-		throw new Error(`${hostname}.${FLEET_ZONE} is already taken.`);
+		throw new Error(`${cluster}.${FLEET_ZONE} is already taken.`);
 	}
 };
 
@@ -142,15 +154,17 @@ const updateIdentifier = async (job, module) => {
 	assertIdentifierFormat(config);
 
 	if (isFleetZone(config.domainName)) {
-		await assertFleetNameAvailable(config.hostname);
+		await assertFleetNameAvailable(config.cluster);
 	}
+
+	const domainName = `${config.cluster}.${config.domainName}`;
 
 	const system = module.getState('system');
 	await module.updateJobProgress(job, `Host updating...`);
 	try {
 		const defaultInterface = system.networkInterfaces?.find((iface) => { return iface.default; });
 		const connectionName = await getConnectionNameForInterface(defaultInterface.ifname);
-		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns-search', config.domainName]);
+		await execa('nmcli', ['connection', 'modify', connectionName, 'ipv4.dns-search', domainName]);
 		// On DHCP the servers come from the lease, so only a manual connection needs a fallback
 		const isManual = (await getConnectionProperty(connectionName, 'ipv4.method')) === 'manual';
 		if (isManual && !await getConnectionProperty(connectionName, 'ipv4.dns')) {
@@ -161,7 +175,7 @@ const updateIdentifier = async (job, module) => {
 		await execa('hostnamectl', ['set-hostname', config.hostname]);
 		const ipv4Info = defaultInterface.addrInfo?.find((info) => { return info.family === 'inet'; });
 		const ip = ipv4Info?.local || '';
-		const fqdn = `${config.hostname}.${config.domainName}`;
+		const fqdn = `${config.hostname}.${domainName}`;
 		await updateEtcHosts(module, ip, config.hostname, fqdn);
 		await sleep(RECONNECT_GRACE_MS);
 	} catch (error) {
