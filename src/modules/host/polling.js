@@ -435,11 +435,19 @@ const getCertificate = async (module) => {
 };
 
 const register = (module) => {
+	if (setup.isCompleted()) {
+		getCertificate(module);
+	}
 	module.eventEmitter.on('host:storage:fetch', () => {
 		getStorage(module);
 	});
 	module.eventEmitter.on('app:installed', ({ name } = {}) => {
-		if (name !== 'traefik' || setup.isCompleted()) {
+		if (name !== 'traefik') {
+			return;
+		}
+
+		if (setup.isCompleted()) {
+			getCertificate(module);
 			return;
 		}
 
