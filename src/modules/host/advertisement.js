@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
+import si from 'systeminformation';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
@@ -66,6 +67,13 @@ const buildRecords = async () => {
 	if (virtualIp?.address) {
 		records.virtualip = virtualIp.address;
 		records.holds = (await holdsAddress(virtualIp.address) ? '1' : '0');
+	}
+
+	const { hostname, fqdn } = await si.osInfo();
+	const prefix = `${hostname}.`;
+	const domainName = (hostname && String(fqdn || '').startsWith(prefix) ? fqdn.slice(prefix.length).toLowerCase() : '');
+	if (domainName.split('.').length >= 3) {
+		records.cluster = domainName;
 	}
 
 	return records;

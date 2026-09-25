@@ -2,8 +2,11 @@ import fs from 'fs/promises';
 import { execa } from 'execa';
 import validator from 'validator';
 import appConfig from '../../../config.js';
+import DataService from '../../database/data_service.js';
 import { checkDomainAvailability } from '../configuration/fleet.js';
 import { BOND_NAME, getPhysicalInterfaceNames, getDefaultInterfaceName, isAddressInUse } from '../../utils/network.js';
+import * as setup from '../../utils/setup_state.js';
+import * as discovery from './discovery.js';
 
 const DEFAULT_DNS_SERVER = '1.1.1.1';
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
@@ -157,9 +160,22 @@ const updateIdentifier = async (job, module) => {
 		await assertFleetNameAvailable(config.cluster);
 	}
 
-	const domainName = `${config.cluster}.${config.domainName}`;
+	const domainName = `${config.cluster}.${config.domainName}`.toLowerCase();
+	const clustered = discovery.discover().filter((node) => { return Boolean(node.cluster); });
+	const joined = (clustered.find((node) => { return node.holdsVirtualIp; }) || clustered[0]);
+	if (!setup.isCompleted() && joined && joined.cluster !== domainName) {
+		throw new Error(`${joined.name || joined.address} is already in ${joined.cluster}. A node set up on this network joins that cluster.`);
+	}
 
 	const system = module.getState('system');
+	const hostPrefix = `${system?.osInfo?.hostname}.`;
+	const fqdn = String(system?.osInfo?.fqdn || '');
+	const currentDomainName = (fqdn.startsWith(hostPrefix) ? fqdn.slice(hostPrefix.length).toLowerCase() : '');
+	const hasPeers = Boolean(((await DataService.getConfiguration()).peers || []).length);
+	if (setup.isCompleted() && hasPeers && currentDomainName.split('.').length >= 3 && currentDomainName !== domainName) {
+		throw new Error(`This node has adopted nodes in ${currentDomainName}. Remove them to change the cluster.`);
+	}
+
 	await module.updateJobProgress(job, `Host updating...`);
 	try {
 		const defaultInterface = system.networkInterfaces?.find((iface) => { return iface.default; });
