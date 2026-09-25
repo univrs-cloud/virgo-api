@@ -21,6 +21,7 @@ function createApp() {
 			return response.getHeader('Content-Encoding') ? false : compression.filter(request, response);
 		}
 	}));
+	app.use('/__misdirected', (request, response) => { response.status(421).end(); });
 	app.use(frameAncestorsHandler);
 	app.use(express.json());
 	app.use(authorizationHandler);
