@@ -24,7 +24,7 @@ const updateApp = async (job, module) => {
 	const composeProject = container.labels?.comDockerComposeProject;
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
-	const template = module.toArray(module.getState('templates')).find((template) => { return template.name === config.name; });
+	const template = (await module.getTemplates()).find((template) => { return template.name === config.name; });
 	if (template) {
 		try {
 			const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);

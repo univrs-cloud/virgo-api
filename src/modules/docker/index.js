@@ -86,6 +86,14 @@ class DockerModule extends BaseModule {
 		return this.#appIconsDir;
 	}
 
+	async getTemplates() {
+		if (!this.getState('templates')) {
+			await this.#loadTemplates();
+			this.#emitTemplates();
+		}
+		return this.toArray(this.getState('templates'));
+	}
+
 	/**
 	 * Find all containers for an app by matching compose project name.
 	 * Matches containers by compose project label (exact match).
