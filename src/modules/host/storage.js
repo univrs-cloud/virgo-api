@@ -6,6 +6,7 @@ import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
 import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 import { getTopology, getVdevArguments } from '../../utils/topology.js';
+import { getOwnAddress } from '../../utils/network.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -42,7 +43,8 @@ const SSL_EMAIL = 'voyager@univrs.cloud';
 const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
 const CORE_APP_ENV = {
 	authelia: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
-	traefik: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; }
+	traefik: (fqdn) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; },
+	wetty: (fqdn, address) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), SSHHOST: address }; }
 };
 
 let scanning = null;
@@ -293,15 +295,25 @@ const createDirectories = async () => {
 	}
 };
 
+const getNodeAddress = async () => {
+	const { virtualIp } = await DataService.getConfiguration();
+	return getOwnAddress(virtualIp?.address);
+};
+
 /** Queues the apps the node cannot be used without, through the same command an operator would run.
  * The command returns once the work is queued; the installs themselves report their own progress.
  * Forced, because an imported pool already lists them: they are reconfigured for this node's name.
- * Both apps are named after the node, so without a name there is nothing to install — a job that
+ * They are named after the node, so without a name there is nothing to install — a job that
  * reported that as done would be claiming work it never did. */
 const installCoreApps = async (job, module) => {
 	const fqdn = module.getState('system')?.osInfo?.fqdn;
 	if (!fqdn) {
 		throw new Error('Core apps were not installed: this node has no name yet.');
+	}
+
+	const address = await getNodeAddress();
+	if (!address) {
+		throw new Error('Core apps were not installed: this node has no address yet.');
 	}
 
 	// Every app is attempted before the job gives up: they are independent, and one that fails should not
@@ -310,7 +322,7 @@ const installCoreApps = async (job, module) => {
 	for (const name of getCoreApps()) {
 		const title = getCoreAppTitle(name);
 		await module.updateJobProgress(job, `Installing ${title}...`);
-		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn))], { reject: false });
+		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name](fqdn, address))], { reject: false });
 		if (exitCode !== 0) {
 			failedApps.push(title);
 			console.error(`Could not install ${title}: ${stderr}`);
