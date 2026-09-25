@@ -3,6 +3,7 @@ import https from 'https';
 import { io as ioClient } from 'socket.io-client';
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
+import * as database from '../../database/index.js';
 import * as socket from '../../socket.js';
 import * as advertisement from './advertisement.js';
 import * as discovery from './discovery.js';
@@ -14,10 +15,15 @@ const REQUEST_TIMEOUT_MS = 15000;
 const INTRODUCE_TIMEOUT_MS = REQUEST_TIMEOUT_MS * 2;
 const PAIRING_KEY_TTL_MS = REQUEST_TIMEOUT_MS * 2;
 const ADOPTION_GRACE_MS = 60000;
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+const STALE_CHECK_TIMEOUT_MS = 5000;
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 let hostModule = null;
 let clock = null;
+let clockQueue = Promise.resolve();
+let reconciling = false;
+let reconcileAgain = false;
 const reconciled = new Set();
 const pairing = new Map();
 const pairingKeys = new Map();
@@ -42,25 +48,41 @@ const findPeer = async (nodeId) => {
 
 const loadClock = async () => {
 	if (clock === null) {
+		if (!await database.ensureOpen()) {
+			return 0;
+		}
+
 		clock = (Number((await DataService.getConfiguration()).peerClock) || 0);
 	}
 
 	return clock;
 };
 
-const advanceClock = async (received) => {
-	await loadClock();
-	clock = Math.max(clock, (Number(received) || 0)) + 1;
-	await DataService.setConfiguration('peerClock', clock);
-	return clock;
+const withClock = (task) => {
+	const run = clockQueue.then(task);
+	clockQueue = run.catch(() => {});
+	return run;
 };
 
-const observeClock = async (received) => {
-	await loadClock();
-	if ((Number(received) || 0) > clock) {
-		clock = Number(received);
-		await DataService.setConfiguration('peerClock', clock);
-	}
+const advanceClock = (received) => {
+	return withClock(async () => {
+		const next = Math.max(await loadClock(), (Number(received) || 0)) + 1;
+		if (!await DataService.setConfiguration('peerClock', next)) {
+			throw new Error('Could not store the peer clock.');
+		}
+
+		clock = next;
+		return next;
+	});
+};
+
+const observeClock = (received) => {
+	return withClock(async () => {
+		const value = (Number(received) || 0);
+		if (value > await loadClock() && await DataService.setConfiguration('peerClock', value)) {
+			clock = value;
+		}
+	});
 };
 
 const pairingKey = (nodeId) => {
@@ -154,8 +176,12 @@ const resolveAddress = async (peer) => {
 	return (address && !(await ownAddresses()).includes(address) ? address : null);
 };
 
+const withoutKeys = (peers) => {
+	return peers.map(({ key, ...peer }) => { return peer; });
+};
+
 const publishPeers = async () => {
-	const peers = await readConfiguration();
+	const peers = withoutKeys(await readConfiguration());
 	hostModule?.setState('peers', peers);
 	hostModule?.emitChanged('host:peers', peers, { audience: 'admin' });
 	hostModule?.eventEmitter.emit('host:peers:updated', peers.map((peer) => { return peer.id; }));
@@ -169,9 +195,7 @@ const forgetPeer = async (nodeId) => {
 	hostModule?.eventEmitter.emit('host:peer:updated');
 };
 
-/** Adopting one node does not preclude adopting another, so this appends rather than replaces. A node
- * already on the list is refreshed in place — re-adopting is how a peer that was rebuilt gets a new
- * key without first being removed. */
+/** Adopting one node does not preclude adopting another, so this appends rather than replaces. */
 const savePeer = async ({ id, name, address, key }, receivedClock) => {
 	const pairedClock = await advanceClock(receivedClock);
 	const peers = await readConfiguration();
@@ -180,6 +204,7 @@ const savePeer = async ({ id, name, address, key }, receivedClock) => {
 	await clearRemoval(id);
 	await publishPeers();
 	hostModule?.eventEmitter.emit('host:peer:updated');
+	await retireGhosts(peer);
 };
 
 const removePeer = async (nodeId, removedClock, confirmedBy = []) => {
@@ -188,6 +213,21 @@ const removePeer = async (nodeId, removedClock, confirmedBy = []) => {
 	await forgetPeer(nodeId);
 	await recordRemoval(nodeId, stamp, confirmedBy);
 	return stamp;
+};
+
+const retireGhosts = async (peer) => {
+	const visible = discovery.discover();
+	const ghosts = (await readConfiguration()).filter((entry) => {
+		return entry.id !== peer.id && entry.address === peer.address && !visible.some((node) => { return node.id === entry.id; });
+	});
+	for (const ghost of ghosts) {
+		console.log(`${ghost.name || ghost.address} was replaced by ${peer.name || peer.address} at the same address; removing it.`);
+		await removePeer(ghost.id);
+	}
+};
+
+const clientAddress = (connection) => {
+	return String(connection.handshake?.address || '').replace(/^::ffff:/, '');
 };
 
 const connectToPeer = (address, auth) => {
@@ -238,8 +278,37 @@ const attachNamespace = () => {
 					return;
 				}
 
+				const source = clientAddress(connection);
+				const advertised = discovery.discover().find((node) => { return node.id === request.id; });
+				if (!advertised || ![advertised.address, (advertised.holdsVirtualIp ? advertised.virtualIp : null)].filter(Boolean).includes(source)) {
+					acknowledge({ status: 'failed', message: 'Pairing was refused: that node is not on the network at this address.' });
+					return;
+				}
+
+				if (request.adopt) {
+					await dropStalePeers();
+				}
+
+				if (await findPeer(request.id)) {
+					acknowledge({ status: 'failed', message: 'Pairing was refused: that node is already adopted. Remove it first to pair again.' });
+					return;
+				}
+
+				if (request.adopt) {
+					const current = await virtualIpConfiguration();
+					if ((await readConfiguration()).length) {
+						acknowledge({ status: 'failed', message: `${self.name || self.address} already belongs to a cluster. Remove its adopted nodes first.` });
+						return;
+					}
+
+					if (current?.address && current.address !== request.virtualIp?.address) {
+						acknowledge({ status: 'failed', message: `${self.name || self.address} has a different virtual IP (${current.address}).` });
+						return;
+					}
+				}
+
 				const key = (offered ? request.key : pairingKey(request.id));
-				await savePeer({ id: request.id, name: request.name, address: request.address, key }, request.clock);
+				await savePeer({ id: request.id, name: request.name, address: advertised.address, key }, request.clock);
 				if (request.virtualIp?.address) {
 					hostModule?.eventEmitter.emit('host:peer:virtualIp:received', request.virtualIp);
 				}
@@ -409,17 +478,17 @@ const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) =
 /** Says the same thing to every adopted node. Unreachable peers are logged and skipped — this runs
  * behind operations that must not fail because another node is switched off. */
 const broadcast = async (event, payload = {}) => {
-	for (const peer of await readConfiguration()) {
-		try {
-			await call(peer.id, event, payload);
-		} catch (error) {
-			console.warn(`Could not tell ${peer.name || peer.address} about ${event}: ${error.message}`);
+	const peers = await readConfiguration();
+	const results = await Promise.allSettled(peers.map((peer) => { return call(peer.id, event, payload); }));
+	results.forEach((result, index) => {
+		if (result.status === 'rejected') {
+			console.warn(`Could not tell ${peers[index].name || peers[index].address} about ${event}: ${result.reason.message}`);
 		}
-	}
+	});
 };
 
 /** One call: the node with the smaller id mints the key, and both keep it. */
-const pairWith = async (nodeId, address) => {
+const pairWith = async (nodeId, address, adopting = false) => {
 	const self = await describeSelf();
 	const offered = (self.id < nodeId ? pairingKey(nodeId) : undefined);
 	// Sent as well as read back: the node holding the address is the one that adopts, so the config
@@ -428,10 +497,10 @@ const pairWith = async (nodeId, address) => {
 	const connection = connectToPeer(address, { mode: 'pair' });
 	try {
 		const response = await new Promise((resolve, reject) => {
-			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, REQUEST_TIMEOUT_MS);
+			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, (adopting ? REQUEST_TIMEOUT_MS + STALE_CHECK_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error('Could not reach that node.')); });
 			connection.on('connect', async () => {
-				connection.emit('pair:request', { ...self, key: offered, virtualIp: configured, clock: await loadClock() }, (answer) => {
+				connection.emit('pair:request', { ...self, key: offered, virtualIp: configured, adopt: adopting, clock: await loadClock() }, (answer) => {
 					clearTimeout(timer);
 					(answer?.status === 'ok' ? resolve(answer) : reject(new Error(answer?.message || 'Pairing was refused.')));
 				});
@@ -457,9 +526,9 @@ const pairWith = async (nodeId, address) => {
 	}
 };
 
-const pairOnce = (nodeId, address) => {
+const pairOnce = (nodeId, address, adopting = false) => {
 	if (!pairing.has(nodeId)) {
-		pairing.set(nodeId, pairWith(nodeId, address).finally(() => { pairing.delete(nodeId); }));
+		pairing.set(nodeId, pairWith(nodeId, address, adopting).finally(() => { pairing.delete(nodeId); }));
 	}
 
 	return pairing.get(nodeId);
@@ -484,17 +553,16 @@ const joinIntroduced = async (node) => {
 const introduce = async (nodeId) => {
 	const newcomer = await findPeer(nodeId);
 	const others = (await readConfiguration()).filter((peer) => { return peer.id !== nodeId; });
-	const failed = [];
-	for (const peer of others) {
-		try {
-			await call(peer.id, 'peer:introduce', { node: { id: newcomer.id, name: newcomer.name, address: newcomer.address } }, INTRODUCE_TIMEOUT_MS);
-		} catch (error) {
-			console.warn(`Could not introduce ${newcomer.name || newcomer.address} to ${peer.name || peer.address}: ${error.message}`);
-			failed.push(peer.name || peer.address);
+	const node = { id: newcomer.id, name: newcomer.name, address: newcomer.address };
+	const results = await Promise.allSettled(others.map((peer) => { return call(peer.id, 'peer:introduce', { node }, INTRODUCE_TIMEOUT_MS); }));
+	return others.filter((peer, index) => {
+		if (results[index].status === 'fulfilled') {
+			return false;
 		}
-	}
 
-	return failed;
+		console.warn(`Could not introduce ${newcomer.name || newcomer.address} to ${peer.name || peer.address}: ${results[index].reason.message}`);
+		return true;
+	}).map((peer) => { return peer.name || peer.address; });
 };
 
 const adopt = async (job, module) => {
@@ -512,8 +580,13 @@ const adopt = async (job, module) => {
 		throw new Error(`${peer.name || peer.address} has not finished its own setup yet.`);
 	}
 
+	const configured = await virtualIpConfiguration();
+	if (peer.virtualIp && peer.virtualIp !== configured?.address) {
+		throw new Error(`${peer.name || peer.address} has a different virtual IP (${peer.virtualIp}).`);
+	}
+
 	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
-	const node = await pairOnce(peer.id, peer.address);
+	const node = await pairOnce(peer.id, peer.address, true);
 	await module.updateJobProgress(job, `Introducing ${node.name || peer.address} to the other nodes...`);
 	const failed = await introduce(node.id);
 	if (failed.length) {
@@ -521,6 +594,35 @@ const adopt = async (job, module) => {
 	}
 
 	return `Adopted ${node.name || peer.address}.`;
+};
+
+const stillAdopted = async (address, nodeId, timeout = REQUEST_TIMEOUT_MS) => {
+	const connection = connectToPeer(address, { mode: 'call', nodeId });
+	try {
+		return await new Promise((resolve) => {
+			const timer = setTimeout(() => { resolve(true); }, timeout);
+			connection.on('connect', () => { clearTimeout(timer); resolve(true); });
+			connection.on('connect_error', (error) => { clearTimeout(timer); resolve(error?.data?.reason !== 'unknown'); });
+		});
+	} finally {
+		connection.close();
+	}
+};
+
+const dropStalePeers = async () => {
+	const self = await describeSelf();
+	const own = await ownAddresses();
+	const visible = discovery.discover();
+	const peers = (await readConfiguration()).map((peer) => {
+		return { peer, address: visible.find((node) => { return node.id === peer.id; })?.address };
+	}).filter(({ address }) => { return address && !own.includes(address); });
+	const results = await Promise.all(peers.map(({ address }) => { return stillAdopted(address, self.id, STALE_CHECK_TIMEOUT_MS); }));
+	for (const [index, adopted] of results.entries()) {
+		if (!adopted) {
+			console.log(`${peers[index].peer.name || peers[index].peer.address} no longer has this node adopted; removing it.`);
+			await forgetPeer(peers[index].peer.id);
+		}
+	}
 };
 
 /** Removal only ever reaches a node that is up. Remove a node while it is powered off and it comes
@@ -531,23 +633,13 @@ const adopt = async (job, module) => {
  * refused all leave the pairing alone: not hearing back is not the same as having been removed, and
  * treating it that way would drop a peer every time the other node reboots. */
 const reconcile = async (peer, address, nodeId) => {
-	const connection = connectToPeer(address, { mode: 'call', nodeId });
-	try {
-		const adopted = await new Promise((resolve) => {
-			const timer = setTimeout(() => { resolve(true); }, REQUEST_TIMEOUT_MS);
-			connection.on('connect', () => { clearTimeout(timer); resolve(true); });
-			connection.on('connect_error', (error) => { clearTimeout(timer); resolve(error?.data?.reason !== 'unknown'); });
-		});
-		if (adopted) {
-			return true;
-		}
-
-		console.log(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
-		await forgetPeer(peer.id);
-		return false;
-	} finally {
-		connection.close();
+	if (await stillAdopted(address, nodeId)) {
+		return true;
 	}
+
+	console.log(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
+	await forgetPeer(peer.id);
+	return false;
 };
 
 /** A virtual IP that changed while this node was off never arrived, and the holder has no reason to
@@ -657,6 +749,25 @@ const reconcileVisible = async (nodes) => {
 	}
 };
 
+const scheduleReconcile = async () => {
+	if (reconciling) {
+		reconcileAgain = true;
+		return;
+	}
+
+	reconciling = true;
+	try {
+		do {
+			reconcileAgain = false;
+			await reconcileVisible(discovery.discover());
+		} while (reconcileAgain);
+	} catch (error) {
+		console.warn(`Could not reconcile adopted nodes: ${error.message}`);
+	} finally {
+		reconciling = false;
+	}
+};
+
 /** One-sided by design: the node being removed is usually the one that has died. The virtual IP is
  * deliberately untouched — the address lives in the kernel, not in the pairing. */
 const remove = async (job, module) => {
@@ -676,23 +787,23 @@ const remove = async (job, module) => {
 	}
 
 	const removedClock = await removePeer(peer.id);
+	const others = await readConfiguration();
+	const results = await Promise.allSettled(others.map((other) => { return call(other.id, 'peer:forget', { id: peer.id, removedClock }); }));
 	const told = [];
-	for (const other of await readConfiguration()) {
-		try {
-			await call(other.id, 'peer:forget', { id: peer.id, removedClock });
-			await confirmRemovals(other.id, [peer.id]);
-			told.push(other.id);
-		} catch (error) {
-			console.warn(`Could not tell ${other.name || other.address} that ${peer.name || peer.address} was removed: ${error.message}`);
+	for (const [index, result] of results.entries()) {
+		if (result.status === 'fulfilled') {
+			await confirmRemovals(others[index].id, [peer.id]);
+			told.push(others[index].id);
+		} else {
+			console.warn(`Could not tell ${others[index].name || others[index].address} that ${peer.name || peer.address} was removed: ${result.reason.message}`);
 		}
 	}
 
-	for (const id of (told.length > 1 ? told : [])) {
-		try {
-			await call(id, 'peer:forget', { id: peer.id, removedClock, confirmedBy: told });
-		} catch (error) {
-			console.warn(`Could not confirm the removal of ${peer.name || peer.address}: ${error.message}`);
-		}
+	if (told.length > 1) {
+		const confirmations = await Promise.allSettled(told.map((id) => { return call(id, 'peer:forget', { id: peer.id, removedClock, confirmedBy: told }); }));
+		confirmations.filter((result) => { return result.status === 'rejected'; }).forEach((result) => {
+			console.warn(`Could not confirm the removal of ${peer.name || peer.address}: ${result.reason.message}`);
+		});
 	}
 
 	return `${peer.name || peer.address} removed.`;
@@ -702,7 +813,7 @@ const onConnection = (socket, module) => {
 	// emitChanged suppresses a repeat of the last payload, so a browser connecting after the last
 	// change would otherwise see nothing until the next adoption.
 	if (socket.isAuthenticated && socket.isAdmin) {
-		readConfiguration().then((peers) => { socket.emit('host:peers', peers); });
+		readConfiguration().then((peers) => { socket.emit('host:peers', withoutKeys(peers)); });
 	}
 
 };
@@ -711,13 +822,11 @@ const register = (module) => {
 	hostModule = module;
 	attachNamespace();
 	publishPeers();
-	module.eventEmitter.on('host:discovery:updated', async (nodes) => {
-		try {
-			await reconcileVisible(nodes);
-		} catch (error) {
-			console.warn(`Could not reconcile adopted nodes: ${error.message}`);
-		}
-	});
+	module.eventEmitter.on('host:discovery:updated', () => { scheduleReconcile(); });
+	setInterval(() => {
+		reconciled.clear();
+		scheduleReconcile();
+	}, RECONCILE_INTERVAL_MS);
 };
 
 export default {
