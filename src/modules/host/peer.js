@@ -162,7 +162,8 @@ const describeSelf = async () => {
 	return {
 		id: await advertisement.getNodeId(),
 		name: (hostModule?.getState('system')?.osInfo?.hostname || ''),
-		address: await getOwnAddress(virtualIp?.address)
+		address: await getOwnAddress(virtualIp?.address),
+		cluster: await getClusterDomain()
 	};
 };
 
@@ -373,6 +374,11 @@ const attachNamespace = () => {
 				const advertised = discovery.discover().find((node) => { return node.id === request.id; });
 				if (!advertised || ![advertised.address, (advertised.holdsVirtualIp ? advertised.virtualIp : null)].filter(Boolean).includes(source)) {
 					acknowledge({ status: 'failed', message: 'Pairing was refused: that node is not on the network at this address.' });
+					return;
+				}
+
+				if ((request.cluster || null) !== self.cluster) {
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is in ${request.cluster || 'no cluster'}, ${self.name || self.address} is in ${self.cluster || 'no cluster'}.` });
 					return;
 				}
 
@@ -674,6 +680,11 @@ const adopt = async (job, module) => {
 	const configured = await virtualIpConfiguration();
 	if (peer.virtualIp && peer.virtualIp !== configured?.address) {
 		throw new Error(`${peer.name || peer.address} has a different virtual IP (${peer.virtualIp}).`);
+	}
+
+	const cluster = await getClusterDomain();
+	if ((peer.cluster || null) !== cluster) {
+		throw new Error(`${peer.name || peer.address} is in ${peer.cluster || 'no cluster'}, this node is in ${cluster || 'no cluster'}. Set the same cluster on both first.`);
 	}
 
 	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
