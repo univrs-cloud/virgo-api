@@ -216,6 +216,19 @@ const peerRoute = (id, name, address, clusterDomain) => {
         serversTransport: "${router}"
         servers:
           - address: "${address}:443"
+http:
+  routers:
+    ${router}-acme:
+      rule: '(Host(\`${fqdn}\`) || HostRegexp(\`^.+\\.${fqdn.replace(/\./g, '\\.')}$\`)) && PathPrefix(\`/.well-known/acme-challenge/\`)'
+      entryPoints:
+        - "http"
+      priority: 1000
+      service: "${router}-acme"
+  services:
+    ${router}-acme:
+      loadBalancer:
+        servers:
+          - url: "http://${address}:80"
 `;
 };
 
