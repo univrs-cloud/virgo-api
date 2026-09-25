@@ -1,4 +1,4 @@
-const CORE_APPS = { authelia: 'Authelia', traefik: 'Traefik' };
+const CORE_APPS = { wetty: 'Terminal', authelia: 'Authelia', traefik: 'Traefik' };
 
 const getCoreApps = () => {
 	return Object.keys(CORE_APPS);
