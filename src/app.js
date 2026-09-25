@@ -1,5 +1,6 @@
 import express from 'express';
 import compression from 'compression';
+import config from '../config.js';
 import authorizationHandler from './middleware/authorization_handler.js';
 import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
