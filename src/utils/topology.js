@@ -1,5 +1,5 @@
 const MIRROR_WIDTH = 2;
-const SIZE_TOLERANCE = 0.01;
+const SIZE_TOLERANCE = 0.1;
 const PARITY = {
 	raidz1: 1,
 	raidz2: 2,
