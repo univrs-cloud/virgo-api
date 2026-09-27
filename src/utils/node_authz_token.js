@@ -31,7 +31,8 @@ const verifyNodeSessionToken = (token, { nodeToken, nodeId, sessionId } = {}) =>
 	}
 
 	const [encodedPayload, signature] = parts;
-	const expected = crypto.createHmac('sha256', nodeToken).update(encodedPayload).digest('base64url');
+	const signingKey = crypto.createHash('sha256').update(String(nodeToken)).digest('hex');
+	const expected = crypto.createHmac('sha256', signingKey).update(encodedPayload).digest('base64url');
 	if (!timingSafeEquals(signature, expected)) {
 		return null;
 	}
