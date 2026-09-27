@@ -277,7 +277,7 @@ const disconnect = () => {
 	fleetState.resetRuntimeState();
 };
 
-const registerNode = ({ email, password, nodeId, name, hostname, domainName, address }) => {
+const registerNode = ({ email, password, token, nodeId, name, hostname, domainName, address }) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
@@ -291,7 +291,7 @@ const registerNode = ({ email, password, nodeId, name, hostname, domainName, add
 			reject(new Error(error?.message || 'Failed to connect to fleet'));
 		});
 		socket.on('connect', () => {
-			socket.emit('node:register', { nodeId, name, hostname, domainName, address, email, password }, (response) => {
+			socket.emit('node:register', { nodeId, name, hostname, domainName, address, email, password, token }, (response) => {
 				socket.disconnect();
 				if (response?.status !== 'succeeded') {
 					reject(new Error(response?.message || 'Fleet registration failed'));
@@ -349,6 +349,7 @@ const registerFleet = async (job, module) => {
 	const { nodeId, token } = await registerNode({
 		email: fleetEmail,
 		password: config.password,
+		token: configuration?.fleet?.token,
 		nodeId: await resolveNodeId(configuration),
 		name: await getNodeName(),
 		...await getNodeIdentifier()
