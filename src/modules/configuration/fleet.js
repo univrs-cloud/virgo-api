@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import si from 'systeminformation';
 import { io } from 'socket.io-client';
 import validator from 'validator';
@@ -14,6 +14,7 @@ import { getNodeId } from '../host/advertisement.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
+const REGISTRATION_TIMEOUT_MS = 60000;
 // A mass power event brings many nodes back at once; without a spread they'd all open their
 // control socket in the same tick and hammer the fleet server (each connect is a serialised
 // SQLite write). Delay the boot-time auto-connect by a random offset in this window so the
@@ -193,22 +194,16 @@ const refreshWebrtcBindAddress = async () => {
 	}
 };
 
-/** This node's fleet identity: minted on first registration and kept for as long as the node stays
- * enrolled, so a retry after a failed attempt — or a later re-registration — lands on the same fleet
- * record instead of creating a second one. Persisted before registering for exactly that reason: if
- * the fleet commits the record but the node never sees the answer, the retry reuses this id and
- * recovers onto that record rather than stranding it. A node is registered once it holds a token, so
- * writing the id alone does not present it as enrolled. Unregistering clears the whole record,
- * identity included, so the next registration mints a fresh one. */
-const resolveNodeId = async (configuration) => {
-	const existing = configuration?.fleet?.nodeId || '';
-	if (existing) {
-		return existing;
+const resolveRegistration = async (configuration) => {
+	const fleet = configuration?.fleet || {};
+	const nodeId = fleet.nodeId || randomUUID();
+	const registrationToken = fleet.registrationToken || randomBytes(32).toString('hex');
+	if (fleet.nodeId !== nodeId || fleet.registrationToken !== registrationToken) {
+		if (!await DataService.setConfiguration('fleet', { ...fleet, nodeId, registrationToken })) {
+			throw new Error('Could not save fleet registration credentials.');
+		}
 	}
-
-	const nodeId = randomUUID();
-	await DataService.setConfiguration('fleet', { ...configuration?.fleet, nodeId });
-	return nodeId;
+	return { nodeId, token: fleet.token, registrationToken };
 };
 
 const connect = async ({ token, nodeId }) => {
@@ -277,7 +272,7 @@ const disconnect = () => {
 	fleetState.resetRuntimeState();
 };
 
-const registerNode = ({ email, password, token, nodeId, name, hostname, domainName, address }) => {
+const registerNode = ({ email, password, token, registrationToken, nodeId, name, hostname, domainName, address }) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
@@ -291,8 +286,12 @@ const registerNode = ({ email, password, token, nodeId, name, hostname, domainNa
 			reject(new Error(error?.message || 'Failed to connect to fleet'));
 		});
 		socket.on('connect', () => {
-			socket.emit('node:register', { nodeId, name, hostname, domainName, address, email, password, token }, (response) => {
+			socket.timeout(REGISTRATION_TIMEOUT_MS).emit('node:register', { nodeId, name, hostname, domainName, address, email, password, token, registrationToken }, (error, response) => {
 				socket.disconnect();
+				if (error) {
+					reject(new Error('Fleet registration interrupted or timed out. Please try again.'));
+					return;
+				}
 				if (response?.status !== 'succeeded') {
 					reject(new Error(response?.message || 'Fleet registration failed'));
 					return;
@@ -346,16 +345,20 @@ const registerFleet = async (job, module) => {
 	}
 
 	const fleetEmail = registeredEmail || submittedEmail;
+	const registration = await resolveRegistration(configuration);
 	const { nodeId, token } = await registerNode({
 		email: fleetEmail,
 		password: config.password,
-		token: configuration?.fleet?.token,
-		nodeId: await resolveNodeId(configuration),
+		token: registration.token,
+		registrationToken: registration.registrationToken,
+		nodeId: registration.nodeId,
 		name: await getNodeName(),
 		...await getNodeIdentifier()
 	});
 
-	await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email: fleetEmail });
+	if (!await DataService.setConfiguration('fleet', { enabled: true, nodeId, token, email: fleetEmail })) {
+		throw new Error('Could not save fleet registration credentials.');
+	}
 	module.eventEmitter.emit('configuration:updated');
 	await connect({ token, nodeId });
 	return 'Fleet registered.';
