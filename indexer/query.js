@@ -156,11 +156,17 @@ function search(db, pattern, opts = {}) {
 			s.name AS snapshot,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
 			CASE WHEN f.deleted_at_snap_id IS NOT NULL THEN 1 ELSE 0 END AS deleted,
+			s_last.name AS last_seen_snap,
+			strftime('%Y-%m-%dT%H:%M:%SZ', s_last.created_at, 'unixepoch') AS last_seen,
+			s_del.name AS deleted_snapshot,
+			strftime('%Y-%m-%dT%H:%M:%SZ', s_del.created_at, 'unixepoch') AS deleted_in,
 			c.change_type
 		FROM file_versions fv
 		JOIN files f ON f.id = fv.file_id
 		JOIN datasets d ON d.id = f.dataset_id
 		JOIN snapshots s ON s.id = fv.snapshot_id
+		LEFT JOIN snapshots s_last ON s_last.id = f.last_seen_snap_id
+		LEFT JOIN snapshots s_del ON s_del.id = f.deleted_at_snap_id
 		LEFT JOIN changes c ON c.file_id = f.id AND c.snapshot_id = fv.snapshot_id
 		WHERE f.id IN (${placeholders})
 		GROUP BY fv.id
@@ -187,8 +193,6 @@ function search(db, pattern, opts = {}) {
 			snapshot_path: v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.path}` : null,
 		}));
 
-		const showVersions = versionList.length > 1 || latest.deleted;
-
 		const entry = {
 			dataset: latest.dataset,
 			mountpoint: latest.mountpoint,
@@ -198,11 +202,12 @@ function search(db, pattern, opts = {}) {
 			size: latest.size,
 			modified_on: latest.modified,
 			deleted: latest.deleted,
+			last_seen_snap: latest.last_seen_snap,
+			last_seen: latest.last_seen,
+			deleted_snapshot: latest.deleted_snapshot,
+			deleted_in: latest.deleted_in,
+			versions: versionList,
 		};
-
-		if (showVersions) {
-			entry.versions = versionList;
-		}
 
 		results.push(entry);
 	}
