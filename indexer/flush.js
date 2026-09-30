@@ -1,7 +1,9 @@
 import * as database from './db.js';
+import { snapshotMountPath } from './zfs.js';
 import { STAT_CONCURRENCY } from './constants.js';
 import {
 	safeStatAsync,
+	primeMountReadable,
 	makeSnapshotStatError,
 	isWholesaleStatFailure,
 	resolveRelPath,
@@ -175,19 +177,19 @@ function bulkLoadFileMap(stmt, perf, datasetId, paths) {
 	return map;
 }
 
-function bulkLoadFileMapWithSnap(stmt, perf, datasetId, paths, snapId) {
+function bulkLoadFileMapAround(stmt, perf, datasetId, paths, prevSnap, snap) {
 	if (!paths.size) {
 		return new Map();
 	}
 	const t = Date.now();
-	const rows = stmt.bulkLookupFilesWithSnap.all(JSON.stringify([...paths]), datasetId, snapId);
+	const rows = stmt.bulkLookupFilesAround.all(JSON.stringify([...paths]), datasetId, prevSnap.created_at, snap.created_at);
 	perf.sqlSelects += rows.length;
 	perf.sqlMs += Date.now() - t;
 	const map = new Map();
 	for (const r of rows) {
 		map.set(r.path, {
 			id: r.id,
-			latestSize: r.latest_size ?? null,
+			sizeBefore: r.size_before ?? null,
 			sizeAtSnap: r.size_at_snap ?? null,
 		});
 	}
@@ -563,13 +565,115 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
-function flushChanges(db, stmt, perf, changes, prevSnap, snap, datasetId, mountpoint) {
+const MAX_RENAME_HOPS = 32;
+
+function findMovedFile(stmt, datasetId, relPath, snap) {
+	let path = relPath;
+	let after = snap.created_at;
+	for (let hop = 0; hop < MAX_RENAME_HOPS; hop++) {
+		const rename = stmt.nextRenameOfPath.get(datasetId, after, path);
+		if (!rename) {
+			break;
+		}
+		path = rename.new_path + path.slice(rename.old_path.length);
+		after = rename.created_at;
+	}
+	if (path === relPath) {
+		return null;
+	}
+	return stmt.getFileByPath.get(datasetId, path) ?? null;
+}
+
+async function statInSnapshot(snap, mountpoint, relPath, primed) {
+	const snapPath = snapshotMountPath(mountpoint, snap.name);
+	if (!primed.has(snap.id)) {
+		if (!(await primeMountReadable(snapPath))) {
+			throw makeSnapshotStatError(snap, snapPath, 1, 1);
+		}
+		primed.add(snap.id);
+	}
+	return safeStatAsync(snapPath + relPath);
+}
+
+async function firstSnapshotWithout(later, mountpoint, relPath, primed) {
+	let low = 0;
+	let high = later.length;
+	while (low < high) {
+		const mid = (low + high) >> 1;
+		if (await statInSnapshot(later[mid], mountpoint, relPath, primed)) {
+			low = mid + 1;
+		} else {
+			high = mid;
+		}
+	}
+	return low;
+}
+
+async function findDroppedFiles(stmt, perf, changes, relPaths, relNewPaths, fileByPath, prevSnap, snap, datasetId, mountpoint) {
+	const dropped = [];
+	const seen = new Set();
+	const primed = new Set();
+	let later = null;
+	for (let i = 0; i < changes.length; i++) {
+		if (changes[i].changeType === 'removed') {
+			continue;
+		}
+		const path = relNewPaths[i] ?? relPaths[i];
+		if (fileByPath.has(path) || seen.has(path)) {
+			continue;
+		}
+		seen.add(path);
+
+		const moved = findMovedFile(stmt, datasetId, path, snap);
+		if (moved) {
+			const sizes = stmt.fileSizesAround.get(moved.id, prevSnap.created_at, snap.created_at);
+			fileByPath.set(path, { id: moved.id, sizeBefore: sizes?.size_before ?? null, sizeAtSnap: sizes?.size_at_snap ?? null });
+			continue;
+		}
+
+		const st = await statInSnapshot(snap, mountpoint, path, primed);
+		if (!st) {
+			continue;
+		}
+		later ??= stmt.getSnapshotsForDataset.all(datasetId).filter(s => s.created_at > snap.created_at);
+		const gone = await firstSnapshotWithout(later, mountpoint, path, primed);
+		dropped.push({
+			path,
+			st,
+			lastSeen: (gone > 0 ? later[gone - 1] : snap),
+			deletedAt: later[gone] ?? null,
+		});
+	}
+	perf.sqlSelects += seen.size;
+	return dropped;
+}
+
+function restoreDroppedFiles(stmt, perf, dropped, fileByPath, snap, datasetId) {
+	for (const d of dropped) {
+		const fileRow = stmt.upsertFile.get(datasetId, d.path, d.st.ino, typeFromStat(d.st), snap.id, d.lastSeen.id);
+		perf.sqlUpserts++;
+		if (!fileRow) {
+			continue;
+		}
+		const size = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, d.st);
+		if (d.deletedAt) {
+			stmt.markDeleted.run(d.deletedAt.id, fileRow.id);
+			perf.sqlUpdates++;
+		}
+		fileByPath.set(d.path, { id: fileRow.id, sizeBefore: null, sizeAtSnap: size });
+		perf.backfilledFiles = (perf.backfilledFiles ?? 0) + 1;
+	}
+}
+
+async function flushChanges(db, stmt, perf, changes, prevSnap, snap, datasetId, mountpoint) {
 	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(changes, mountpoint, { lookupAllSources: true });
-	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
+	const fileByPath = bulkLoadFileMapAround(stmt, perf, datasetId, lookup, prevSnap, snap);
+	const dropped = await findDroppedFiles(stmt, perf, changes, relPaths, relNewPaths, fileByPath, prevSnap, snap, datasetId, mountpoint);
 
 	const t = Date.now();
 	database.transaction(db, () => {
 		perf.sqlTxns++;
+		restoreDroppedFiles(stmt, perf, dropped, fileByPath, snap, datasetId);
 		for (let i = 0; i < changes.length; i++) {
 			const c = changes[i];
 			const relPath = relPaths[i];
@@ -581,11 +685,11 @@ function flushChanges(db, stmt, perf, changes, prevSnap, snap, datasetId, mountp
 			let oldSize = null;
 			let newSize = null;
 			if (c.changeType === 'removed') {
-				oldSize = fileRow?.latestSize ?? null;
+				oldSize = fileRow?.sizeBefore ?? null;
 			} else if (c.changeType === 'added') {
 				newSize = fileRow?.sizeAtSnap ?? null;
 			} else {
-				oldSize = fileRow?.latestSize ?? null;
+				oldSize = fileRow?.sizeBefore ?? null;
 				newSize = fileRow?.sizeAtSnap ?? null;
 			}
 

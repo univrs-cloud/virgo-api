@@ -75,6 +75,16 @@ const MIGRATIONS = [
 			)
 		`);
 	},
+	(db) => {
+		db.exec(`
+			UPDATE snapshots SET diff_done = 0
+			WHERE EXISTS (
+				SELECT 1 FROM snapshots s2
+				WHERE s2.dataset_id = snapshots.dataset_id
+				AND (s2.created_at < snapshots.created_at OR (s2.created_at = snapshots.created_at AND s2.id < snapshots.id))
+			)
+		`);
+	},
 ];
 
 /**

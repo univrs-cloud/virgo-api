@@ -533,15 +533,30 @@ function prepareIndexerStatements(db) {
 			FROM json_each(?1) j
 			INNER JOIN files f ON f.path = j.value AND f.dataset_id = ?2
 		`),
-		// Same as bulkLookupFiles but additionally returns the size at a
-		// specific snapshot. Used by the standalone diff path where both
-		// snapshots are already indexed.
-		bulkLookupFilesWithSnap: db.prepare(`
+		bulkLookupFilesAround: db.prepare(`
 			SELECT f.path, f.id,
-				(SELECT size FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1) AS latest_size,
-				(SELECT size FROM file_versions WHERE file_id = f.id AND snapshot_id = ?3 LIMIT 1) AS size_at_snap
+				(SELECT fv.size FROM file_versions fv JOIN snapshots s ON s.id = fv.snapshot_id
+					WHERE fv.file_id = f.id AND s.created_at <= ?3 ORDER BY s.created_at DESC LIMIT 1) AS size_before,
+				(SELECT fv.size FROM file_versions fv JOIN snapshots s ON s.id = fv.snapshot_id
+					WHERE fv.file_id = f.id AND s.created_at <= ?4 ORDER BY s.created_at DESC LIMIT 1) AS size_at_snap
 			FROM json_each(?1) j
 			INNER JOIN files f ON f.path = j.value AND f.dataset_id = ?2
+		`),
+		fileSizesAround: db.prepare(`
+			SELECT
+				(SELECT fv.size FROM file_versions fv JOIN snapshots s ON s.id = fv.snapshot_id
+					WHERE fv.file_id = ?1 AND s.created_at <= ?2 ORDER BY s.created_at DESC LIMIT 1) AS size_before,
+				(SELECT fv.size FROM file_versions fv JOIN snapshots s ON s.id = fv.snapshot_id
+					WHERE fv.file_id = ?1 AND s.created_at <= ?3 ORDER BY s.created_at DESC LIMIT 1) AS size_at_snap
+		`),
+		nextRenameOfPath: db.prepare(`
+			SELECT c.old_path, c.new_path, s.created_at FROM changes c
+			JOIN snapshots s ON s.id = c.snapshot_id
+			WHERE s.dataset_id = ?1 AND s.created_at > ?2
+			AND c.change_type = 'renamed' AND c.new_path IS NOT NULL
+			AND (c.old_path = ?3 OR substr(?3, 1, length(c.old_path) + 1) = c.old_path || '/')
+			ORDER BY s.created_at, c.id
+			LIMIT 1
 		`),
 		markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
 		markDeletedIfGone: db.prepare(`
@@ -600,7 +615,11 @@ function prepareIndexerStatements(db) {
 			UPDATE OR IGNORE file_versions SET snapshot_id = ?1
 			WHERE snapshot_id = ?2
 			AND EXISTS (
-				SELECT 1 FROM files f WHERE f.id = file_versions.file_id AND f.deleted_at_snap_id IS NULL
+				SELECT 1 FROM files f WHERE f.id = file_versions.file_id
+				AND (
+					f.deleted_at_snap_id IS NULL
+					OR (SELECT created_at FROM snapshots WHERE id = f.deleted_at_snap_id) > (SELECT created_at FROM snapshots WHERE id = ?1)
+				)
 			)
 			-- Live *now* does not mean present continuously. A file deleted and later
 			-- restored was absent in between, so moving its version forward would
@@ -1203,9 +1222,7 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 		snap,
 		mountpoint,
 		perf,
-		flushBatch: (batch) => {
-			flushChanges(db, stmt, perf, batch, prevSnap, snap, datasetId, mountpoint);
-		},
+		flushBatch: (batch) => flushChanges(db, stmt, perf, batch, prevSnap, snap, datasetId, mountpoint),
 	});
 }
 
