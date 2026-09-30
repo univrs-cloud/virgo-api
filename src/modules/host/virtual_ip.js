@@ -84,11 +84,14 @@ const writeEnvironmentFile = async ({ address, netmask, device }) => {
 
 /** The virtual IP must never move on its own, so claiming is the only operation that probes: if
  * another host already answers, this node stands down rather than creating a duplicate address. */
-const claim = async (address) => {
+const assertUnheld = async (address) => {
 	if (!await holdsAddress(address) && await isAddressInUse(address) === true) {
 		throw new Error(`${address} is already held by another host on the network.`);
 	}
+};
 
+const claim = async (address) => {
+	await assertUnheld(address);
 	await execa('systemctl', ['enable', '--now', UNIT]);
 };
 
@@ -196,9 +199,11 @@ const apply = async (virtualIp, config, module) => {
 
 	validate(virtualIp, config);
 	await assertClaimable();
+	await assertUnheld(virtualIp);
+	await execa('systemctl', ['stop', UNIT]);
 	await writeEnvironmentFile({ address: virtualIp, netmask: config.netmask, device });
 	await DataService.setConfiguration('virtualIp', { address: virtualIp, netmask: config.netmask, device });
-	await claim(virtualIp);
+	await execa('systemctl', ['enable', '--now', UNIT]);
 	module.eventEmitter.emit('host:network:virtualIp:updated');
 };
 
@@ -377,6 +382,7 @@ const register = (module) => {
 	module.eventEmitter.on('host:peer:virtualIp:configure', (received) => { receiveConfiguration(received, module); });
 	module.eventEmitter.on('host:network:virtualIp:updated', () => { propagate(module); });
 	module.eventEmitter.on('host:network:interface:updated', () => { reassert(module); });
+	module.eventEmitter.on('host:network:identifier:updated', () => { reassert(module); });
 };
 
 export default {
