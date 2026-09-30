@@ -59,6 +59,7 @@ const register = (program) => {
 		.option('--dataset <names>', 'Limit to dataset root(s), comma-separated (each matches that dataset and children)')
 		.option('--path <pattern>', 'Filter by path (prefix or glob with * ?)')
 		.option('--type <type>', 'Filter by type: file, dir, link')
+		.option('--state <state>', 'Filter by state: live, modified, renamed, unchanged, deleted')
 		.option('--min-size <bytes>', 'Minimum file size in bytes', parseInt)
 		.option('--max-size <bytes>', 'Maximum file size in bytes', parseInt)
 		.option('--since <date>', 'Files modified after this date (ISO 8601)')

@@ -563,7 +563,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
 
-function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
+function flushChanges(db, stmt, perf, changes, prevSnap, snap, datasetId, mountpoint) {
 	const { relPaths, relNewPaths, lookup } = resolveBatchPaths(changes, mountpoint, { lookupAllSources: true });
 	const fileByPath = bulkLoadFileMapWithSnap(stmt, perf, datasetId, lookup, snap.id);
 
@@ -575,7 +575,7 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 			const relPath = relPaths[i];
 			const relNewPath = relNewPaths[i];
 
-			const fileRow = fileByPath.get(relPath) ?? null;
+			const fileRow = (c.changeType === 'renamed' ? fileByPath.get(relNewPath) : null) ?? fileByPath.get(relPath) ?? null;
 			const fileId = fileRow?.id ?? null;
 
 			let oldSize = null;
@@ -589,16 +589,15 @@ function flushChanges(db, stmt, perf, changes, snap, datasetId, mountpoint) {
 				newSize = fileRow?.sizeAtSnap ?? null;
 			}
 
-			// Deliberately no markDeleted here. This path only backfills the event
-			// log for a snapshot that is already indexed, and it can run for an old
-			// snapshot while newer ones are already done — marking the file deleted
-			// then would strand a live file as deleted forever. `files` lifecycle
-			// state belongs to the incremental paths.
-
 			if (fileId === null) {
 				perf.orphanedChanges++;
 				sampleOrphan(perf, snap, c.changeType, relPath, relNewPath, false, 'changes');
 				continue;
+			}
+
+			if (c.changeType === 'removed') {
+				stmt.markDeletedIfGone.run(snap.id, fileId, prevSnap.id);
+				perf.sqlUpdates++;
 			}
 
 			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;

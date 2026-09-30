@@ -2,6 +2,7 @@ import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 
 const TYPES = ['file', 'dir', 'link'];
+const STATES = ['live', 'modified', 'renamed', 'unchanged', 'deleted'];
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
@@ -59,6 +60,14 @@ const search = async (config = {}, socket, module) => {
 			throw new Error('Invalid type.');
 		}
 		args.push('--type', type);
+	}
+
+	if (isSet(config.state)) {
+		const state = cleanText(config.state)?.toLowerCase();
+		if (!STATES.includes(state)) {
+			throw new Error('Invalid state.');
+		}
+		args.push('--state', state);
 	}
 
 	for (const [key, flag] of [['since', '--since'], ['until', '--until']]) {

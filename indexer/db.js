@@ -61,6 +61,20 @@ const MIGRATIONS = [
 	(db) => {
 		addColumnIfMissing(db, 'files', 'overwritten_from', 'TEXT');
 	},
+	(db) => {
+		db.exec(`
+			UPDATE snapshots SET diff_done = 0
+			WHERE id IN (
+				SELECT DISTINCT fv.snapshot_id FROM file_versions fv
+				WHERE NOT EXISTS (SELECT 1 FROM changes c WHERE c.file_id = fv.file_id AND c.snapshot_id = fv.snapshot_id)
+			)
+			AND EXISTS (
+				SELECT 1 FROM snapshots s2
+				WHERE s2.dataset_id = snapshots.dataset_id
+				AND (s2.created_at < snapshots.created_at OR (s2.created_at = snapshots.created_at AND s2.id < snapshots.id))
+			)
+		`);
+	},
 ];
 
 /**

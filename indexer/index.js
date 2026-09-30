@@ -116,7 +116,6 @@ function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
 	database.transaction(db, () => {
 		stmt.deleteChangesBySnapshot.run(snapId);
 		if (mode === 'changes_only') {
-			stmt.clearDeletedAt.run(snapId);
 			return;
 		}
 		stmt.deleteVersionsBySnapshot.run(snapId);
@@ -283,6 +282,8 @@ function pruneSnapshotRow(db, stmt, snap, survivor) {
 		stmt.deleteChangesBySnapshot.run(snap.id);
 		if (survivor) {
 			stmt.reanchorVersions.run(survivor.id, snap.id);
+			stmt.moveDeletedAt.run(survivor.id, snap.id);
+			stmt.markDiffPending.run(survivor.id);
 		}
 		stmt.deleteVersionsBySnapshot.run(snap.id);
 		stmt.clearFirstSeen.run(snap.id);
@@ -543,6 +544,16 @@ function prepareIndexerStatements(db) {
 			INNER JOIN files f ON f.path = j.value AND f.dataset_id = ?2
 		`),
 		markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
+		markDeletedIfGone: db.prepare(`
+			UPDATE files SET deleted_at_snap_id = ?1, last_seen_snap_id = ?3
+			WHERE id = ?2 AND deleted_at_snap_id IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM file_versions fv
+				JOIN snapshots s ON s.id = fv.snapshot_id
+				WHERE fv.file_id = ?2
+				AND s.created_at >= (SELECT created_at FROM snapshots WHERE id = ?1)
+			)
+		`),
 		updateFileRename: db.prepare(`
 			UPDATE files SET path = ?, inode = ?, type = ?, last_seen_snap_id = ?, deleted_at_snap_id = NULL
 			WHERE id = ? AND dataset_id = ?
@@ -580,6 +591,8 @@ function prepareIndexerStatements(db) {
 		clearFirstSeen: db.prepare(`UPDATE files SET first_seen_snap_id = NULL WHERE first_seen_snap_id = ?`),
 		clearLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = NULL WHERE last_seen_snap_id = ?`),
 		clearDeletedAt: db.prepare(`UPDATE files SET deleted_at_snap_id = NULL WHERE deleted_at_snap_id = ?`),
+		moveDeletedAt: db.prepare(`UPDATE files SET deleted_at_snap_id = ?1 WHERE deleted_at_snap_id = ?2`),
+		markDiffPending: db.prepare(`UPDATE snapshots SET diff_done = 0 WHERE id = ?`),
 		deleteSnapshot: db.prepare(`DELETE FROM snapshots WHERE id = ?`),
 		// OR IGNORE skips rows that collide with a version the file already has at
 		// the survivor — those are redundant; deleteVersionsBySnapshot sweeps them.
@@ -1191,7 +1204,7 @@ async function doDiff(db, stmt, perf, prevSnap, snap, datasetId, mountpoint) {
 		mountpoint,
 		perf,
 		flushBatch: (batch) => {
-			flushChanges(db, stmt, perf, batch, snap, datasetId, mountpoint);
+			flushChanges(db, stmt, perf, batch, prevSnap, snap, datasetId, mountpoint);
 		},
 	});
 }

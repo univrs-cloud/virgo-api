@@ -59,6 +59,18 @@ function search(db, pattern, opts = {}) {
 	const until = opts.until ? Math.floor(new Date(opts.until).getTime() / 1000) : null;
 
 	const TYPE_FILTER = typeFilter ? `AND f.type = ?` : '';
+	const STATE_FILTERS = {
+		live: 'AND f.deleted_at_snap_id IS NULL',
+		modified: `AND EXISTS (SELECT 1 FROM changes c WHERE c.file_id = f.id AND c.change_type = 'modified')`,
+		deleted: 'AND f.deleted_at_snap_id IS NOT NULL',
+		renamed: `AND EXISTS (SELECT 1 FROM changes c WHERE c.file_id = f.id AND c.change_type = 'renamed')`,
+		unchanged: `AND f.deleted_at_snap_id IS NULL AND NOT EXISTS (SELECT 1 FROM changes c WHERE c.file_id = f.id AND c.change_type IN ('modified', 'renamed'))`,
+	};
+	if (opts.state && !STATE_FILTERS[opts.state]) {
+		console.error('Usage: --state live|modified|renamed|unchanged|deleted');
+		return null;
+	}
+	const STATE_FILTER = opts.state ? STATE_FILTERS[opts.state] : '';
 	const baseParams = [...dsScopeParams, ...(typeFilter ? [typeFilter] : [])];
 
 	let pathParam = null;
@@ -98,7 +110,7 @@ function search(db, pattern, opts = {}) {
 	const likeSearch = (needle) => db.prepare(`
 		SELECT DISTINCT f.id, f.dataset_id, f.path FROM files f
 		JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-		WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
+		WHERE f.path LIKE ? ${DS_FILTER} ${TYPE_FILTER} ${STATE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
 		${ORDER}
 		LIMIT ? OFFSET ?
 	`).all(needle, ...baseParams, ...filterParams, ...pathParams, limit, offset);
@@ -122,7 +134,7 @@ function search(db, pattern, opts = {}) {
 				SELECT DISTINCT f.id, f.dataset_id, f.path FROM fts_paths fp
 				JOIN files f ON f.id = fp.rowid
 				JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-				WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
+				WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${STATE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
 				${ORDER}
 				LIMIT ? OFFSET ?
 			`).all(ftsQuery, ...baseParams, ...filterParams, ...pathParams, limit, offset);
@@ -184,10 +196,10 @@ function search(db, pattern, opts = {}) {
 	const results = [];
 	for (const versions of grouped.values()) {
 		const latest = versions[versions.length - 1];
-		const versionList = versions.map(v => ({
+		const versionList = versions.map((v, index) => ({
 			snapshot: v.snapshot,
 			snapshot_on: v.snapshot_date,
-			change: v.change_type ?? null,
+			change: v.change_type ?? (index === 0 ? 'added' : null),
 			size: v.size,
 			modified_on: v.modified,
 			snapshot_path: v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.path}` : null,
