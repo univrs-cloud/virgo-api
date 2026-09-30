@@ -42,7 +42,7 @@ function sqlDatasetScope(scopes, tableAlias = 'd') {
 
 function search(db, pattern, opts = {}) {
 	if (!pattern) {
-		console.log('Usage: virgo indexer search <term> [--dataset <names>] [--path <pattern>] [--type file|dir]');
+		console.error('Usage: virgo indexer search <term> [--dataset <names>] [--path <pattern>] [--type file|dir]');
 		return null;
 	}
 
@@ -139,7 +139,9 @@ function search(db, pattern, opts = {}) {
 	}
 
 	if (!fileIds.length) {
-		console.log('No results.');
+		if (!json) {
+			console.log('No results.');
+		}
 		return [];
 	}
 
@@ -240,7 +242,7 @@ function search(db, pattern, opts = {}) {
 
 function history(db, path, opts = {}) {
 	if (!path) {
-		console.log('Usage: virgo indexer history <path> [--dataset <names>]');
+		console.error('Usage: virgo indexer history <path> [--dataset <names>]');
 		return null;
 	}
 
@@ -288,7 +290,9 @@ function history(db, path, opts = {}) {
 	`).all(path, path, ...chScope.params);
 
 	if (!versions.length && !chgs.length) {
-		console.log('No history found for that path.');
+		if (!json) {
+			console.log('No history found for that path.');
+		}
 		return { path, versions: [], changes: [] };
 	}
 
@@ -376,7 +380,9 @@ function deleted(db, opts = {}) {
 	);
 
 	if (!rows.length) {
-		console.log('No deleted files found.');
+		if (!json) {
+			console.log('No deleted files found.');
+		}
 		return { deleted: [] };
 	}
 
@@ -406,7 +412,7 @@ function deleted(db, opts = {}) {
 
 function changes(db, snapshotName, opts = {}) {
 	if (!snapshotName) {
-		console.log('Usage: virgo indexer changes <snapshot> [--dataset <names>] [--path <pattern>]');
+		console.error('Usage: virgo indexer changes <snapshot> [--dataset <names>] [--path <pattern>]');
 		return null;
 	}
 
@@ -450,7 +456,7 @@ function changes(db, snapshotName, opts = {}) {
 	}
 
 	if (!snap) {
-		console.log(`Snapshot '${snapshotName}' not found.`);
+		console.error(`Snapshot '${snapshotName}' not found.`);
 		return null;
 	}
 
@@ -477,7 +483,9 @@ function changes(db, snapshotName, opts = {}) {
 	};
 
 	if (!rows.length) {
-		console.log('No changes recorded for this snapshot.');
+		if (!json) {
+			console.log('No changes recorded for this snapshot.');
+		}
 		return result;
 	}
 
@@ -524,7 +532,7 @@ function changes(db, snapshotName, opts = {}) {
  */
 function diff(db, snapA, snapB, opts = {}) {
 	if (!snapA || !snapB) {
-		console.log('Usage: virgo indexer diff <snap_a> <snap_b>');
+		console.error('Usage: virgo indexer diff <snap_a> <snap_b>');
 		return null;
 	}
 
@@ -536,22 +544,24 @@ function diff(db, snapA, snapB, opts = {}) {
 	const sA = lookup.get(snapA, snapA);
 	const sB = lookup.get(snapB, snapB);
 	if (!sA) {
-		console.log(`Snapshot '${snapA}' not found.`);
+		console.error(`Snapshot '${snapA}' not found.`);
 		return null;
 	}
 	if (!sB) {
-		console.log(`Snapshot '${snapB}' not found.`);
+		console.error(`Snapshot '${snapB}' not found.`);
 		return null;
 	}
 	if (sA.dataset_id !== sB.dataset_id) {
-		console.log('Both snapshots must belong to the same dataset.');
+		console.error('Both snapshots must belong to the same dataset.');
 		return null;
 	}
 
 	// Tolerate the two being given newest-first.
 	const [from, to] = sA.created_at <= sB.created_at ? [sA, sB] : [sB, sA];
 	if (from.id === to.id) {
-		console.log('Both names resolve to the same snapshot.');
+		if (!json) {
+			console.log('Both names resolve to the same snapshot.');
+		}
 		return { from: snapA, to: snapB, total: 0, files: [] };
 	}
 
