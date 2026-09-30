@@ -136,7 +136,7 @@ const parse = (yamlContent) => {
 	}
 	
 	// Extract subdomain from router rule: Host(`subdomain.TEMPLATE_VAR`)
-	const ruleMatch = router.rule.match(/Host\(`([^.`]+)\./);
+	const ruleMatch = router.rule.match(/Host\(`([^`]+?)\.(?:\{\{|TEMPLATE_VAR)/);
 	const subdomain = ruleMatch ? ruleMatch[1] : null;
 	
 	// Extract backend URL from service
