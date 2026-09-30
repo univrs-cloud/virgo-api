@@ -172,7 +172,8 @@ function search(db, pattern, opts = {}) {
 			strftime('%Y-%m-%dT%H:%M:%SZ', s_last.created_at, 'unixepoch') AS last_seen,
 			s_del.name AS deleted_snapshot,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s_del.created_at, 'unixepoch') AS deleted_in,
-			c.change_type
+			c.change_type,
+			c.old_path AS change_old_path
 		FROM file_versions fv
 		JOIN files f ON f.id = fv.file_id
 		JOIN datasets d ON d.id = f.dataset_id
@@ -200,6 +201,7 @@ function search(db, pattern, opts = {}) {
 			snapshot: v.snapshot,
 			snapshot_on: v.snapshot_date,
 			change: v.change_type ?? (index === 0 ? 'added' : null),
+			renamed_from: (v.change_type === 'renamed' ? v.change_old_path : null),
 			size: v.size,
 			modified_on: v.modified,
 			snapshot_path: v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.path}` : null,
@@ -244,7 +246,7 @@ function search(db, pattern, opts = {}) {
 			if (r.versions && r.versions.length > 1) {
 				console.log(`history (${r.versions.length} versions):`);
 				for (const v of r.versions) {
-					const ch = v.change ? ` [${v.change}]` : '';
+					const ch = v.change ? ` [${v.change}${v.renamed_from ? ` from ${v.renamed_from}` : ''}]` : '';
 					console.log(`[${v.snapshot_on}] ${utils.formatSize(v.size)}${ch} ${v.snapshot}`);
 				}
 			}
