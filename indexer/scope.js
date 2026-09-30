@@ -15,12 +15,12 @@
  *    path segment (i.e. anything except `/`). The whole pattern must match
  *    the entire relative path of a directory.
  *
- *    - `data/appdata_<hash>/preview` — Nextcloud's preview pyramid: hundreds
- *                                       of thousands of tiny thumbnail tiles
- *                                       under every appdata directory. Churns
- *                                       on every file view, never user-visible.
- *                                       The rest of appdata (avatars, password
- *                                       backups, etc.) is kept.
+ *    - `data/appdata_<hash>`         — Nextcloud's internal app data: the
+ *                                       preview pyramid, caches, theming,
+ *                                       avatars, app backups. Churns constantly,
+ *                                       never user files. Matched at the root
+ *                                       and one level down, never deeper, so a
+ *                                       user folder with that name is kept.
  *
  *    - `config/www/nextcloud/apps`    — Nextcloud's installed app bundles. PHP
  *                                       source updated on every app upgrade,
@@ -31,7 +31,8 @@
  */
 const NOISE_DIR_NAMES = new Set(['db', 'redis']);
 const NOISE_DIR_GLOBS = [
-	'**/appdata_*/preview',
+	'appdata_*',
+	'*/appdata_*',
 	'**/www/nextcloud/apps',
 ];
 
@@ -43,7 +44,7 @@ const NOISE_DIR_GLOBS = [
 // `config/`, which only matches a dataset mounted above the Nextcloud data dir.
 // A dataset mounted at the data dir itself puts them at the root, so the preview
 // pyramid was indexed in full — on one production node, 73% of every row.
-const NOISE_SCOPE_VERSION = 2;
+const NOISE_SCOPE_VERSION = 3;
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
