@@ -44,7 +44,7 @@ const NOISE_DIR_GLOBS = [
 // `config/`, which only matches a dataset mounted above the Nextcloud data dir.
 // A dataset mounted at the data dir itself puts them at the root, so the preview
 // pyramid was indexed in full — on one production node, 73% of every row.
-const NOISE_SCOPE_VERSION = 3;
+const NOISE_SCOPE_VERSION = 4;
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
@@ -76,6 +76,7 @@ function globToERE(glob) {
 }
 
 const NOISE_GLOB_REGEXES = NOISE_DIR_GLOBS.map(g => new RegExp('^' + globToERE(g) + '(?:/|$)'));
+const NOISE_FILE_REGEX = /\/[^/]*\.log(\.[^/]*)?$/;
 
 function topLevelDirName(relPath) {
 	if (typeof relPath !== 'string' || relPath === '/' || !relPath.startsWith('/')) {
@@ -100,6 +101,10 @@ function isNoisePath(relPath) {
 		}
 	}
 	return false;
+}
+
+function isNoiseFile(relPath) {
+	return typeof relPath === 'string' && NOISE_FILE_REGEX.test(relPath);
 }
 
 function noisePrefixes() {
@@ -130,7 +135,8 @@ function noiseGrepPattern(mountpoint) {
 	const names = [...NOISE_DIR_NAMES].map(escapeForERE);
 	const globs = NOISE_DIR_GLOBS.map(globToERE);
 	const alt = [...names, ...globs].join('|');
-	return `${TAB}${anchor}/(${alt})(${TAB}|/|$)`;
+	const logFile = `^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^/${TAB}]${TAB}([^${TAB}]*${TAB})?${anchor}/([^/${TAB}]+/)*[^/${TAB}]*\\.log(\\.[^/${TAB}]*)?(${TAB}|$)`;
+	return `(${TAB}${anchor}/(${alt})(${TAB}|/|$))|(${logFile})`;
 }
 
-export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, NOISE_SCOPE_VERSION, isNoisePath, noisePrefixes, noiseGrepPattern };
+export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, NOISE_SCOPE_VERSION, isNoisePath, isNoiseFile, noisePrefixes, noiseGrepPattern };

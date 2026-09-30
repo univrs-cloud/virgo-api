@@ -2,7 +2,7 @@
 // dangling link throws — dropping the entry and inflating the stat-failure count
 // that aborts the snapshot.
 import { opendir, lstat } from 'fs/promises';
-import { isNoisePath } from './scope.js';
+import { isNoisePath, isNoiseFile } from './scope.js';
 import { BATCH_SIZE, STAT_CONCURRENCY } from './constants.js';
 import { primeMountReadable, isWholesaleStatFailure } from './snapshot_util.js';
 
@@ -118,7 +118,7 @@ async function walkSnapshot(snapshotPath, onBatch) {
 					? fullPath.slice(snapshotPath.length) || '/'
 					: fullPath;
 
-				if (entry.isDirectory() && isNoisePath(relPath)) {
+				if (entry.isDirectory() ? isNoisePath(relPath) : isNoiseFile(relPath)) {
 					continue;
 				}
 

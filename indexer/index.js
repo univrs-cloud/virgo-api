@@ -5,7 +5,7 @@ import * as walker from './walker.js';
 import * as utils from './utils.js';
 import { execaSync } from 'execa';
 import { BATCH_SIZE } from './constants.js';
-import { isNoisePath, NOISE_SCOPE_VERSION } from './scope.js';
+import { isNoisePath, isNoiseFile, NOISE_SCOPE_VERSION } from './scope.js';
 import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
 import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies } from './flush.js';
 import { logBatchProgress, endProgressLine } from './progress.js';
@@ -264,7 +264,7 @@ function purgeNoiseRows(db, stmt, filteredDatasets, datasetIds) {
 			batch = [];
 		};
 		for (const row of stmt.iterateFilePaths.iterate(dsId)) {
-			if (isNoisePath(row.path)) {
+			if (isNoisePath(row.path) || (row.type !== 'dir' && isNoiseFile(row.path))) {
 				batch.push(row.id);
 				if (batch.length >= BATCH_SIZE) {
 					flush();
@@ -634,7 +634,7 @@ function prepareIndexerStatements(db) {
 			)
 		`),
 		datasetHasFiles: db.prepare(`SELECT 1 AS present FROM files WHERE dataset_id = ? LIMIT 1`),
-		iterateFilePaths: db.prepare(`SELECT id, path FROM files WHERE dataset_id = ?`),
+		iterateFilePaths: db.prepare(`SELECT id, path, type FROM files WHERE dataset_id = ?`),
 		deleteChangesByFileIds: db.prepare(`DELETE FROM changes WHERE file_id IN (SELECT value FROM json_each(?1))`),
 		deleteVersionsByFileIds: db.prepare(`DELETE FROM file_versions WHERE file_id IN (SELECT value FROM json_each(?1))`),
 		deleteFilesByIds: db.prepare(`DELETE FROM files WHERE id IN (SELECT value FROM json_each(?1))`),
