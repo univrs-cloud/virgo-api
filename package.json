@@ -16,7 +16,7 @@
 		"executable_name": "virgo",
 		"init": "systemd",
 		"install_dir": "/var/www",
-		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,network-manager,avahi-daemon,avahi-utils",
+		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,network-manager,avahi-daemon,avahi-utils,zip",
 		"user": "root",
 		"templates": {
 			"preinst": "templates/preinstall",
