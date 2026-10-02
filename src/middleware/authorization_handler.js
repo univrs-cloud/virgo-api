@@ -36,18 +36,24 @@ const cookieDomain = async (req) => {
 /** A readable copy of who Authelia says is here, for the shell to build itself from before it has
  * spoken to anything. Removed rather than emptied when nobody is, and at both reaches: the session it
  * copies may have been established when the node answered to another name. */
+const cookieName = (req) => {
+	const host = ((setup.isCompleted() && traefikConfig.getDomain()) || req.hostname);
+	return `account_${host.toLowerCase().split('.')[0]}`;
+};
+
 const writeAccount = async (req, res, identity) => {
 	const domain = await cookieDomain(req);
+	const name = cookieName(req);
 	if (!identity) {
-		res.clearCookie('account', { domain, path: '/' });
+		res.clearCookie(name, { domain, path: '/' });
 		if (domain !== req.hostname) {
-			res.clearCookie('account', { domain: req.hostname, path: '/' });
+			res.clearCookie(name, { domain: req.hostname, path: '/' });
 		}
 		return;
 	}
 
 	const account = { name: identity.name, user: identity.username, email: identity.email, groups: identity.groups };
-	res.cookie('account', Buffer.from(JSON.stringify(account)).toString('base64'), {
+	res.cookie(name, Buffer.from(JSON.stringify(account)).toString('base64'), {
 		domain,
 		encode: String,
 		httpOnly: false,
