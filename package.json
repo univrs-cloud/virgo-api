@@ -39,7 +39,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^6.3.10",
+		"bullmq": "^6.3.11",
 		"camelcase-keys": "^10.0.3",
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
@@ -47,7 +47,7 @@
 		"compromise": "^14.17.0",
 		"docker-compose": "^1.5.0",
 		"dockerode": "^5.0.1",
-		"dotenv": "^18.0.4",
+		"dotenv": "^18.0.5",
 		"execa": "^10.0.1",
 		"compression": "^1.8.2",
 		"express": "^5.2.1",
@@ -67,7 +67,7 @@
 		"socket.io": "^4.8.4",
 		"socket.io-client": "^4.8.4",
 		"sqlite3": "^6.0.1",
-		"systeminformation": "^5.33.14",
+		"systeminformation": "^5.33.15",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
@@ -75,7 +75,7 @@
 		"utf-8-validate": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.6.3",
+		"@types/node": "^26.6.4",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
