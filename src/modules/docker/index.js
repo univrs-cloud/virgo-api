@@ -172,6 +172,8 @@ class DockerModule extends BaseModule {
 				return this.toArray(template.platforms).some((platform) => { return String(platform).toLowerCase() === this.#platform; });
 			});
 			this.setState('templates', templates);
+			await DataService.setRestoreZones(templates);
+			this.eventEmitter.emit('configured:updated');
 		} catch (error) {
 			this.setState('templates', false);
 			console.error(`Error loading templates:`, error);

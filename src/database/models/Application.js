@@ -12,15 +12,6 @@ const Application = sequelize.define('Application', {
 		allowNull: false,
 		unique: true
 	},
-	canBeRemoved: {
-		type: DataTypes.BOOLEAN,
-		allowNull: false,
-		defaultValue: true
-	},
-	category: {
-		type: DataTypes.STRING,
-		allowNull: true
-	},
 	title: {
 		type: DataTypes.STRING,
 		allowNull: true
@@ -28,6 +19,19 @@ const Application = sequelize.define('Application', {
 	icon: {
 		type: DataTypes.STRING,
 		allowNull: true
+	},
+	category: {
+		type: DataTypes.STRING,
+		allowNull: true
+	},
+	restoreZones: {
+		type: DataTypes.JSON,
+		allowNull: true
+	},
+	canBeRemoved: {
+		type: DataTypes.BOOLEAN,
+		allowNull: false,
+		defaultValue: true
 	}
 });
 
