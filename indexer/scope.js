@@ -34,7 +34,10 @@ const NOISE_DIR_GLOBS = [
 	'appdata_*',
 	'*/appdata_*',
 	'**/www/nextcloud/apps',
+	'**/.cache',
+	'**/config/keys',
 ];
+const NOISE_FILE_EXTENSIONS = ['crt', 'key', 'pem', 'cer', 'der', 'csr', 'p12', 'pfx', 'p7b', 'p7c', 'jks'];
 
 // Bump whenever the patterns above change. A pass whose stored version differs
 // sweeps rows indexed under the older, narrower patterns — otherwise content we
@@ -44,7 +47,7 @@ const NOISE_DIR_GLOBS = [
 // `config/`, which only matches a dataset mounted above the Nextcloud data dir.
 // A dataset mounted at the data dir itself puts them at the root, so the preview
 // pyramid was indexed in full — on one production node, 73% of every row.
-const NOISE_SCOPE_VERSION = 4;
+const NOISE_SCOPE_VERSION = 6;
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
@@ -76,7 +79,7 @@ function globToERE(glob) {
 }
 
 const NOISE_GLOB_REGEXES = NOISE_DIR_GLOBS.map(g => new RegExp('^' + globToERE(g) + '(?:/|$)'));
-const NOISE_FILE_REGEX = /\/[^/]*\.log(\.[^/]*)?$/;
+const NOISE_FILE_REGEX = new RegExp(`/[^/]*\\.(log(\\.[^/]*)?|${NOISE_FILE_EXTENSIONS.join('|')})$`);
 
 function topLevelDirName(relPath) {
 	if (typeof relPath !== 'string' || relPath === '/' || !relPath.startsWith('/')) {
@@ -135,8 +138,8 @@ function noiseGrepPattern(mountpoint) {
 	const names = [...NOISE_DIR_NAMES].map(escapeForERE);
 	const globs = NOISE_DIR_GLOBS.map(globToERE);
 	const alt = [...names, ...globs].join('|');
-	const logFile = `^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^/${TAB}]${TAB}([^${TAB}]*${TAB})?${anchor}/([^/${TAB}]+/)*[^/${TAB}]*\\.log(\\.[^/${TAB}]*)?(${TAB}|$)`;
-	return `(${TAB}${anchor}/(${alt})(${TAB}|/|$))|(${logFile})`;
+	const noiseFile = `^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^/${TAB}]${TAB}([^${TAB}]*${TAB})?${anchor}/([^/${TAB}]+/)*[^/${TAB}]*\\.(log(\\.[^/${TAB}]*)?|${NOISE_FILE_EXTENSIONS.join('|')})(${TAB}|$)`;
+	return `(${TAB}${anchor}/(${alt})(${TAB}|/|$))|(${noiseFile})`;
 }
 
 export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, NOISE_SCOPE_VERSION, isNoisePath, isNoiseFile, noisePrefixes, noiseGrepPattern };
