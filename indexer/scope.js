@@ -1,145 +1,50 @@
-/**
- * Directory subtrees that we ALWAYS skip during indexing.
- *
- * Two flavours:
- *
- * 1. NOISE_DIR_NAMES — exact directory names matched ONLY at the dataset
- *    root. e.g. `db` skips `/db` and `/db/**` but NOT `/data/db`.
- *
- *    - `db`    — MariaDB / PostgreSQL data files. Constant churn, useless
- *                for search.
- *    - `redis` — Redis RDB/AOF dumps. Binary, rewritten every snapshot.
- *
- * 2. NOISE_DIR_GLOBS — glob patterns matched against the relative path
- *    (rooted at the mountpoint, no leading slash). `*` matches any single
- *    path segment (i.e. anything except `/`). The whole pattern must match
- *    the entire relative path of a directory.
- *
- *    - `data/appdata_<hash>`         — Nextcloud's internal app data: the
- *                                       preview pyramid, caches, theming,
- *                                       avatars, app backups. Churns constantly,
- *                                       never user files. Matched at the root
- *                                       and one level down, never deeper, so a
- *                                       user folder with that name is kept.
- *
- *    - `config/www/nextcloud/apps`    — Nextcloud's installed app bundles. PHP
- *                                       source updated on every app upgrade,
- *                                       not user content, not searchable.
- *
- * Both lists are hardcoded. The user-facing toggle stays "enable/disable
- * indexing for this dataset" — no per-path config.
- */
-const NOISE_DIR_NAMES = new Set(['db', 'redis']);
-const NOISE_DIR_GLOBS = [
-	'appdata_*',
-	'*/appdata_*',
-	'**/www/nextcloud/apps',
-	'**/.cache',
-	'**/config/keys',
-];
-const NOISE_FILE_EXTENSIONS = ['crt', 'key', 'pem', 'cer', 'der', 'csr', 'p12', 'pfx', 'p7b', 'p7c', 'jks'];
-
-// Bump whenever the patterns above change. A pass whose stored version differs
-// sweeps rows indexed under the older, narrower patterns — otherwise content we
-// now exclude would sit in the index forever.
-//
-// v2: appdata/preview and the Nextcloud app bundles were anchored at `data/` and
-// `config/`, which only matches a dataset mounted above the Nextcloud data dir.
-// A dataset mounted at the data dir itself puts them at the root, so the preview
-// pyramid was indexed in full — on one production node, 73% of every row.
-const NOISE_SCOPE_VERSION = 6;
+const INDEXED_APP = 'nextcloud';
+const INDEXED_DATASET = `messier/apps/${INDEXED_APP}`;
+const INDEX_ROOT = '/data';
+const USER_FOLDERS = ['files', 'files_trashbin'];
+const GROUP_FOLDERS = '__groupfolders';
+const SYSTEM_FOLDERS = ['files_external'];
+const SYSTEM_FOLDER_PREFIX = 'appdata_';
+const SCOPE_VERSION = 8;
 
 function escapeForERE(s) {
 	return s.replace(/[.\\^$|()[\]*+?{}]/g, '\\$&');
 }
 
-// Convert a glob to an ERE fragment. A single `*` matches within one path
-// segment. A leading double-star segment matches any number of leading
-// segments, so a pattern applies wherever that subtree sits relative to the
-// dataset mountpoint. Every other regex metachar is escaped. The group is
-// capturing, not non-capturing, because POSIX ERE (grep -E) has no "(?:".
-function globToERE(glob) {
-	let out = '';
-	let start = 0;
-	if (glob.startsWith('**/')) {
-		out += '([^/]+/)*';
-		start = 3;
-	}
-	for (let i = start; i < glob.length; i++) {
-		const c = glob[i];
-		if (c === '*') {
-			out += '[^/]*';
-		} else if ('.\\^$|()[]+?{}'.includes(c)) {
-			out += '\\' + c;
-		} else {
-			out += c;
-		}
-	}
-	return out;
-}
-
-const NOISE_GLOB_REGEXES = NOISE_DIR_GLOBS.map(g => new RegExp('^' + globToERE(g) + '(?:/|$)'));
-const NOISE_FILE_REGEX = new RegExp(`/[^/]*\\.(log(\\.[^/]*)?|${NOISE_FILE_EXTENSIONS.join('|')})$`);
-
-function topLevelDirName(relPath) {
-	if (typeof relPath !== 'string' || relPath === '/' || !relPath.startsWith('/')) {
-		return null;
-	}
-	const next = relPath.indexOf('/', 1);
-	return next === -1 ? relPath.slice(1) : relPath.slice(1, next);
-}
-
-function isNoisePath(relPath) {
-	if (typeof relPath !== 'string' || !relPath.startsWith('/')) {
+function isInScope(relPath, isDir) {
+	if (typeof relPath !== 'string') {
 		return false;
 	}
-	const top = topLevelDirName(relPath);
-	if (top !== null && NOISE_DIR_NAMES.has(top)) {
+	if (relPath === INDEX_ROOT) {
+		return isDir;
+	}
+	if (!relPath.startsWith(`${INDEX_ROOT}/`)) {
+		return false;
+	}
+
+	const [top, sub, ...rest] = relPath.slice(INDEX_ROOT.length + 1).split('/');
+	if (top.startsWith(SYSTEM_FOLDER_PREFIX) || SYSTEM_FOLDERS.includes(top)) {
+		return false;
+	}
+	if (sub === undefined) {
+		return isDir;
+	}
+	if (top === GROUP_FOLDERS) {
 		return true;
 	}
-	const rel = relPath.slice(1);
-	for (const re of NOISE_GLOB_REGEXES) {
-		if (re.test(rel)) {
-			return true;
-		}
+	if (!USER_FOLDERS.includes(sub)) {
+		return false;
 	}
-	return false;
+	return (rest.length > 0 || isDir);
 }
 
-function isNoiseFile(relPath) {
-	return typeof relPath === 'string' && NOISE_FILE_REGEX.test(relPath);
-}
-
-function noisePrefixes() {
-	return [...[...NOISE_DIR_NAMES].map(n => `/${n}`), ...NOISE_DIR_GLOBS.map(g => `/${g}`)];
-}
-
-/**
- * Build a `grep -E` pattern that matches a noise path appearing in any
- * tab-delimited field of a `zfs diff -FHt` line.
- *
- * zfs diff emits ABSOLUTE filesystem paths (e.g.
- * `/messier/apps/nextcloud/db/file`), not paths relative to the dataset
- * mountpoint. So we anchor on `<TAB><mountpoint>/(noise)(<TAB>|/|<EOL>)`.
- *
- * The trailing `(\t|/|$)` is the boundary check: it ensures we match the
- * `db` directory and its subtree but NOT siblings whose names happen to
- * start with `db` (e.g. `/dbcache`) or root files like `/db.sql`.
- *
- * The pattern uses literal tab characters (POSIX ERE matches a literal tab
- * directly); `\t` as a portable escape across grep implementations is iffy.
- */
-function noiseGrepPattern(mountpoint) {
+function scopeGrepPattern(mountpoint) {
 	if (typeof mountpoint !== 'string' || !mountpoint.startsWith('/')) {
 		return null;
 	}
 	const TAB = '\t';
 	const anchor = escapeForERE(mountpoint.replace(/\/+$/, ''));
-	const names = [...NOISE_DIR_NAMES].map(escapeForERE);
-	const globs = NOISE_DIR_GLOBS.map(globToERE);
-	const alt = [...names, ...globs].join('|');
-	const noiseFile = `^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^/${TAB}]${TAB}([^${TAB}]*${TAB})?${anchor}/([^/${TAB}]+/)*[^/${TAB}]*\\.(log(\\.[^/${TAB}]*)?|${NOISE_FILE_EXTENSIONS.join('|')})(${TAB}|$)`;
-	return `(${TAB}${anchor}/(${alt})(${TAB}|/|$))|(${noiseFile})`;
+	return `${TAB}${anchor}${escapeForERE(INDEX_ROOT)}(${TAB}|/|$)`;
 }
 
-export { NOISE_DIR_NAMES, NOISE_DIR_GLOBS, NOISE_SCOPE_VERSION, isNoisePath, isNoiseFile, noisePrefixes, noiseGrepPattern };
+export { INDEXED_APP, INDEXED_DATASET, INDEX_ROOT, SCOPE_VERSION, isInScope, scopeGrepPattern };

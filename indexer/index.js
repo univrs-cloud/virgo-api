@@ -5,7 +5,7 @@ import * as walker from './walker.js';
 import * as utils from './utils.js';
 import { execaSync } from 'execa';
 import { BATCH_SIZE } from './constants.js';
-import { isNoisePath, isNoiseFile, NOISE_SCOPE_VERSION } from './scope.js';
+import { INDEXED_APP, INDEXED_DATASET, isInScope, SCOPE_VERSION } from './scope.js';
 import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
 import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies } from './flush.js';
 import { logBatchProgress, endProgressLine } from './progress.js';
@@ -161,8 +161,8 @@ const MISSING_RUNS_BEFORE_DROP = 3;
 
 /**
  * Remove SQLite rows for datasets that are no longer indexed:
- * - name not under current Configuration `indexer` list — dropped immediately,
- *   because that is a deliberate user action, or
+ * - name no longer indexed — dropped immediately, because the app it belongs to
+ *   was removed, or
  * - still in scope but not returned by ZFS for several consecutive runs.
  */
 function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
@@ -188,7 +188,7 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
 			}
 		}
 
-		const reason = !inScope ? 'removed from indexer configuration' : `absent from ZFS for ${MISSING_RUNS_BEFORE_DROP} runs`;
+		const reason = !inScope ? 'no longer indexed' : `absent from ZFS for ${MISSING_RUNS_BEFORE_DROP} runs`;
 		console.log(`  🗑  Dropping index data for ${name} (${reason})`);
 		database.transaction(db, () => {
 			stmt.deleteChangesForDataset.run(id);
@@ -236,16 +236,13 @@ function pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullN
 }
 
 /**
- * Delete rows for paths the current noise patterns exclude.
+ * Delete rows for paths outside the indexed folder.
  *
- * The walker and the diff filter only stop noise from being *added*; anything
- * indexed under an older, narrower pattern stays forever. Runs only when the
- * stored NOISE_SCOPE_VERSION differs, because it is a full scan of `files`.
- *
- * Matching happens in JS rather than SQL: the patterns allow a subtree at any
- * depth, which no single LIKE expresses without over-matching real user paths.
+ * The walker and the diff filter only stop them from being *added*; anything
+ * indexed under an older, wider scope stays forever. Runs only when the
+ * stored SCOPE_VERSION differs, because it is a full scan of `files`.
  */
-function purgeNoiseRows(db, stmt, filteredDatasets, datasetIds) {
+function purgeOutOfScopeRows(db, stmt, filteredDatasets, datasetIds) {
 	let removed = 0;
 	for (const d of filteredDatasets) {
 		const dsId = datasetIds[d.name];
@@ -264,7 +261,7 @@ function purgeNoiseRows(db, stmt, filteredDatasets, datasetIds) {
 			batch = [];
 		};
 		for (const row of stmt.iterateFilePaths.iterate(dsId)) {
-			if (isNoisePath(row.path) || (row.type !== 'dir' && isNoiseFile(row.path))) {
+			if (!isInScope(row.path, row.type === 'dir')) {
 				batch.push(row.id);
 				if (batch.length >= BATCH_SIZE) {
 					flush();
@@ -281,6 +278,9 @@ function pruneSnapshotRow(db, stmt, snap, survivor) {
 	database.transaction(db, () => {
 		stmt.deleteChangesBySnapshot.run(snap.id);
 		if (survivor) {
+			for (const rename of stmt.renamesBetweenSnapshots.all(snap.id, survivor.id)) {
+				stmt.advanceVersionPaths.run(rename.old_path, rename.new_path, snap.id);
+			}
 			stmt.reanchorVersions.run(survivor.id, snap.id);
 			stmt.moveDeletedAt.run(survivor.id, snap.id);
 			stmt.markDiffPending.run(survivor.id);
@@ -405,23 +405,6 @@ async function processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dataset
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-/**
- * Returns the configured dataset roots, or `null` if the key is present but not
- * an array. An empty result means "index nothing" and clears the database, so a
- * malformed value must be distinguishable — otherwise a config typo silently
- * costs a full re-crawl.
- */
-function normalizeIndexerDatasets(configuration) {
-	const raw = configuration?.indexer;
-	if (raw === null || raw === undefined) {
-		return [];
-	}
-	if (!Array.isArray(raw)) {
-		return null;
-	}
-	return raw.map(s => String(s).trim()).filter(Boolean);
-}
-
 async function run(_opts = {}) {
 	// Nowhere to keep an index means nothing to index: no pool, or one setup has not prepared yet.
 	const index = database.open();
@@ -436,21 +419,17 @@ async function run(_opts = {}) {
 		console.log(`🧹 Cleaned up ${staleTemps} stale zfs-diff temp file(s) from previous run(s).`);
 	}
 
-	const configuration = await DataService.getConfiguration();
-	const includeDatasets = normalizeIndexerDatasets(configuration);
-
-	if (includeDatasets === null) {
-		console.error(
-			'Indexer: Configuration key `indexer` is present but not a JSON array (virgo.db). Refusing to run — fix the value rather than lose the index to a typo.'
-		);
+	const isInstalled = await DataService.hasApplication(INDEXED_APP);
+	if (isInstalled === null) {
+		console.error('Indexer: could not tell whether Nextcloud is installed; leaving the index as it is.');
 		process.exitCode = 1;
 		return;
 	}
 
+	const includeDatasets = (isInstalled ? [INDEXED_DATASET] : []);
+
 	if (!includeDatasets.length) {
-		console.log(
-			'Indexer: Configuration key `indexer` is missing or empty (virgo.db); clearing the index database.'
-		);
+		console.log('Indexer: Nextcloud is not installed; clearing the index database.');
 		const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
 		try {
 			const db = database.open();
@@ -465,7 +444,7 @@ async function run(_opts = {}) {
 						ON CONFLICT(key) DO UPDATE SET value = excluded.value
 					`).run(lastRunAt);
 				});
-				console.log('✅ Index database cleared (no indexer roots configured).');
+				console.log('✅ Index database cleared (Nextcloud is not installed).');
 			} finally {
 				try {
 					db.exec('PRAGMA optimize');
@@ -522,7 +501,7 @@ function prepareIndexerStatements(db) {
 		markIndexed: db.prepare(`UPDATE snapshots SET indexed_at=? WHERE id=?`),
 		markDiffDone: db.prepare(`UPDATE snapshots SET diff_done=1 WHERE id=?`),
 		upsertFile: db.prepare(`INSERT INTO files(dataset_id, path, inode, type, first_seen_snap_id, last_seen_snap_id) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(dataset_id, path) DO UPDATE SET inode=excluded.inode, type=excluded.type, last_seen_snap_id=excluded.last_seen_snap_id, deleted_at_snap_id=NULL RETURNING id`),
-		insertVersion: db.prepare(`INSERT OR IGNORE INTO file_versions(file_id, snapshot_id, size, mtime, ctime, nlink, mode) VALUES(?, ?, ?, ?, ?, ?, ?)`),
+		insertVersion: db.prepare(`INSERT OR IGNORE INTO file_versions(file_id, snapshot_id, size, mtime, ctime, nlink, mode, path) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT COALESCE(overwritten_from, path) FROM files WHERE id = ?1))`),
 		getFileByPath: db.prepare(`SELECT id FROM files WHERE dataset_id = ? AND path = ?`),
 		// Bulk fetch (id, path, latest size) for every path in a batch via
 		// json_each so we don't do 4096 individual selects per flush. Used by
@@ -558,7 +537,24 @@ function prepareIndexerStatements(db) {
 			ORDER BY s.created_at, c.id
 			LIMIT 1
 		`),
-		markDeleted: db.prepare(`UPDATE files SET deleted_at_snap_id = ? WHERE id = ? AND deleted_at_snap_id IS NULL`),
+		markDeleted: db.prepare(`
+			UPDATE files SET deleted_at_snap_id = ?1, last_seen_snap_id = COALESCE((
+				SELECT sp.id FROM snapshots sp
+				WHERE sp.dataset_id = files.dataset_id
+				AND sp.created_at < (SELECT created_at FROM snapshots WHERE id = ?1)
+				ORDER BY sp.created_at DESC, sp.id DESC LIMIT 1
+			), last_seen_snap_id)
+			WHERE id = ?2 AND deleted_at_snap_id IS NULL
+		`),
+		markSubtreeDeleted: db.prepare(`
+			UPDATE files SET deleted_at_snap_id = ?1, last_seen_snap_id = COALESCE((
+				SELECT sp.id FROM snapshots sp
+				WHERE sp.dataset_id = files.dataset_id
+				AND sp.created_at < (SELECT created_at FROM snapshots WHERE id = ?1)
+				ORDER BY sp.created_at DESC, sp.id DESC LIMIT 1
+			), last_seen_snap_id)
+			WHERE dataset_id = ?2 AND path LIKE ?3 ESCAPE '\\' AND deleted_at_snap_id IS NULL
+		`),
 		markDeletedIfGone: db.prepare(`
 			UPDATE files SET deleted_at_snap_id = ?1, last_seen_snap_id = ?3
 			WHERE id = ?2 AND deleted_at_snap_id IS NULL
@@ -609,6 +605,20 @@ function prepareIndexerStatements(db) {
 		moveDeletedAt: db.prepare(`UPDATE files SET deleted_at_snap_id = ?1 WHERE deleted_at_snap_id = ?2`),
 		markDiffPending: db.prepare(`UPDATE snapshots SET diff_done = 0 WHERE id = ?`),
 		deleteSnapshot: db.prepare(`DELETE FROM snapshots WHERE id = ?`),
+		renamesBetweenSnapshots: db.prepare(`
+			SELECT c.old_path, c.new_path FROM changes c
+			JOIN snapshots s ON s.id = c.snapshot_id
+			WHERE s.dataset_id = (SELECT dataset_id FROM snapshots WHERE id = ?1)
+			AND c.change_type = 'renamed' AND c.new_path IS NOT NULL
+			AND s.created_at >  (SELECT created_at FROM snapshots WHERE id = ?1)
+			AND s.created_at <= (SELECT created_at FROM snapshots WHERE id = ?2)
+			ORDER BY s.created_at, c.id
+		`),
+		advanceVersionPaths: db.prepare(`
+			UPDATE file_versions SET path = ?2 || substr(path, length(?1) + 1)
+			WHERE snapshot_id = ?3
+			AND (path = ?1 OR substr(path, 1, length(?1) + 1) = ?1 || '/')
+		`),
 		// OR IGNORE skips rows that collide with a version the file already has at
 		// the survivor — those are redundant; deleteVersionsBySnapshot sweeps them.
 		reanchorVersions: db.prepare(`
@@ -655,10 +665,16 @@ function prepareIndexerStatements(db) {
 			)
 		`),
 		repairLastSeenNull: db.prepare(`
-			UPDATE files SET last_seen_snap_id = (
+			UPDATE files SET last_seen_snap_id = COALESCE((
+				SELECT sp.id FROM snapshots sp
+				WHERE files.deleted_at_snap_id IS NOT NULL
+				AND sp.dataset_id = files.dataset_id
+				AND sp.created_at < (SELECT created_at FROM snapshots WHERE id = files.deleted_at_snap_id)
+				ORDER BY sp.created_at DESC, sp.id DESC LIMIT 1
+			), (
 				SELECT snapshot_id FROM file_versions WHERE file_id = files.id
 				ORDER BY snapshot_id DESC LIMIT 1
-			)
+			))
 			WHERE dataset_id = ?
 			AND last_seen_snap_id IS NULL
 			AND EXISTS (SELECT 1 FROM file_versions WHERE file_id = files.id)
@@ -699,7 +715,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		// Descendant paths rewritten because zfs diff reported a directory rename;
 		// the children produce no diff lines of their own.
 		renamedSubtreePaths: 0,
-		purgedNoiseRows: 0,
+		purgedOutOfScopeRows: 0,
 		// Files destroyed by a rename landing on top of them; tombstoned, not dropped.
 		overwrittenFiles: 0,
 		crawlSkippedDirs: 0,
@@ -810,17 +826,17 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		}
 		forceBaselineRecrawl(db, stmt, filteredDatasets, datasetIds);
 
-		const storedScope = Number(stmt.getMeta.get('noise_scope_version')?.value ?? 0);
-		let purgedNoise = 0;
-		if (storedScope !== NOISE_SCOPE_VERSION) {
-			console.log(`  🧹 Noise patterns changed (v${storedScope} → v${NOISE_SCOPE_VERSION}); sweeping rows they now exclude…`);
-			purgedNoise = purgeNoiseRows(db, stmt, filteredDatasets, datasetIds);
-			perf.purgedNoiseRows = purgedNoise;
-			console.log(`     Removed ${purgedNoise.toLocaleString()} row(s).`);
+		const storedScope = Number(stmt.getMeta.get('scope_version')?.value ?? 0);
+		let purgedOutOfScope = 0;
+		if (storedScope !== SCOPE_VERSION) {
+			console.log(`  🧹 Index scope changed (v${storedScope} → v${SCOPE_VERSION}); sweeping rows outside it…`);
+			purgedOutOfScope = purgeOutOfScopeRows(db, stmt, filteredDatasets, datasetIds);
+			perf.purgedOutOfScopeRows = purgedOutOfScope;
+			console.log(`     Removed ${purgedOutOfScope.toLocaleString()} row(s).`);
 			database.transaction(db, () => {
-				stmt.setMeta.run('noise_scope_version', String(NOISE_SCOPE_VERSION));
+				stmt.setMeta.run('scope_version', String(SCOPE_VERSION));
 			});
-			if (purgedNoise > 0) {
+			if (purgedOutOfScope > 0) {
 				database.vacuumIfBloated(db);
 			}
 		}
@@ -838,10 +854,10 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 		// steady-state pass that only ingests a small incremental diff. Only pay
 		// it when a full crawl is actually going to run (or when the triggers are
 		// missing, e.g. a previous run was SIGKILLed before restoring them).
-		// A noise purge deletes a lot of `files` rows; letting the FTS triggers fire
+		// An out-of-scope purge deletes a lot of `files` rows; letting the FTS triggers fire
 		// per row costs far more than one rebuild at the end.
 		const needBulkMode = !ftsTriggersPresent(db)
-			|| purgedNoise > 0
+			|| purgedOutOfScope > 0
 			|| datasetWork.some(({ d, dsSnaps }) => willDoFullCrawl(dsSnaps, d.mountpoint));
 		if (needBulkMode) {
 			database.enableBulkMode(db);

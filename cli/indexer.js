@@ -30,7 +30,7 @@ const register = (program) => {
 
 	indexerCmd
 		.command('index')
-		.description('Index ZFS datasets and snapshots (uses configured indexer paths)')
+		.description('Index the files in Nextcloud\'s snapshots')
 		.action(async (options) => {
 			const indexer = await import('../indexer/index.js');
 			try {

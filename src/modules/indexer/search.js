@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
+import { INDEXED_DATASET } from '../../../indexer/scope.js';
 
 const TYPES = ['file', 'dir', 'link'];
 const STATES = ['live', 'modified', 'renamed', 'unchanged', 'deleted'];
@@ -31,15 +32,10 @@ const isDate = (value) => {
 	return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 };
 
-const search = async (config = {}, socket, module) => {
+const search = async (config = {}) => {
 	const term = cleanText(config.term);
 	if (!term) {
 		throw new Error('Invalid search term.');
-	}
-
-	const dataset = cleanText(config.dataset);
-	if (!dataset || !(module.getState('datasets') ?? []).includes(dataset)) {
-		throw new Error('Dataset is not indexed.');
 	}
 
 	const limit = (isSet(config.limit) ? config.limit : DEFAULT_LIMIT);
@@ -52,7 +48,7 @@ const search = async (config = {}, socket, module) => {
 		throw new Error('Invalid offset.');
 	}
 
-	const args = ['indexer', 'search', '--json', '--dataset', dataset, '--limit', String(limit), '--offset', String(offset)];
+	const args = ['indexer', 'search', '--json', '--dataset', INDEXED_DATASET, '--limit', String(limit), '--offset', String(offset)];
 
 	if (isSet(config.type)) {
 		const type = cleanText(config.type)?.toLowerCase();

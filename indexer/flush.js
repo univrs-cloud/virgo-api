@@ -438,6 +438,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				// Recreated in this same snapshot — the path is still there, so the
 				// removal applies to an object that a new one already replaced.
 				if (fileRow && !presentPaths.has(relPath)) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
+				if (c.isSubtree) { stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(relPath) + '/%'); perf.sqlUpdates++; }
 			} else if (c.changeType === 'modified') {
 				const st = statMap.get(i);
 				if (st) {
@@ -511,6 +512,10 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					} else {
 						perf.recreatedPaths = (perf.recreatedPaths ?? 0) + 1;
 					}
+				}
+				if (c.isSubtree) {
+					stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(relPath) + '/%');
+					perf.sqlUpdates++;
 				}
 			} else if (c.changeType === 'modified') {
 				if (st) {
@@ -702,6 +707,10 @@ async function flushChanges(db, stmt, perf, changes, prevSnap, snap, datasetId, 
 			if (c.changeType === 'removed') {
 				stmt.markDeletedIfGone.run(snap.id, fileId, prevSnap.id);
 				perf.sqlUpdates++;
+				if (c.isSubtree) {
+					stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(relPath) + '/%');
+					perf.sqlUpdates++;
+				}
 			}
 
 			const delta = (newSize !== null || oldSize !== null) ? (newSize ?? 0) - (oldSize ?? 0) : null;

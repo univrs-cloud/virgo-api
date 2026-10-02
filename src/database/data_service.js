@@ -10,8 +10,7 @@ const DEFAULT_CONFIGURATION = {
 		longitude: '21.227'
 	},
 	smtp: null,
-	trustedProxies: [],
-	indexer: []
+	trustedProxies: []
 };
 
 class DataService {
@@ -133,6 +132,19 @@ class DataService {
 				raw: true
 			});
 			return application;
+		} catch (error) {
+			console.error(`Error reading application '${name}' from database:`, error);
+			return null;
+		}
+	}
+
+	static async hasApplication(name) {
+		if (!await database.ensureOpen()) {
+			return null;
+		}
+
+		try {
+			return (await Application.count({ where: { name } }) > 0);
 		} catch (error) {
 			console.error(`Error reading application '${name}' from database:`, error);
 			return null;

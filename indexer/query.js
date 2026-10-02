@@ -162,16 +162,13 @@ function search(db, pattern, opts = {}) {
 
 	const rows = db.prepare(`
 		SELECT
-			f.id AS file_id, f.dataset_id,
-			d.name AS dataset, d.mountpoint, f.path, f.overwritten_from, f.type, fv.size, fv.mtime,
+			f.id AS file_id,
+			d.name AS dataset, d.mountpoint, f.path, fv.path AS version_path, f.type, fv.size, fv.mtime,
 			strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
 			s.name AS snapshot,
-			s.created_at AS snapshot_created_at,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
 			CASE WHEN f.deleted_at_snap_id IS NOT NULL THEN 1 ELSE 0 END AS deleted,
 			s_last.name AS last_seen_snap,
-			s_last.created_at AS last_seen_created_at,
-			s_del.created_at AS deleted_created_at,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s_last.created_at, 'unixepoch') AS last_seen,
 			s_del.name AS deleted_snapshot,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s_del.created_at, 'unixepoch') AS deleted_in,
@@ -181,12 +178,8 @@ function search(db, pattern, opts = {}) {
 		JOIN files f ON f.id = fv.file_id
 		JOIN datasets d ON d.id = f.dataset_id
 		JOIN snapshots s ON s.id = fv.snapshot_id
+		LEFT JOIN snapshots s_last ON s_last.id = f.last_seen_snap_id
 		LEFT JOIN snapshots s_del ON s_del.id = f.deleted_at_snap_id
-		LEFT JOIN snapshots s_last ON s_last.id = COALESCE((
-			SELECT s_prev.id FROM snapshots s_prev
-			WHERE s_prev.dataset_id = f.dataset_id AND s_prev.created_at < s_del.created_at
-			ORDER BY s_prev.created_at DESC LIMIT 1
-		), f.last_seen_snap_id)
 		LEFT JOIN changes c ON c.file_id = f.id AND c.snapshot_id = fv.snapshot_id
 		WHERE f.id IN (${placeholders})
 		GROUP BY fv.id
@@ -201,45 +194,9 @@ function search(db, pattern, opts = {}) {
 		grouped.get(r.file_id).push(r);
 	}
 
-	const datasetIds = [...new Set(rows.map(r => r.dataset_id))];
-	const renamesByDataset = new Map();
-	for (const rename of db.prepare(`
-		SELECT s.dataset_id, s.created_at, c.old_path, c.new_path
-		FROM changes c
-		JOIN snapshots s ON s.id = c.snapshot_id
-		WHERE c.change_type = 'renamed' AND c.new_path IS NOT NULL
-		AND s.dataset_id IN (${datasetIds.map(() => '?').join(',')})
-		ORDER BY s.created_at DESC, c.id DESC
-	`).all(...datasetIds)) {
-		if (!renamesByDataset.has(rename.dataset_id)) {
-			renamesByDataset.set(rename.dataset_id, []);
-		}
-		renamesByDataset.get(rename.dataset_id).push(rename);
-	}
-
 	const results = [];
 	for (const versions of grouped.values()) {
 		const latest = versions[versions.length - 1];
-		const renames = renamesByDataset.get(latest.dataset_id) ?? [];
-		const ceiling = (latest.overwritten_from ? latest.deleted_created_at : Infinity);
-		let pathAt = latest.overwritten_from ?? latest.path;
-		let next = 0;
-		const rewindTo = (createdAt) => {
-			while (next < renames.length && renames[next].created_at > createdAt) {
-				const rename = renames[next++];
-				if (rename.created_at >= ceiling) {
-					continue;
-				}
-				if (pathAt === rename.new_path || pathAt.startsWith(`${rename.new_path}/`)) {
-					pathAt = rename.old_path + pathAt.slice(rename.new_path.length);
-				}
-			}
-			return pathAt;
-		};
-		const lastSeenPath = (latest.last_seen_created_at !== null && latest.last_seen_created_at >= latest.snapshot_created_at ? rewindTo(latest.last_seen_created_at) : null);
-		for (let index = versions.length - 1; index >= 0; index--) {
-			versions[index].path_at = rewindTo(versions[index].snapshot_created_at);
-		}
 		const versionList = versions.map((v, index) => ({
 			snapshot: v.snapshot,
 			snapshot_on: v.snapshot_date,
@@ -247,7 +204,7 @@ function search(db, pattern, opts = {}) {
 			renamed_from: (v.change_type === 'renamed' ? v.change_old_path : null),
 			size: v.size,
 			modified_on: v.modified,
-			snapshot_path: v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.path_at}` : null,
+			snapshot_path: v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.version_path ?? v.path}` : null,
 		}));
 
 		const entry = {
@@ -261,7 +218,6 @@ function search(db, pattern, opts = {}) {
 			deleted: latest.deleted,
 			last_seen_snap: latest.last_seen_snap,
 			last_seen: latest.last_seen,
-			last_seen_path: lastSeenPath ?? versions[versions.length - 1].path_at,
 			deleted_snapshot: latest.deleted_snapshot,
 			deleted_in: latest.deleted_in,
 			versions: versionList,
@@ -321,7 +277,7 @@ function history(db, path, opts = {}) {
 			s.full_name,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
 			f.path,
-			f.overwritten_from,
+			fv.path AS version_path,
 			fv.size,
 			strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
 			fv.mode
@@ -360,7 +316,7 @@ function history(db, path, opts = {}) {
 	}
 
 	for (const v of versions) {
-		v.snapshot_path = v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.overwritten_from ?? v.path}` : null;
+		v.snapshot_path = v.mountpoint ? `${v.mountpoint}/.zfs/snapshot/${v.snapshot}${v.version_path ?? v.path}` : null;
 	}
 
 	if (!json) {

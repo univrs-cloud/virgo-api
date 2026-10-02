@@ -2,7 +2,8 @@ import { execaSync, execa } from 'execa';
 import { createReadStream, promises as fs, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import readline from 'readline';
-import { noiseGrepPattern } from './scope.js';
+import { isInScope, scopeGrepPattern } from './scope.js';
+import { resolveRelPath } from './snapshot_util.js';
 import * as database from './db.js';
 
 // ─── Temp file lifecycle ────────────────────────────────────────────────────
@@ -273,13 +274,13 @@ function unescapeZfsPath(str) {
  * to die with "Premature close" after multi-minute stalls.
  *
  * When a mountpoint is provided, the stream is pre-filtered through
- * `grep -v` against the noise pattern (db, redis, ...) so we never spend
- * disk space or JS parse time on change rows we'd just drop anyway. The
- * pattern is built from the same NOISE_DIR_NAMES set the walker uses, so
- * there's one source of truth for "what counts as noise".
+ * `grep` for the indexed folder, so we never spend disk space or JS parse
+ * time on change rows we'd just drop anyway. The pattern is built from the
+ * same INDEX_ROOT the walker uses, so there's one source of truth for what
+ * is indexed.
  *
  * grep exits with code 1 when no lines matched — meaning *every* zfs diff
- * row was noise. That's a perfectly valid outcome for us, not an error.
+ * row was outside it. That's a perfectly valid outcome for us, not an error.
  */
 async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	installExitHandlers();
@@ -287,7 +288,7 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	activeTempFiles.add(tmpPath);
 
 	try {
-		const pattern = noiseGrepPattern(mountpoint);
+		const pattern = scopeGrepPattern(mountpoint);
 		let result;
 		let zfsResult;
 
@@ -295,7 +296,7 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 			const promise = execa('zfs', ['diff', '-FHt', snapA, snapB], {
 				reject: false,
 				stderr: 'pipe',
-			}).pipe('grep', ['-vE', pattern], {
+			}).pipe('grep', ['-E', pattern], {
 				reject: false,
 				stdout: { file: tmpPath },
 				stderr: 'pipe',
@@ -325,14 +326,14 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 		}
 
 		// When piped through grep: 0 = matches emitted, 1 = nothing
-		// survived (entirely-noise diff — valid for us), >1 = real grep
+		// survived (nothing changed in the indexed folder — valid for us), >1 = real grep
 		// failure. When unfiltered, only 0 is success.
 		const ok = pattern ? (result.exitCode === 0 || result.exitCode === 1) : (result.exitCode === 0);
 		if (!ok) {
 			const stderr = (result.stderr && result.stderr.toString().trim()) || '';
 			const msg = stderr
 				|| `${pattern ? 'grep' : 'zfs diff'} exited with code ${result.exitCode}${result.signal ? ` (signal ${result.signal})` : ''}`;
-			const e = new Error(pattern ? `noise filter failed: ${msg}` : msg);
+			const e = new Error(pattern ? `scope filter failed: ${msg}` : msg);
 			e.code = 'ZFS_DIFF_FAILED';
 			e.exitCode = result.exitCode;
 			e.snapA = snapA;
@@ -346,8 +347,9 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 		});
 		for await (const line of rl) {
 			const entry = parseDiffLine(line);
-			if (entry) {
-				yield entry;
+			const scoped = (entry && pattern ? scopeDiffEntry(entry, mountpoint) : entry);
+			if (scoped) {
+				yield scoped;
 			}
 		}
 	} finally {
@@ -421,6 +423,26 @@ function parseDiffLine(line) {
 		newPath: rawNewPath ? unescapeZfsPath(rawNewPath) : null,
 		changedAt,
 	};
+}
+
+function scopeDiffEntry(entry, mountpoint) {
+	const isDir = (entry.fileType === 'dir');
+	const isSourceInScope = isInScope(resolveRelPath(entry.path, mountpoint), isDir);
+	if (entry.changeType !== 'renamed' || entry.newPath === null) {
+		return (isSourceInScope ? entry : null);
+	}
+
+	const isTargetInScope = isInScope(resolveRelPath(entry.newPath, mountpoint), isDir);
+	if (isSourceInScope && isTargetInScope) {
+		return entry;
+	}
+	if (isSourceInScope) {
+		return { ...entry, changeType: 'removed', newPath: null, isSubtree: isDir };
+	}
+	if (isTargetInScope) {
+		return { ...entry, changeType: 'added', path: entry.newPath, newPath: null };
+	}
+	return null;
 }
 
 function snapshotMountPath(datasetMountpoint, snapshotName) {

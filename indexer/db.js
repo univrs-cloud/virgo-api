@@ -208,6 +208,7 @@ function open(dbPath = null) {
 			ctime        INTEGER,
 			nlink        INTEGER,
 			mode         TEXT,
+			path         TEXT,
 			UNIQUE(file_id, snapshot_id)
 		);
 

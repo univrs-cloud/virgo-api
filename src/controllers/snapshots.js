@@ -3,8 +3,9 @@ import { spawn } from 'child_process';
 import { realpath, stat } from 'fs/promises';
 import express from 'express';
 import * as authelia from '../utils/authelia.js';
+import { INDEXED_DATASET, isInScope } from '../../indexer/scope.js';
 
-const SNAPSHOT_PATH_PATTERN = /^\/.+\/\.zfs\/snapshot\/[^/]+\/.+$/;
+const SNAPSHOT_PATH_PATTERN = new RegExp(`^/${INDEXED_DATASET}/\\.zfs/snapshot/[^/]+(/.+)$`);
 
 const router = express.Router();
 
@@ -85,7 +86,8 @@ router.get('/snapshots/download', async (req, res, next) => {
 		return;
 	}
 
-	if (!SNAPSHOT_PATH_PATTERN.test(target) || (!stats.isFile() && !stats.isDirectory())) {
+	const relPath = SNAPSHOT_PATH_PATTERN.exec(target)?.[1];
+	if (!relPath || (!stats.isFile() && !stats.isDirectory()) || !isInScope(relPath, stats.isDirectory())) {
 		res.sendStatus(404);
 		return;
 	}
