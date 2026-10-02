@@ -162,7 +162,6 @@ class DataService {
 				category: applicationData.category,
 				title: applicationData.title,
 				icon: applicationData.icon,
-				restoreZones: applicationData.restoreZones ?? null,
 				canBeRemoved: applicationData.canBeRemoved,
 			}, { returning: true });
 			const application = entry.get({ plain: true });
@@ -175,26 +174,6 @@ class DataService {
 		}
 	}
 	
-	static async setRestoreZones(templates) {
-		if (!await database.ensureOpen()) {
-			return false;
-		}
-
-		try {
-			const applications = await Application.findAll();
-			for (const application of applications) {
-				const template = templates.find((template) => { return String(template.name).toLowerCase() === application.name.toLowerCase(); });
-				if (template) {
-					await application.update({ restoreZones: template.restoreZones ?? null });
-				}
-			}
-			return true;
-		} catch (error) {
-			console.error(`Error writing restore zones to database:`, error);
-			return false;
-		}
-	}
-
 	static async deleteApplication(name) {
 		if (!await database.ensureOpen()) {
 			return false;

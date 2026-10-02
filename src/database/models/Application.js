@@ -24,10 +24,6 @@ const Application = sequelize.define('Application', {
 		type: DataTypes.STRING,
 		allowNull: true
 	},
-	restoreZones: {
-		type: DataTypes.JSON,
-		allowNull: true
-	},
 	canBeRemoved: {
 		type: DataTypes.BOOLEAN,
 		allowNull: false,

@@ -7,9 +7,6 @@
 		const { default: updateNotificationConfiguration } = await import('./001_update_notification_configuration_files.js');
 		await updateNotificationConfiguration();
 
-		const { default: addRestoreZonesToApplications } = await import('./003_add_restore_zones_to_applications.js');
-		await addRestoreZonesToApplications();
-
 		const { default: removeIndexerConfiguration } = await import('./004_remove_indexer_configuration.js');
 		await removeIndexerConfiguration();
 

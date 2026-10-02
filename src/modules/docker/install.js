@@ -114,8 +114,7 @@ const installApp = async (job, module) => {
 		canBeRemoved: !isCoreApp(template.name),
 		category: template.categories.find((_, index) => { return index === 0; }),
 		icon: icon,
-		title: template.title,
-		restoreZones: template.restoreZones ?? null
+		title: template.title
 	};
 	await module.updateJobProgress(job, `Updating apps registry...`);
 	await DataService.setApplication(app);
