@@ -1,7 +1,8 @@
 import path from 'path';
 import { randomBytes } from 'crypto';
 import { constants } from 'fs';
-import { copyFile, lchown, lstat, lutimes, mkdir, readdir, realpath, rename, rm, rmdir, stat } from 'fs/promises';
+import { copyFile, lstat, lutimes, mkdir, readdir, realpath, rename, rm, rmdir, stat } from 'fs/promises';
+import { execa } from 'execa';
 
 const MOUNTPOINT = '/messier/apps/nextcloud';
 const DATA_ROOT = '/data';
@@ -14,6 +15,7 @@ const TRASHED_NAME_PATTERN = /\.d\d+$/;
 const SNAPSHOT_PATH_PATTERN = new RegExp(`^${MOUNTPOINT}/\\.zfs/snapshot/([^/]+)(/.+)$`);
 const CONFLICTS = ['copy', 'overwrite'];
 const MAX_NAME_BYTES = 255;
+const OWNER = 'voyager:users';
 
 const isUserFolder = (name) => {
 	return name !== GROUP_FOLDERS && !name.startsWith(SYSTEM_FOLDER_PREFIX) && !SYSTEM_FOLDERS.includes(name);
@@ -125,12 +127,16 @@ const resolveExistingDestination = async (relPath) => {
 	return destination;
 };
 
+const setOwner = async (target) => {
+	await execa('chown', ['-h', '--', OWNER, target]);
+};
+
 const createFolder = async (parent, name, stats, created) => {
 	const folder = path.join(parent, name);
 	try {
 		await mkdir(folder, { mode: stats.mode & 0o7777 });
 		created.push(folder);
-		await lchown(folder, stats.uid, stats.gid);
+		await setOwner(folder);
 	} catch (error) {
 		if (error.code !== 'EEXIST') {
 			throw error;
@@ -268,7 +274,7 @@ const restoreFile = async (job, module) => {
 		if (await realpath(partial) !== partial) {
 			throw new Error('The folder changed while restoring.');
 		}
-		await lchown(partial, destination.stats.uid, destination.stats.gid);
+		await setOwner(partial);
 		await lutimes(partial, source.stats.atime, source.stats.mtime);
 		await rename(partial, path.join(folder, targetName));
 	} catch (error) {
