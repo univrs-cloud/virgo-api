@@ -1,7 +1,7 @@
 import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
-import { INDEXED_DATASET } from '../../../indexer/scope.js';
 
+const DATASET = 'messier/apps/nextcloud';
 const TYPES = ['file', 'dir', 'link'];
 const STATES = ['live', 'modified', 'renamed', 'unchanged', 'deleted'];
 const DEFAULT_LIMIT = 100;
@@ -48,7 +48,7 @@ const search = async (config = {}) => {
 		throw new Error('Invalid offset.');
 	}
 
-	const args = ['indexer', 'search', '--json', '--dataset', INDEXED_DATASET, '--limit', String(limit), '--offset', String(offset)];
+	const args = ['indexer', 'search', '--json', '--dataset', DATASET, '--limit', String(limit), '--offset', String(offset)];
 
 	if (isSet(config.type)) {
 		const type = cleanText(config.type)?.toLowerCase();

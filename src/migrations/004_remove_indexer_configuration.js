@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const DATABASE_FILE = '/messier/.config/virgo.db';
+const INDEX_DATABASE_FILE = '/messier/.config/index.db';
 const STOP_ATTEMPTS = 100;
 const STOP_INTERVAL = 100;
 
@@ -66,10 +67,9 @@ const removeIndexerConfiguration = async () => {
 			return;
 		}
 
-		const { INDEX_DB_PATH } = await import('../../indexer/db.js');
-		await stopIndexer(`${INDEX_DB_PATH}.lock`);
+		await stopIndexer(`${INDEX_DATABASE_FILE}.lock`);
 		for (const suffix of ['', '-wal', '-shm', '.lock']) {
-			await fs.rm(`${INDEX_DB_PATH}${suffix}`, { force: true });
+			await fs.rm(`${INDEX_DATABASE_FILE}${suffix}`, { force: true });
 		}
 		console.log(`Deleted the index database.`);
 

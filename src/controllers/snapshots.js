@@ -3,11 +3,39 @@ import { spawn } from 'child_process';
 import { realpath, stat } from 'fs/promises';
 import express from 'express';
 import * as authelia from '../utils/authelia.js';
-import { INDEXED_DATASET, isInScope } from '../../indexer/scope.js';
 
-const SNAPSHOT_PATH_PATTERN = new RegExp(`^/${INDEXED_DATASET}/\\.zfs/snapshot/[^/]+(/.+)$`);
+const SNAPSHOT_PATH_PATTERN = /^\/messier\/apps\/nextcloud\/\.zfs\/snapshot\/[^/]+(\/.+)$/;
+const DATA_ROOT = '/data';
+const USER_FOLDERS = ['files', 'files_trashbin'];
+const GROUP_FOLDERS = '__groupfolders';
+const SYSTEM_FOLDERS = ['files_external'];
+const SYSTEM_FOLDER_PREFIX = 'appdata_';
 
 const router = express.Router();
+
+const isUserContent = (relPath, isDir) => {
+	if (relPath === DATA_ROOT) {
+		return isDir;
+	}
+	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
+		return false;
+	}
+
+	const [top, sub, ...rest] = relPath.slice(DATA_ROOT.length + 1).split('/');
+	if (top.startsWith(SYSTEM_FOLDER_PREFIX) || SYSTEM_FOLDERS.includes(top)) {
+		return false;
+	}
+	if (sub === undefined) {
+		return isDir;
+	}
+	if (top === GROUP_FOLDERS) {
+		return true;
+	}
+	if (!USER_FOLDERS.includes(sub)) {
+		return false;
+	}
+	return (rest.length > 0 || isDir);
+};
 
 const sendFolder = (target, res) => {
 	const name = path.basename(target);
@@ -87,7 +115,7 @@ router.get('/snapshots/download', async (req, res, next) => {
 	}
 
 	const relPath = SNAPSHOT_PATH_PATTERN.exec(target)?.[1];
-	if (!relPath || (!stats.isFile() && !stats.isDirectory()) || !isInScope(relPath, stats.isDirectory())) {
+	if (!relPath || (!stats.isFile() && !stats.isDirectory()) || !isUserContent(relPath, stats.isDirectory())) {
 		res.sendStatus(404);
 		return;
 	}
