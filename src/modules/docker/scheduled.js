@@ -267,7 +267,7 @@ const fetchStackFiles = async (module) => {
 		// Update compose files for each installed app that has a template
 		for (const app of installedApps) {
 			const appName = app.name;
-			const template = templates.find((template) => { return template.name === appName; });
+			const template = module.findTemplateByAppName(templates, appName);
 
 			if (!template) {
 				continue; // Skip if no template exists for this app

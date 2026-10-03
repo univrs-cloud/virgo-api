@@ -162,7 +162,13 @@ const exploreApps = async (options) => {
 		return;
 	}
 
-	const available = templates.filter((template) => { return !installedNames.has(template.name); });
+	const available = templates.filter((template) => {
+		if (template.multiple === true) {
+			return (template.env || []).some((field) => { return String(field?.name ?? '').toLowerCase() === 'instance'; });
+		}
+
+		return !installedNames.has(template.name);
+	});
 	const hostfqdn = getHostFQDN();
 
 	if (options.json) {

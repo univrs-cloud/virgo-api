@@ -94,6 +94,18 @@ class DockerModule extends BaseModule {
 		return this.toArray(this.getState('templates'));
 	}
 
+	findTemplateByAppName(templates, appName) {
+		const name = String(appName ?? '').toLowerCase();
+		const exact = templates.find((template) => { return template.name.toLowerCase() === name; });
+		if (exact) {
+			return exact;
+		}
+
+		return templates.find((template) => {
+			return template.multiple === true && name.startsWith(`${template.name.toLowerCase()}-`);
+		});
+	}
+
 	/**
 	 * Find all containers for an app by matching compose project name.
 	 * Matches containers by compose project label (exact match).
