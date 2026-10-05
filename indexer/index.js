@@ -600,7 +600,7 @@ function prepareIndexerStatements(db) {
 		deleteVersionsOfFile: db.prepare(`DELETE FROM file_versions WHERE file_id = ?`),
 		getFileState: db.prepare(`SELECT id, inode, type, first_seen_snap_id, deleted_at_snap_id FROM files WHERE dataset_id = ? AND path = ?`),
 		heldRows: db.prepare(`
-			SELECT id, path, deleted_at_snap_id FROM files
+			SELECT id, path, type, deleted_at_snap_id FROM files
 			WHERE dataset_id = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))
 		`),
 		heldRecords: db.prepare(`

@@ -295,6 +295,23 @@ function displaceOccupants(stmt, perf, datasetId, path, snapId, fileByPath, cont
 }
 
 /**
+ * Something new was created at `path`. A file that was there before this
+ * snapshot is set aside. A deleted one stays, and the new object takes up its
+ * row and history, unless it is of another kind: a folder is not a later version
+ * of a file, so that history is parked and the newcomer starts its own.
+ */
+function makeRoomForNew(stmt, perf, datasetId, path, type, snapId, fileByPath, context) {
+	displaceOccupants(stmt, perf, datasetId, path, snapId, fileByPath, context);
+	const prior = stmt.getFileState.get(datasetId, path) ?? null;
+	perf.sqlSelects++;
+	if (prior && prior.deleted_at_snap_id !== null && prior.type !== type) {
+		stmt.parkFile.run(prior.id, snapId);
+		perf.sqlUpdates++;
+		fileByPath.delete(path);
+	}
+}
+
+/**
  * `target` sits where `source` is about to be. What it recorded for this
  * snapshot was written under the new path by an event applied earlier, so it
  * belongs to the file arriving there and is handed over. What is left is an
@@ -431,8 +448,8 @@ function applyFileRename(stmt, perf, datasetId, sourcePath, relNewPath, st, snap
  * renamed these files and they are no longer where they were, so each was
  * replaced by whatever is at its path now:
  *
- *   - by an object this snapshot created there: the same file as far as its
- *     history goes, so the two rows become one that carries on;
+ *   - by an object of the same kind that this snapshot created there: the same
+ *     file as far as its history goes, so the two rows become one that carries on;
  *   - by a file that was moved onto it: overwritten, kept as deleted history;
  *   - by nothing: removed.
  */
@@ -447,7 +464,7 @@ function finishSnapshot(db, stmt, perf, snap, datasetId, context) {
 			for (const held of stmt.heldRows.all(datasetId, hold, `${hold}/`, `${hold}0`)) {
 				const original = path + held.path.slice(hold.length);
 				const occupant = stmt.getFileState.get(datasetId, original) ?? null;
-				if (occupant && occupant.deleted_at_snap_id === null && occupant.first_seen_snap_id === snap.id) {
+				if (occupant && occupant.deleted_at_snap_id === null && occupant.first_seen_snap_id === snap.id && occupant.type === held.type) {
 					stmt.moveAllVersions.run(occupant.id, held.id);
 					stmt.deleteVersionsOfFile.run(occupant.id);
 					stmt.moveAllChanges.run(occupant.id, held.id);
@@ -592,7 +609,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				if (st) {
 					const type = typeFromStat(st);
 					if (fileByPath.has(relPath)) {
-						displaceOccupants(stmt, perf, datasetId, relPath, snap.id, fileByPath, context);
+						makeRoomForNew(stmt, perf, datasetId, relPath, type, snap.id, fileByPath, context);
 					}
 					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
 					perf.sqlUpserts++;
@@ -663,7 +680,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 				if (st) {
 					const type = typeFromStat(st);
 					if (fileByPath.has(relPath)) {
-						displaceOccupants(stmt, perf, datasetId, relPath, snap.id, fileByPath, context);
+						makeRoomForNew(stmt, perf, datasetId, relPath, type, snap.id, fileByPath, context);
 					}
 					const fileRow = stmt.upsertFile.get(datasetId, relPath, st.ino, type, snap.id, snap.id);
 					perf.sqlUpserts++;

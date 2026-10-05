@@ -867,7 +867,7 @@ function since(db, snapshotName, opts = {}) {
 		GROUP BY c.file_id, c.change_type
 	`);
 
-	const liveAt = db.prepare(`SELECT 1 AS found FROM files WHERE dataset_id = ? AND path = ? AND deleted_at_snap_id IS NULL`);
+	const liveAt = db.prepare(`SELECT type FROM files WHERE dataset_id = ? AND path = ? AND deleted_at_snap_id IS NULL`);
 
 	const files = [];
 	const allIds = [...ids];
@@ -890,7 +890,7 @@ function since(db, snapshotName, opts = {}) {
 			}
 
 			const isGone = f.deleted_at !== null;
-			const isReplaced = isGone && f.overwritten_from !== null && Boolean(liveAt.get(snap.dataset_id, f.overwritten_from));
+			const isReplaced = isGone && f.overwritten_from !== null && liveAt.get(snap.dataset_id, f.overwritten_from)?.type === f.type;
 			const isDeleted = !isReplaced && (isGone || isTrash(f.path));
 			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity));
 			if (!isUnder(path, folder)) {
