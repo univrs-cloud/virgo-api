@@ -192,6 +192,9 @@ function bulkLoadFileMapAround(stmt, perf, datasetId, paths, prevSnap, snap) {
 //     have recorded something. Whether that is the same file, seen early, or a new
 //     one that replaced it is only known once the old file's own event has had its
 //     chance, so the arriving file is set aside too.
+//   - What is set aside is kept outside the tree, under a name no real path can
+//     have, so nothing that moves a folder sweeps it up. It still belongs where it
+//     was taken from: when that place moves, its return address moves with it.
 //   - Whatever is still set aside when the snapshot is done was replaced, and is
 //     settled then (`finishSnapshot`).
 
@@ -269,6 +272,15 @@ function locateSource(stmt, perf, datasetId, relPath, fileByPath, context) {
 	return { path, row };
 }
 
+/** Everything set aside from at or under `from` now belongs at the same place under `to`. */
+function rebaseWaiting(context, from, to) {
+	for (const entry of [...context.displaced, ...context.incoming]) {
+		if (isAt(entry.path, from)) {
+			entry.path = to + entry.path.slice(from.length);
+		}
+	}
+}
+
 /** The directories this snapshot moved to somewhere at or under `path`. Their contents arrived with them. */
 function arrivedUnder(context, path) {
 	return JSON.stringify(context.moves.filter((move) => { return move.to !== path && isAt(move.to, path); }).map((move) => { return move.to; }));
@@ -280,7 +292,7 @@ function arrivedUnder(context, path) {
  * there stays, and so do deleted rows, as history.
  */
 function displaceOccupants(stmt, perf, datasetId, path, snapId, fileByPath, context) {
-	const hold = `${path}#displaced@${snapId}.${context.displaced.length}`;
+	const hold = `#displaced@${snapId}.${context.displaced.length}`;
 	const { changes } = stmt.moveOldRows.run(hold, path.length + 1, datasetId, path, snapId, arrivedUnder(context, path));
 	perf.sqlUpdates++;
 	if (Number(changes ?? 0) === 0) {
@@ -288,6 +300,7 @@ function displaceOccupants(stmt, perf, datasetId, path, snapId, fileByPath, cont
 	}
 
 	const move = { from: path, to: hold };
+	rebaseWaiting(context, path, hold);
 	context.moves.push(move);
 	context.displaced.push({ path, hold });
 	refreshMap(stmt, perf, datasetId, fileByPath, [move]);
@@ -362,7 +375,7 @@ function reclaimFromHold(stmt, perf, datasetId, hold, path, snapId) {
  */
 function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath, snapId, context) {
 	const arrived = arrivedUnder(context, relOldPath);
-	const hold = `${relNewPath}#incoming@${snapId}.${context.incoming.length}`;
+	const hold = `#incoming@${snapId}.${context.incoming.length}`;
 	let isHolding = false;
 	for (const collision of stmt.renameCollisions.all(datasetId, relNewPath, relOldPath.length + 1, relOldPath, snapId, arrived)) {
 		if (collision.target_deleted_at !== null) {
@@ -373,16 +386,16 @@ function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath
 		perf.sqlUpdates++;
 		isHolding = true;
 	}
-	if (isHolding) {
-		context.incoming.push({ path: relNewPath, hold });
-	}
-
 	const { changes } = stmt.moveOldRows.run(relNewPath, relOldPath.length + 1, datasetId, relOldPath, snapId, arrived);
 	perf.sqlUpdates++;
 	perf.renamedSubtreePaths = (perf.renamedSubtreePaths ?? 0) + Number(changes ?? 0);
 
 	const move = { from: relOldPath, to: relNewPath };
+	rebaseWaiting(context, relOldPath, relNewPath);
 	context.moves.push(move);
+	if (isHolding) {
+		context.incoming.push({ path: relNewPath, hold });
+	}
 	refreshMap(stmt, perf, datasetId, fileByPath, [move, { from: relNewPath, to: hold }]);
 }
 
@@ -451,7 +464,8 @@ function applyFileRename(stmt, perf, datasetId, sourcePath, relNewPath, st, snap
  *   - by an object of the same kind that this snapshot created there: the same
  *     file as far as its history goes, so the two rows become one that carries on;
  *   - by a file that was moved onto it: overwritten, kept as deleted history;
- *   - by nothing: removed.
+ *   - by nothing, because the place it was taken from has itself moved on: it
+ *     goes back there as it is.
  */
 function finishSnapshot(db, stmt, perf, snap, datasetId, context) {
 	const waiting = [...context.displaced, ...context.incoming];
@@ -478,15 +492,17 @@ function finishSnapshot(db, stmt, perf, snap, datasetId, context) {
 					continue;
 				}
 
+				if (!occupant) {
+					stmt.setPath.run(held.id, original);
+					perf.sqlUpdates++;
+					continue;
+				}
+
 				if (held.deleted_at_snap_id === null) {
 					stmt.markDeleted.run(snap.id, held.id);
 				}
-				if (occupant) {
-					stmt.parkAs.run(held.id, original, snap.id);
-					perf.overwrittenFiles = (perf.overwrittenFiles ?? 0) + 1;
-				} else {
-					stmt.setPath.run(held.id, original);
-				}
+				stmt.parkAs.run(held.id, original, snap.id);
+				perf.overwrittenFiles = (perf.overwrittenFiles ?? 0) + 1;
 				perf.sqlUpdates++;
 			}
 		}
