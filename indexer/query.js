@@ -806,7 +806,7 @@ function since(db, snapshotName, opts = {}) {
 	}
 
 	const describe = db.prepare(`
-		SELECT f.id, COALESCE(f.overwritten_from, f.path) AS path, f.type,
+		SELECT f.id, COALESCE(f.overwritten_from, f.path) AS path, f.type, f.overwritten_from,
 			sf.created_at AS first_seen, sd.created_at AS deleted_at
 		FROM files f
 		LEFT JOIN snapshots sf ON sf.id = f.first_seen_snap_id
@@ -817,10 +817,12 @@ function since(db, snapshotName, opts = {}) {
 		SELECT c.file_id, c.change_type
 		FROM changes c
 		JOIN snapshots s ON s.id = c.snapshot_id
-		WHERE s.created_at > ? AND c.change_type IN ('modified', 'renamed')
+		WHERE s.created_at > ? AND c.change_type IN ('modified', 'renamed', 'removed', 'added')
 			AND c.file_id IN (SELECT value FROM json_each(?))
 		GROUP BY c.file_id, c.change_type
 	`);
+
+	const liveAt = db.prepare(`SELECT 1 AS found FROM files WHERE dataset_id = ? AND path = ? AND deleted_at_snap_id IS NULL`);
 
 	const files = [];
 	const allIds = [...ids];
@@ -843,7 +845,8 @@ function since(db, snapshotName, opts = {}) {
 			}
 
 			const isGone = f.deleted_at !== null;
-			const isDeleted = isGone || isTrash(f.path);
+			const isReplaced = isGone && f.overwritten_from !== null && Boolean(liveAt.get(snap.dataset_id, f.overwritten_from));
+			const isDeleted = !isReplaced && (isGone || isTrash(f.path));
 			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity));
 			if (!isUnder(path, folder)) {
 				continue;
@@ -852,9 +855,12 @@ function since(db, snapshotName, opts = {}) {
 			const states = [];
 			if (isDeleted) {
 				states.push('deleted');
+			} else if (isReplaced) {
+				states.push('modified');
 			} else {
 				const types = typesById.get(f.id) ?? new Set();
-				if (types.has('modified') && f.type !== 'dir') {
+				const isChanged = types.has('modified') || types.has('removed') || types.has('added');
+				if (isChanged && f.type !== 'dir') {
 					states.push('modified');
 				}
 				if (types.has('renamed') && path !== f.path) {
@@ -872,7 +878,7 @@ function since(db, snapshotName, opts = {}) {
 				continue;
 			}
 
-			files.push({ path, type: f.type, states, current_path: (!isDeleted && path !== f.path ? f.path : null) });
+			files.push({ path, type: f.type, states, current_path: (!isDeleted && !isReplaced && path !== f.path ? f.path : null) });
 		}
 	}
 
