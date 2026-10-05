@@ -17,7 +17,7 @@ const withoutRenderedStatus = (containers) => {
 };
 
 class DockerModule extends BaseModule {
-	#composeDir = '/opt/docker';
+	#composeDir = '.docker';
 	#appsDataset = 'messier/apps';
 	#appsDir;
 	#appIconsDir = '/messier/.config/assets/img/apps';
@@ -70,7 +70,7 @@ class DockerModule extends BaseModule {
 
 	get projectComposeFile() {
 		return (composeProject) => {
-			return path.join(this.composeDir, composeProject, 'docker-compose.yml');
+			return path.join(this.appsDir, composeProject, this.composeDir, 'docker-compose.yml');
 		};
 	}
 

@@ -15,7 +15,6 @@ const POOL_OPTIONS = ['-o', 'ashift=13', '-o', 'autotrim=on', '-O', 'compression
 const DATASETS = [
 	{ name: `${POOL_NAME}/docker`, options: ['-o', 'mountpoint=/var/lib/docker'] },
 	{ name: `${POOL_NAME}/containerd`, options: ['-o', 'mountpoint=/var/lib/containerd'] },
-	{ name: `${POOL_NAME}/docker/compose`, options: ['-o', 'mountpoint=/opt/docker'] },
 	{ name: `${POOL_NAME}/apps`, options: [] },
 	{ name: `${POOL_NAME}/folders`, options: [] },
 	{ name: `${POOL_NAME}/time_machines`, options: ['-o', 'mountpoint=/time_machines'] },

@@ -3,7 +3,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
-const TRAEFIK_ENV_PATH = '/opt/docker/traefik/.env';
+const TRAEFIK_ENV_PATH = '/messier/apps/traefik/.docker/.env';
 const IGNORED_FILES = ['traefik.yml', 'local-service.yml'];
 
 /**

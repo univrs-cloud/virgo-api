@@ -1,6 +1,9 @@
 (async () => {
 	console.log(`Post install running...`);
 	try {
+		const { default: moveComposeFiles } = await import('./001_move_compose_files.js');
+		await moveComposeFiles();
+
 		const { default: renameBookmarksToShortcuts } = await import('./002_rename_bookmarks_to_shortcuts.js');
 		await renameBookmarksToShortcuts();
 

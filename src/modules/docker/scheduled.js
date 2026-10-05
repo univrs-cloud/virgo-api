@@ -182,7 +182,7 @@ const checkForUpdates = async (module) => {
 		// Check compose file first — if image name has changed, no registry request needed
 		let resolvedByCompose = false;
 		try {
-			const composeFilePath = labels?.comDockerComposeProjectConfigFiles || path.join(module.composeDir, labels?.comDockerComposeProject, 'docker-compose.yml');
+			const composeFilePath = labels?.comDockerComposeProjectConfigFiles || path.join(module.appsDir, labels?.comDockerComposeProject, module.composeDir, 'docker-compose.yml');
 			try {
 				await fs.access(composeFilePath);
 			} catch (error) {
@@ -248,12 +248,13 @@ const checkForUpdates = async (module) => {
 const fetchStackFiles = async (module) => {
 	try {
 		const composeDir = module.composeDir;
+		const appsDir = module.appsDir;
 
-		// Check if compose directory exists
+		// Check if apps directory exists
 		try {
-			await fs.access(composeDir);
+			await fs.access(appsDir);
 		} catch (error) {
-			console.warn(`Compose directory ${composeDir} does not exist. Skipping compose files update.`);
+			console.warn(`Apps directory ${appsDir} does not exist. Skipping compose files update.`);
 			return;
 		}
 
@@ -279,7 +280,7 @@ const fetchStackFiles = async (module) => {
 			}
 
 			try {
-				const composeFilePath = path.join(composeDir, appName, 'docker-compose.yml');
+				const composeFilePath = path.join(appsDir, appName, composeDir, 'docker-compose.yml');
 
 				// Check if docker-compose.yml file exists
 				try {

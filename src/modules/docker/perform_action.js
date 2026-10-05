@@ -63,12 +63,12 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'uninstall') {
 		action = ['down', '-v'];
 	}
-	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
+	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	if (config.action === 'recreate') {
 		await downloadComposeFile(job, module, config.name, composeProjectDir);
 	}
 
-	await execa('docker', ['compose', ...action], {
+	await execa('docker', ['compose', '-p', composeProject, ...action], {
 		cwd: composeProjectDir
 	});
 	if (config.action === 'uninstall') {

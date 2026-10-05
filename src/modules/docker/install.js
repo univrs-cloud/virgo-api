@@ -104,7 +104,7 @@ const installApp = async (job, module) => {
 			return envLine(key, value);
 		})
 		.join('\n');
-	const composeProjectDir = path.join(module.composeDir, name);
+	const composeProjectDir = path.join(module.appsDir, name, module.composeDir);
 	await module.updateJobProgress(job, `Making ${title} project directory...`);
 	await fs.mkdir(composeProjectDir, { recursive: true });
 	await module.updateJobProgress(job, `Writing ${title} project template...`);
@@ -116,7 +116,7 @@ const installApp = async (job, module) => {
 	const parsePullProgress = dockerPullProgressParser();
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
-		composeOptions: [['--progress', 'json']],
+		composeOptions: [['-p', name], ['--progress', 'json']],
 		callback: (chunk) => {
 			const progress = parsePullProgress(chunk);
 			if (progress) {
@@ -127,6 +127,7 @@ const installApp = async (job, module) => {
 	await module.updateJobProgress(job, `Installing ${title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
+		composeOptions: [['-p', name]],
 		commandOptions: ['--remove-orphans'],
 		callback: (chunk) => {
 			module.updateJobProgress(job, chunk.toString());

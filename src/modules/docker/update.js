@@ -22,7 +22,7 @@ const updateApp = async (job, module) => {
 	
 	const container = containers[0];
 	const composeProject = container.labels?.comDockerComposeProject;
-	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.composeDir, composeProject);
+	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
 	const template = module.findTemplateByAppName(await module.getTemplates(), config.name);
 	if (template) {
@@ -48,7 +48,7 @@ const updateApp = async (job, module) => {
 	const parsePullProgress = dockerPullProgressParser();
 	await dockerCompose.pullAll({
 		cwd: composeProjectDir,
-		composeOptions: [['--progress', 'json']],
+		composeOptions: [['-p', composeProject], ['--progress', 'json']],
 		callback: (chunk) => {
 			const progress = parsePullProgress(chunk);
 			if (progress) {
@@ -59,6 +59,7 @@ const updateApp = async (job, module) => {
 	await module.updateJobProgress(job, `Updating ${existingApp.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
+		composeOptions: [['-p', composeProject]],
 		commandOptions: ['--remove-orphans'],
 		callback: (chunk) => {
 			module.updateJobProgress(job, chunk.toString());
