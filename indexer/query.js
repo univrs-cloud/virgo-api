@@ -703,14 +703,15 @@ function longestDir(dirs, path, key) {
 	return best;
 }
 
-function pathBefore(steps, path, before) {
+function pathBefore(steps, path, before, followsFolders) {
 	let current = path;
 	for (let i = steps.length - 1; i >= 0; i--) {
 		const step = steps[i];
-		if (step.createdAt >= before) {
+		const isAfter = step.createdAt >= before;
+		if (isAfter && !followsFolders) {
 			continue;
 		}
-		const renamedFrom = step.byNewPath.get(current);
+		const renamedFrom = (isAfter ? undefined : step.byNewPath.get(current));
 		if (renamedFrom !== undefined) {
 			current = renamedFrom;
 			continue;
@@ -847,7 +848,7 @@ function since(db, snapshotName, opts = {}) {
 			const isGone = f.deleted_at !== null;
 			const isReplaced = isGone && f.overwritten_from !== null && Boolean(liveAt.get(snap.dataset_id, f.overwritten_from));
 			const isDeleted = !isReplaced && (isGone || isTrash(f.path));
-			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity));
+			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity), f.overwritten_from === null);
 			if (!isUnder(path, folder)) {
 				continue;
 			}
