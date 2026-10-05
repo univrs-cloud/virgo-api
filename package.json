@@ -7,7 +7,8 @@
 	"main": "index.js",
 	"scripts": {
 		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy ${DEB_ARCH:+--architecture $DEB_ARCH} -- index.js config.js cli/ cert/ src/ indexer/ systemd/",
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "node --test test/*.test.js",
+		"test:indexer": "node --test test/indexer-*.test.js"
 	},
 	"bin": {
 		"virgo": "./cli/virgo"

@@ -391,7 +391,7 @@ const FILETYPE_MAP = {
 	'@': 'link',
 	'B': 'block',
 	'C': 'char',
-	'P': 'pipe',
+	'|': 'pipe',
 	'=': 'socket',
 };
 
@@ -420,7 +420,9 @@ function parseDiffLine(line) {
 		changeType: changeType ?? 'unknown',
 		fileType: FILETYPE_MAP[typeChar] ?? 'other',
 		path: unescapeZfsPath(rawPath),
-		newPath: rawNewPath ? unescapeZfsPath(rawNewPath) : null,
+		// Only a rename has a second path. A change in a file's hard-link count is
+		// printed as a modification with the difference, such as `(+1)`, in that column.
+		newPath: (changeType === 'renamed' && rawNewPath ? unescapeZfsPath(rawNewPath) : null),
 		changedAt,
 	};
 }
@@ -452,4 +454,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
 	return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, snapshotExists, cleanupStaleTempFiles, scopeDiffEntry };
+export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, snapshotExists, cleanupStaleTempFiles, scopeDiffEntry, parseDiffLine };
