@@ -7,7 +7,7 @@ import { execaSync } from 'execa';
 import { BATCH_SIZE } from './constants.js';
 import { INDEXED_APP, INDEXED_DATASET, isInScope, SCOPE_VERSION } from './scope.js';
 import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
-import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies } from './flush.js';
+import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies, createSnapshotContext, finishSnapshot } from './flush.js';
 import { logBatchProgress, endProgressLine } from './progress.js';
 import { printStats } from './stats.js';
 
@@ -561,33 +561,67 @@ function prepareIndexerStatements(db) {
 			UPDATE files SET path = ?, inode = ?, type = ?, last_seen_snap_id = ?, deleted_at_snap_id = NULL
 			WHERE id = ? AND dataset_id = ?
 		`),
-		// `zfs diff` emits a single R line for a renamed directory — the children are
-		// untouched objects and produce no lines at all — so the subtree has to be
-		// rewritten by hand or every descendant path goes stale for good.
-		renameSubtree: db.prepare(`
-			UPDATE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\' AND deleted_at_snap_id IS NULL
-		`),
 		restoreDeletedPath: db.prepare(`
 			UPDATE OR IGNORE files SET path = ?1 WHERE id = ?2 AND deleted_at_snap_id IS NOT NULL
 		`),
 		restoreDeletedSubtreePaths: db.prepare(`
 			UPDATE OR IGNORE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\' AND deleted_at_snap_id = ?5
 		`),
+		// The rows that were at or under a path before this snapshot: live, neither
+		// created nor renamed by it (both stamp its id as last seen), and not inside a
+		// directory it moved in (?7, the destinations of those moves).
+		moveOldRows: db.prepare(`
+			UPDATE files SET path = ?1 || substr(path, ?2)
+			WHERE dataset_id = ?3 AND (path = ?4 OR (path >= ?4 || '/' AND path < ?4 || '0'))
+			AND deleted_at_snap_id IS NULL
+			AND (first_seen_snap_id IS NULL OR first_seen_snap_id != ?5) AND (last_seen_snap_id IS NULL OR last_seen_snap_id != ?5)
+			AND NOT EXISTS (SELECT 1 FROM json_each(?6) arrived WHERE files.path = arrived.value OR (files.path >= arrived.value || '/' AND files.path < arrived.value || '0'))
+		`),
 		renameCollisions: db.prepare(`
-			SELECT target.id AS target_id, source.id AS source_id
+			SELECT target.id AS target_id, target.deleted_at_snap_id AS target_deleted_at, source.id AS source_id, source.path AS source_path
 			FROM files source
 			JOIN files target ON target.dataset_id = source.dataset_id AND target.path = ?2 || substr(source.path, ?3)
-			WHERE source.dataset_id = ?1 AND source.path LIKE ?4 ESCAPE '\\' AND source.deleted_at_snap_id IS NULL
+			WHERE source.dataset_id = ?1 AND source.path >= ?4 || '/' AND source.path < ?4 || '0'
+			AND source.deleted_at_snap_id IS NULL
+			AND (source.first_seen_snap_id IS NULL OR source.first_seen_snap_id != ?5) AND (source.last_seen_snap_id IS NULL OR source.last_seen_snap_id != ?5)
+			AND NOT EXISTS (SELECT 1 FROM json_each(?6) arrived WHERE source.path = arrived.value OR (source.path >= arrived.value || '/' AND source.path < arrived.value || '0'))
 		`),
 		parkFile: db.prepare(`
 			UPDATE files
-			SET overwritten_from = COALESCE(overwritten_from, path), deleted_at_snap_id = COALESCE(deleted_at_snap_id, ?2), path = path || '#overwritten@' || ?2
+			SET overwritten_from = COALESCE(overwritten_from, path), deleted_at_snap_id = COALESCE(deleted_at_snap_id, ?2), path = path || '#overwritten@' || CAST(?2 AS INTEGER)
 			WHERE id = ?1
 		`),
 		moveVersionAtSnapshot: db.prepare(`UPDATE OR IGNORE file_versions SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3`),
-		moveChangesAtSnapshot: db.prepare(`UPDATE changes SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3`),
+		// Added and modified events name a path as it is in the new snapshot, so they
+		// describe whoever ends up there. Removed and renamed ones name the old object.
+		moveChangesAtSnapshot: db.prepare(`UPDATE changes SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3 AND change_type IN ('added', 'modified')`),
+		moveAllVersions: db.prepare(`UPDATE OR IGNORE file_versions SET file_id = ?2 WHERE file_id = ?1`),
+		moveAllChanges: db.prepare(`UPDATE changes SET file_id = ?2 WHERE file_id = ?1`),
+		deleteVersionsOfFile: db.prepare(`DELETE FROM file_versions WHERE file_id = ?`),
+		getFileState: db.prepare(`SELECT id, inode, type, first_seen_snap_id, deleted_at_snap_id FROM files WHERE dataset_id = ? AND path = ?`),
+		heldRows: db.prepare(`
+			SELECT id, path, deleted_at_snap_id FROM files
+			WHERE dataset_id = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))
+		`),
+		heldRecords: db.prepare(`
+			SELECT held.id AS held_id, target.id AS target_id
+			FROM files held
+			JOIN file_versions v ON v.file_id = held.id AND v.snapshot_id = ?1
+			JOIN files target ON target.dataset_id = held.dataset_id AND target.path = ?2 || substr(held.path, ?3)
+			WHERE held.dataset_id = ?4 AND (held.path = ?5 OR (held.path >= ?6 AND held.path < ?7))
+		`),
+		reviveAt: db.prepare(`
+			UPDATE files SET path = ?2, inode = ?3, type = ?4, last_seen_snap_id = ?5, deleted_at_snap_id = NULL, overwritten_from = NULL WHERE id = ?1
+		`),
+		parkAs: db.prepare(`
+			UPDATE files SET path = ?2 || '#overwritten@' || CAST(?3 AS INTEGER), overwritten_from = ?2 WHERE id = ?1
+		`),
+		setPath: db.prepare(`UPDATE files SET path = ?2 WHERE id = ?1`),
+		fillModifiedOldSize: db.prepare(`
+			UPDATE changes SET old_size = ?3, delta_bytes = COALESCE(new_size, 0) - ?3
+			WHERE file_id = ?1 AND snapshot_id = ?2 AND change_type = 'modified' AND old_size IS NULL
+		`),
 		hasVersions: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ? LIMIT 1`),
-		hasVersionAtSnapshot: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ?1 AND snapshot_id = ?2`),
 		sizeBeforeSnapshot: db.prepare(`
 			SELECT fv.size FROM file_versions fv
 			JOIN snapshots s ON s.id = fv.snapshot_id
@@ -601,17 +635,7 @@ function prepareIndexerStatements(db) {
 		`),
 		deleteChangesOfFile: db.prepare(`DELETE FROM changes WHERE file_id = ?`),
 		deleteFile: db.prepare(`DELETE FROM files WHERE id = ?`),
-		tombstoneOverwrittenFile: db.prepare(`
-			UPDATE files SET path = ?1, deleted_at_snap_id = ?2, overwritten_from = ?4 WHERE id = ?3
-		`),
-		// An overwritten file never survived to the end of the snapshot that
-		// destroyed it, so anything recorded for it there describes its replacement.
 		deleteVersionAtSnapshot: db.prepare(`DELETE FROM file_versions WHERE file_id = ?1 AND snapshot_id = ?2`),
-		relastSeenFromVersions: db.prepare(`
-			UPDATE files SET last_seen_snap_id = (
-				SELECT snapshot_id FROM file_versions WHERE file_id = files.id ORDER BY snapshot_id DESC LIMIT 1
-			) WHERE id = ?
-		`),
 		insertChange: db.prepare(`INSERT INTO changes(snapshot_id, file_id, change_type, old_path, new_path, old_size, new_size, delta_bytes, changed_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		bumpLastSeen: db.prepare(`UPDATE files SET last_seen_snap_id = ? WHERE dataset_id = ? AND deleted_at_snap_id IS NULL`),
 		deleteChangesBySnapshot: db.prepare(`DELETE FROM changes WHERE snapshot_id = ?`),
@@ -1201,7 +1225,7 @@ async function runDiffStream({
 // ─── Incremental (standalone, no changes table) ────────────────────────────
 
 async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
-	const context = { dirRenames: [] };
+	const context = createSnapshotContext();
 	await runDiffStream({
 		prevSnap,
 		snap,
@@ -1214,12 +1238,13 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 		reportAnomalies: true,
 		logDone: true,
 	});
+	finishSnapshot(db, stmt, perf, snap, datasetId, context);
 }
 
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
 
 async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
-	const context = { dirRenames: [] };
+	const context = createSnapshotContext();
 	// A previous run may have written changes for this snapshot and died before
 	// marking it done; clear them so a replay can't double up.
 	database.transaction(db, () => {
@@ -1237,6 +1262,7 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 		reportAnomalies: true,
 		logDone: true,
 	});
+	finishSnapshot(db, stmt, perf, snap, datasetId, context);
 }
 
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──
