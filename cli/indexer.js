@@ -122,6 +122,22 @@ const register = (program) => {
 			await query(options, [], (indexer, db) => { return indexer.diff(db, snapA, snapB, options); });
 		});
 
+	// ─── since ──────────────────────────────────────────────────────────────
+
+	indexerCmd
+		.command('since <snapshot>')
+		.description('Files of a snapshot folder that were deleted, modified, renamed or moved after it')
+		.requiredOption('--path <folder>', 'Folder as it was in the snapshot')
+		.option('--dataset <names>', 'Resolve snapshot within these dataset root(s), comma-separated')
+		.option('--state <states>', 'Filter by state, comma-separated: deleted, modified, renamed, moved')
+		.option('--summary', 'One line per entry of the folder, with a count of changes inside')
+		.option('--limit <n>', 'Max results (default 500)', parseInt)
+		.option('--offset <n>', 'Skip first N results', parseInt)
+		.option('--json', 'Output as JSON')
+		.action(async (snapshot, options) => {
+			await query(options, { indexed: false }, (indexer, db) => { return indexer.since(db, snapshot, options); });
+		});
+
 	// ─── stats ──────────────────────────────────────────────────────────────
 
 	indexerCmd

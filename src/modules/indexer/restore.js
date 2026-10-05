@@ -1,7 +1,7 @@
 import path from 'path';
 import { randomBytes } from 'crypto';
 import { constants } from 'fs';
-import { copyFile, lstat, lutimes, mkdir, readdir, realpath, rename, rm, rmdir, stat } from 'fs/promises';
+import { copyFile, lstat, lutimes, mkdir, readdir, realpath, rename, rm, rmdir, stat, utimes } from 'fs/promises';
 import { execa } from 'execa';
 
 const MOUNTPOINT = '/messier/apps/nextcloud';
@@ -16,6 +16,9 @@ const SNAPSHOT_PATH_PATTERN = new RegExp(`^${MOUNTPOINT}/\\.zfs/snapshot/([^/]+)
 const CONFLICTS = ['copy', 'overwrite'];
 const MAX_NAME_BYTES = 255;
 const OWNER = 'voyager:users';
+const SNAPSHOTS_ROOT = `${MOUNTPOINT}/.zfs/snapshot`;
+const MAX_SELECTION_PATHS = 50000;
+const PROGRESS_STEP = 100;
 
 const isUserFolder = (name) => {
 	return name !== GROUP_FOLDERS && !name.startsWith(SYSTEM_FOLDER_PREFIX) && !SYSTEM_FOLDERS.includes(name);
@@ -290,6 +293,201 @@ const restoreFile = async (job, module) => {
 	return `${escapeHtml(targetName)} restored to ${escapeHtml(config.destination.slice(DATA_ROOT.length + 1))}.`;
 };
 
+const isSelectable = (relPath) => {
+	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
+		return false;
+	}
+
+	const [top, sub] = relPath.slice(DATA_ROOT.length + 1).split('/');
+	return isUserFolder(top) && sub === USER_FILES;
+};
+
+const isCleanPath = (value) => {
+	return typeof value === 'string' && value.startsWith('/') && !value.includes('\0') && !value.endsWith('/') && path.posix.normalize(value) === value;
+};
+
+const isInside = (child, folder) => {
+	return child.startsWith(`${folder}/`);
+};
+
+const resolveSnapshotRoot = async (snapshot) => {
+	if (typeof snapshot !== 'string' || !snapshot || snapshot.includes('/') || snapshot.includes('\0') || ['.', '..'].includes(snapshot)) {
+		throw new Error('Invalid snapshot.');
+	}
+
+	let root;
+	try {
+		root = await realpath(`${SNAPSHOTS_ROOT}/${snapshot}`);
+	} catch (error) {
+		throw new Error('The snapshot no longer exists.');
+	}
+
+	if (root !== `${SNAPSHOTS_ROOT}/${snapshot}`) {
+		throw new Error('Invalid snapshot.');
+	}
+
+	return root;
+};
+
+const resolveSelection = async (root, config) => {
+	const paths = (Array.isArray(config.items) ? config.items : []);
+	const excluded = (Array.isArray(config.excluded) ? config.excluded : []);
+	if (!paths.length || paths.length + excluded.length > MAX_SELECTION_PATHS || !paths.every(isCleanPath) || !excluded.every(isCleanPath)) {
+		throw new Error('Invalid selection.');
+	}
+
+	const items = [];
+	for (const relPath of [...new Set(paths)].sort()) {
+		if (items.some((item) => { return item.isDir && isInside(relPath, item.path); })) {
+			continue;
+		}
+		if (!isSelectable(relPath)) {
+			throw new Error('Invalid selection.');
+		}
+
+		let stats;
+		try {
+			if (await realpath(`${root}${relPath}`) !== `${root}${relPath}`) {
+				throw new Error('Invalid selection.');
+			}
+			stats = await lstat(`${root}${relPath}`);
+		} catch (error) {
+			throw new Error(`${path.posix.basename(relPath)} is no longer in that snapshot.`);
+		}
+
+		if (!stats.isFile() && !stats.isDirectory()) {
+			throw new Error('Invalid selection.');
+		}
+		items.push({ path: relPath, isDir: stats.isDirectory() });
+	}
+
+	let common = path.posix.dirname(items[0].path);
+	while (common !== '/' && !items.every((item) => { return isInside(item.path, common); })) {
+		common = path.posix.dirname(common);
+	}
+	return { items, excluded: new Set(excluded), common };
+};
+
+const createRestoreFolder = async (parent, snapshot, stats) => {
+	const label = `Restore (${snapshotDate(snapshot)})`;
+	for (let attempt = 1; ; attempt++) {
+		const folder = path.join(parent, `${label}${attempt > 1 ? ` ${attempt}` : ''}`);
+		try {
+			await mkdir(folder, { mode: stats.mode & 0o7777 });
+		} catch (error) {
+			if (error.code === 'EEXIST') {
+				continue;
+			}
+			throw error;
+		}
+
+		if (await realpath(folder) !== folder) {
+			throw new Error('The folder changed while restoring.');
+		}
+		return folder;
+	}
+};
+
+const copySelection = async (job, module, root, selection, container, mode) => {
+	const made = new Set([container]);
+	let count = 0;
+	const makeParents = async (target) => {
+		const segments = path.relative(container, path.dirname(target)).split(path.sep).filter(Boolean);
+		let folder = container;
+		for (const segment of segments) {
+			folder = path.join(folder, segment);
+			if (!made.has(folder)) {
+				await mkdir(folder, { mode });
+				made.add(folder);
+			}
+		}
+	};
+	const copy = async (relPath, target) => {
+		const source = `${root}${relPath}`;
+		const stats = await lstat(source);
+		if (!stats.isFile()) {
+			return;
+		}
+
+		await copyFile(source, target, constants.COPYFILE_EXCL);
+		await utimes(target, stats.atime, stats.mtime);
+		count++;
+		if (count % PROGRESS_STEP === 0) {
+			await module.updateJobProgress(job, `Restoring files... ${count}`);
+		}
+	};
+	const walk = async (relPath, target) => {
+		const stats = await lstat(`${root}${relPath}`);
+		if (!made.has(target)) {
+			await mkdir(target, { mode });
+			made.add(target);
+		}
+
+		const entries = await readdir(`${root}${relPath}`, { withFileTypes: true });
+		for (const entry of entries) {
+			const child = `${relPath}/${entry.name}`;
+			if (selection.excluded.has(child)) {
+				continue;
+			}
+			if (entry.isDirectory()) {
+				await walk(child, path.join(target, entry.name));
+			} else if (entry.isFile()) {
+				await copy(child, path.join(target, entry.name));
+			}
+		}
+		await utimes(target, stats.atime, stats.mtime);
+	};
+
+	for (const item of selection.items) {
+		const target = path.join(container, item.path.slice(selection.common.length + 1));
+		await makeParents(target);
+		if (item.isDir) {
+			await walk(item.path, target);
+		} else {
+			await copy(item.path, target);
+		}
+	}
+	return count;
+};
+
+const restoreItems = async (job, module) => {
+	const { config = {} } = job.data;
+	const root = await resolveSnapshotRoot(config.snapshot);
+	const selection = await resolveSelection(root, config);
+	const destination = await resolveDestination(config.destination);
+	await module.updateJobProgress(job, 'Restoring files...');
+	const created = [];
+	let container = null;
+	try {
+		let folder = destination.folder;
+		for (const missing of destination.missing) {
+			folder = await createFolder(folder, missing, destination.stats, created);
+		}
+
+		container = await createRestoreFolder(folder, config.snapshot, destination.stats);
+		const count = await copySelection(job, module, root, selection, container, destination.stats.mode & 0o7777);
+		await execa('chown', ['-R', '-h', '--', OWNER, container]);
+		const location = `${config.destination.slice(DATA_ROOT.length + 1)}/${path.basename(container)}`;
+		return `${count} ${count === 1 ? 'file' : 'files'} restored to ${escapeHtml(location)}.`;
+	} catch (error) {
+		if (container) {
+			await rm(container, { recursive: true, force: true });
+		}
+		for (const folder of created.reverse()) {
+			await rmdir(folder).catch(() => {});
+		}
+		throw error;
+	}
+};
+
+const restoreSelection = async (job, module) => {
+	try {
+		return await restoreItems(job, module);
+	} catch (error) {
+		throw new Error(escapeHtml(error.message));
+	}
+};
+
 const restore = async (job, module) => {
 	try {
 		return await restoreFile(job, module);
@@ -303,9 +501,11 @@ export default {
 	commands: {
 		'indexer:restore:folders': { handler: listFolders },
 		'indexer:restore:inspect': { handler: inspect },
-		'indexer:restore': { job: 'indexer:restore' }
+		'indexer:restore': { job: 'indexer:restore' },
+		'indexer:restore:selection': { job: 'indexer:restore:selection' }
 	},
 	jobs: {
-		'indexer:restore': restore
+		'indexer:restore': restore,
+		'indexer:restore:selection': restoreSelection
 	}
 };

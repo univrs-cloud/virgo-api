@@ -1,6 +1,7 @@
 import * as database from './db.js';
 import * as utils from './utils.js';
 import { changeTypeBreakdown } from './stats.js';
+import { isTrash } from './scope.js';
 
 // ─── Dataset scope (opts.dataset / opts.datasets) ───────────────────────────
 // Each root matches that ZFS dataset name or any child (messier/apps → messier/apps/foo).
@@ -657,6 +658,286 @@ function diff(db, snapA, snapB, opts = {}) {
 	return result;
 }
 
+// ─── Since ──────────────────────────────────────────────────────────────────
+
+const SINCE_STATES = ['deleted', 'modified', 'renamed', 'moved'];
+const SINCE_ID_CHUNK = 5000;
+
+function isUnder(path, folder) {
+	return path.startsWith(`${folder}/`);
+}
+
+function renameStepsAfter(db, snap) {
+	const rows = db.prepare(`
+		SELECT c.old_path, c.new_path, f.type, s.id AS snapshot_id, s.created_at
+		FROM changes c
+		JOIN snapshots s ON s.id = c.snapshot_id
+		LEFT JOIN files f ON f.id = c.file_id
+		WHERE s.dataset_id = ? AND s.created_at > ? AND c.change_type = 'renamed'
+			AND c.old_path IS NOT NULL AND c.new_path IS NOT NULL
+		ORDER BY s.created_at, s.id, c.id
+	`).all(snap.dataset_id, snap.created_at);
+
+	const steps = [];
+	for (const r of rows) {
+		let step = steps[steps.length - 1];
+		if (!step || step.snapshotId !== r.snapshot_id) {
+			step = { snapshotId: r.snapshot_id, createdAt: r.created_at, byNewPath: new Map(), dirs: [] };
+			steps.push(step);
+		}
+		step.byNewPath.set(r.new_path, r.old_path);
+		if (r.type === 'dir') {
+			step.dirs.push({ oldPath: r.old_path, newPath: r.new_path });
+		}
+	}
+	return steps;
+}
+
+function longestDir(dirs, path, key) {
+	let best = null;
+	for (const d of dirs) {
+		if ((path === d[key] || isUnder(path, d[key])) && (!best || d[key].length > best[key].length)) {
+			best = d;
+		}
+	}
+	return best;
+}
+
+function pathBefore(steps, path, before) {
+	let current = path;
+	for (let i = steps.length - 1; i >= 0; i--) {
+		const step = steps[i];
+		if (step.createdAt >= before) {
+			continue;
+		}
+		const renamedFrom = step.byNewPath.get(current);
+		if (renamedFrom !== undefined) {
+			current = renamedFrom;
+			continue;
+		}
+		const dir = longestDir(step.dirs, current, 'newPath');
+		if (dir) {
+			current = dir.oldPath + current.slice(dir.newPath.length);
+		}
+	}
+	return current;
+}
+
+function folderImages(steps, folder) {
+	const prefixes = new Set([folder]);
+	let current = [folder];
+	for (const step of steps) {
+		const next = current.map((q) => {
+			const dir = longestDir(step.dirs, q, 'oldPath');
+			return (dir ? dir.newPath + q.slice(dir.oldPath.length) : q);
+		});
+		for (const d of step.dirs) {
+			const leftFolder = current.some((q) => { return isUnder(d.oldPath, q); });
+			const isCovered = next.some((q) => { return d.newPath === q || isUnder(d.newPath, q); });
+			if (leftFolder && !isCovered) {
+				next.push(d.newPath);
+			}
+		}
+		current = next;
+		for (const q of current) {
+			prefixes.add(q);
+		}
+	}
+	return { prefixes: [...prefixes], current: current[0] };
+}
+
+function since(db, snapshotName, opts = {}) {
+	const folder = opts.path;
+	if (!snapshotName || typeof folder !== 'string' || !folder.startsWith('/') || folder.endsWith('/')) {
+		console.error('Usage: virgo indexer since <snapshot> --path <folder> [--state deleted,modified,renamed,moved] [--summary]');
+		return null;
+	}
+
+	const json = opts.json || false;
+	const limit = opts.limit || 500;
+	const offset = opts.offset || 0;
+	const wanted = (opts.state ? String(opts.state).split(',').map((s) => { return s.trim().toLowerCase(); }).filter(Boolean) : []);
+	if (wanted.some((s) => { return !SINCE_STATES.includes(s); })) {
+		console.error(`Usage: --state ${SINCE_STATES.join(',')}`);
+		return null;
+	}
+
+	const { clause, params } = sqlDatasetScope(parseDatasetScopes(opts), 'd');
+	const snap = db.prepare(`
+		SELECT s.id, s.dataset_id, s.full_name, s.created_at
+		FROM snapshots s
+		JOIN datasets d ON d.id = s.dataset_id
+		WHERE (s.name = ? OR s.full_name = ?) AND s.indexed_at IS NOT NULL${clause}
+		LIMIT 1
+	`).get(snapshotName, snapshotName, ...params);
+	if (!snap) {
+		if (!json) {
+			console.log(`Snapshot '${snapshotName}' is not indexed.`);
+		}
+		return { indexed: false };
+	}
+
+	const steps = renameStepsAfter(db, snap);
+	const images = folderImages(steps, folder);
+
+	const changedInRange = db.prepare(`
+		SELECT DISTINCT c.file_id AS id
+		FROM changes c
+		JOIN snapshots s ON s.id = c.snapshot_id
+		WHERE s.dataset_id = ? AND s.created_at > ? AND c.file_id IS NOT NULL
+			AND c.change_type IN ('modified', 'renamed', 'removed')
+			AND c.old_path >= ? AND c.old_path < ?
+	`);
+	const deletedInRange = db.prepare(`
+		SELECT f.id
+		FROM files f
+		JOIN snapshots s ON s.id = f.deleted_at_snap_id
+		WHERE f.dataset_id = ? AND s.created_at > ? AND f.path >= ? AND f.path < ?
+	`);
+	const ids = new Set();
+	for (const prefix of images.prefixes) {
+		const range = [snap.dataset_id, snap.created_at, `${prefix}/`, `${prefix}0`];
+		for (const r of changedInRange.all(...range)) {
+			ids.add(r.id);
+		}
+		for (const r of deletedInRange.all(...range)) {
+			ids.add(r.id);
+		}
+	}
+
+	const describe = db.prepare(`
+		SELECT f.id, COALESCE(f.overwritten_from, f.path) AS path, f.type,
+			sf.created_at AS first_seen, sd.created_at AS deleted_at
+		FROM files f
+		LEFT JOIN snapshots sf ON sf.id = f.first_seen_snap_id
+		LEFT JOIN snapshots sd ON sd.id = f.deleted_at_snap_id
+		WHERE f.id IN (SELECT value FROM json_each(?))
+	`);
+	const changeTypes = db.prepare(`
+		SELECT c.file_id, c.change_type
+		FROM changes c
+		JOIN snapshots s ON s.id = c.snapshot_id
+		WHERE s.created_at > ? AND c.change_type IN ('modified', 'renamed')
+			AND c.file_id IN (SELECT value FROM json_each(?))
+		GROUP BY c.file_id, c.change_type
+	`);
+
+	const files = [];
+	const allIds = [...ids];
+	for (let i = 0; i < allIds.length; i += SINCE_ID_CHUNK) {
+		const chunk = JSON.stringify(allIds.slice(i, i + SINCE_ID_CHUNK));
+		const typesById = new Map();
+		for (const r of changeTypes.all(snap.created_at, chunk)) {
+			if (!typesById.has(r.file_id)) {
+				typesById.set(r.file_id, new Set());
+			}
+			typesById.get(r.file_id).add(r.change_type);
+		}
+
+		for (const f of describe.all(chunk)) {
+			if (f.first_seen !== null && f.first_seen > snap.created_at) {
+				continue;
+			}
+			if (f.deleted_at !== null && f.deleted_at <= snap.created_at) {
+				continue;
+			}
+
+			const isGone = f.deleted_at !== null;
+			const isDeleted = isGone || isTrash(f.path);
+			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity));
+			if (!isUnder(path, folder)) {
+				continue;
+			}
+
+			const states = [];
+			if (isDeleted) {
+				states.push('deleted');
+			} else {
+				const types = typesById.get(f.id) ?? new Set();
+				if (types.has('modified') && f.type !== 'dir') {
+					states.push('modified');
+				}
+				if (types.has('renamed') && path !== f.path) {
+					const nameAt = path.lastIndexOf('/');
+					const nameNow = f.path.lastIndexOf('/');
+					if (path.slice(nameAt) !== f.path.slice(nameNow)) {
+						states.push('renamed');
+					}
+					if (path.slice(0, nameAt) !== f.path.slice(0, nameNow)) {
+						states.push('moved');
+					}
+				}
+			}
+			if (!states.length) {
+				continue;
+			}
+
+			files.push({ path, type: f.type, states, current_path: (!isDeleted && path !== f.path ? f.path : null) });
+		}
+	}
+
+	const folderRow = db.prepare(`SELECT deleted_at_snap_id FROM files WHERE dataset_id = ? AND path = ?`).get(snap.dataset_id, images.current);
+	const isFolderDeleted = isTrash(images.current) || (folderRow?.deleted_at_snap_id ?? null) !== null;
+	const result = {
+		snapshot: snap.full_name,
+		indexed: true,
+		deleted: isFolderDeleted,
+		moved_to: (!isFolderDeleted && images.current !== folder ? images.current : null)
+	};
+
+	if (opts.summary) {
+		const entries = new Map();
+		for (const f of files) {
+			const rest = f.path.slice(folder.length + 1);
+			const slash = rest.indexOf('/');
+			const name = (slash === -1 ? rest : rest.slice(0, slash));
+			if (!entries.has(name)) {
+				entries.set(name, { name, states: [], current_path: null, inside: 0, inside_groups: [] });
+			}
+			const entry = entries.get(name);
+			if (slash === -1) {
+				entry.states = f.states;
+				entry.current_path = f.current_path;
+			} else {
+				const key = f.states.join(',');
+				let group = entry.inside_groups.find((g) => { return g.states.join(',') === key; });
+				if (!group) {
+					group = { states: f.states, count: 0 };
+					entry.inside_groups.push(group);
+				}
+				group.count++;
+				entry.inside++;
+			}
+		}
+		result.entries = [...entries.values()];
+
+		if (!json) {
+			console.log(`\nChanged since ${snap.full_name} in ${folder}:\n`);
+			for (const e of result.entries) {
+				console.log(`  ${e.name}${e.states.length ? ` [${e.states.join(', ')}]` : ''}${e.inside ? ` (${e.inside.toLocaleString()} inside)` : ''}`);
+			}
+		}
+		return result;
+	}
+
+	const matching = (wanted.length ? files.filter((f) => { return f.states.some((s) => { return wanted.includes(s); }); }) : files);
+	matching.sort((a, b) => { return (a.path < b.path ? -1 : (a.path > b.path ? 1 : 0)); });
+	result.total = matching.length;
+	result.files = matching.slice(offset, offset + limit);
+
+	if (!json) {
+		console.log(`\nChanged since ${snap.full_name} in ${folder}: ${result.total.toLocaleString()}\n`);
+		for (const f of result.files) {
+			console.log(`  [${f.states.join(', ')}] ${f.path}${f.current_path ? ` → ${f.current_path}` : ''}`);
+		}
+		if (result.total > result.files.length) {
+			console.log(`\n  …and ${(result.total - result.files.length).toLocaleString()} more (use --limit / --offset)`);
+		}
+	}
+
+	return result;
+}
+
 // ─── Reindex ────────────────────────────────────────────────────────────────
 
 function reindex(db, opts = {}) {
@@ -863,6 +1144,7 @@ export {
 	deleted,
 	changes,
 	diff,
+	since,
 	reindex,
 	stats,
 	parseDatasetScopes,
