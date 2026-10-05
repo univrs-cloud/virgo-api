@@ -588,6 +588,12 @@ function prepareIndexerStatements(db) {
 		moveChangesAtSnapshot: db.prepare(`UPDATE changes SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3`),
 		hasVersions: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ? LIMIT 1`),
 		hasVersionAtSnapshot: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ?1 AND snapshot_id = ?2`),
+		sizeBeforeSnapshot: db.prepare(`
+			SELECT fv.size FROM file_versions fv
+			JOIN snapshots s ON s.id = fv.snapshot_id
+			WHERE fv.file_id = ?1 AND s.created_at < ?2
+			ORDER BY s.created_at DESC, s.id DESC LIMIT 1
+		`),
 		relastSeenIfAt: db.prepare(`
 			UPDATE files SET last_seen_snap_id = COALESCE((
 				SELECT snapshot_id FROM file_versions WHERE file_id = files.id ORDER BY snapshot_id DESC LIMIT 1

@@ -654,9 +654,14 @@ function diff(db, snapA, snapB, opts = {}) {
 
 	// The path a file had at `to`, not the one it has today: its last event in the
 	// span names it, and a folder above it renamed later in the span moves it on.
+	// A file removed in the span stays where it was removed from: it was gone
+	// before the folder took its new name.
 	const steps = renameStepsAfter(db, from).filter((step) => { return step.createdAt <= to.created_at; });
 	const pathAtEnd = (r) => {
 		let path = r.end_path;
+		if (r.last_type === 'removed') {
+			return path;
+		}
 		for (const step of steps) {
 			const dir = (step.createdAt > r.end_at ? longestDir(step.dirs, path, 'oldPath') : null);
 			if (dir && path !== dir.oldPath) {

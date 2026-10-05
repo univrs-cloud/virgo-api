@@ -637,7 +637,10 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 				const isGone = Boolean(fileRow) && !isPresentInSnapshot(stmt, perf, presentPaths, removedPath, fileRow, snap.id);
 				if (fileRow) {
 					fileId = fileRow.id;
-					oldSize = fileRow.latestSize;
+					// A replacement may already have recorded its own size on this
+					// row, so the size of what was removed is read from before this
+					// snapshot rather than from the row's latest.
+					oldSize = (isGone ? fileRow.latestSize : stmt.sizeBeforeSnapshot.get(fileRow.id, snap.created_at)?.size ?? null);
 					// See presentPathsIn: a delete-and-recreate in one snapshot emits
 					// both events for the same path; the file is not gone.
 					if (isGone) {
