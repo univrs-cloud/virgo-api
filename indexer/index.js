@@ -1,4 +1,3 @@
-import DataService from '../src/database/data_service.js';
 import * as database from './db.js';
 import * as zfs from './zfs.js';
 import * as walker from './walker.js';
@@ -411,6 +410,9 @@ async function run(_opts = {}) {
 		console.log(`🧹 Cleaned up ${staleTemps} stale zfs-diff temp file(s) from previous run(s).`);
 	}
 
+	// Loaded here, not at the top: importing it opens the node's own database on the pool, which
+	// nothing but an actual indexing run has any business doing.
+	const { default: DataService } = await import('../src/database/data_service.js');
 	const isInstalled = await DataService.hasApplication(INDEXED_APP);
 	if (isInstalled === null) {
 		console.error('Indexer: could not tell whether Nextcloud is installed; leaving the index as it is.');

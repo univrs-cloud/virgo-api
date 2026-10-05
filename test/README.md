@@ -13,6 +13,14 @@ npm test
 - `indexer-retention.test.js`: what happens to versions when snapshots are pruned.
 - `indexer-query.test.js`: `search`, `history`, `diff` and `since`.
 - `indexer-scope.test.js`: which paths are indexed, how a rename across the edge of that scope is read, and how `zfs diff` lines are parsed.
+- `indexer-isolation.test.js`: importing the indexer does not open the node's own database.
+
+## What a run touches
+
+Temporary folders under the system temp directory, removed afterwards, and SQLite databases in
+memory or in those folders. The index on the pool (`/messier/.config/index.db`) and the node's own
+database (`/messier/.config/virgo.db`) are never opened. No `zfs` command runs unless the ZFS
+backend below is selected.
 
 ## Scenarios
 
