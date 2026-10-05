@@ -573,17 +573,36 @@ function prepareIndexerStatements(db) {
 		// untouched objects and produce no lines at all — so the subtree has to be
 		// rewritten by hand or every descendant path goes stale for good.
 		renameSubtree: db.prepare(`
-			UPDATE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\'
+			UPDATE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\' AND deleted_at_snap_id IS NULL
 		`),
-		deleteChangesUnderPath: db.prepare(`
-			DELETE FROM changes WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\')
+		restoreDeletedPath: db.prepare(`
+			UPDATE OR IGNORE files SET path = ?1 WHERE id = ?2 AND deleted_at_snap_id IS NOT NULL
 		`),
-		deleteVersionsUnderPath: db.prepare(`
-			DELETE FROM file_versions WHERE file_id IN (SELECT id FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\')
+		restoreDeletedSubtreePaths: db.prepare(`
+			UPDATE OR IGNORE files SET path = ?1 || substr(path, ?2) WHERE dataset_id = ?3 AND path LIKE ?4 ESCAPE '\\' AND deleted_at_snap_id = ?5
 		`),
-		deleteFilesUnderPath: db.prepare(`
-			DELETE FROM files WHERE dataset_id = ?1 AND path LIKE ?2 ESCAPE '\\'
+		renameCollisions: db.prepare(`
+			SELECT target.id AS target_id, source.id AS source_id
+			FROM files source
+			JOIN files target ON target.dataset_id = source.dataset_id AND target.path = ?2 || substr(source.path, ?3)
+			WHERE source.dataset_id = ?1 AND source.path LIKE ?4 ESCAPE '\\' AND source.deleted_at_snap_id IS NULL
 		`),
+		parkFile: db.prepare(`
+			UPDATE files
+			SET overwritten_from = COALESCE(overwritten_from, path), deleted_at_snap_id = COALESCE(deleted_at_snap_id, ?2), path = path || '#overwritten@' || ?2
+			WHERE id = ?1
+		`),
+		moveVersionAtSnapshot: db.prepare(`UPDATE OR IGNORE file_versions SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3`),
+		moveChangesAtSnapshot: db.prepare(`UPDATE changes SET file_id = ?2 WHERE file_id = ?1 AND snapshot_id = ?3`),
+		hasVersions: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ? LIMIT 1`),
+		hasVersionAtSnapshot: db.prepare(`SELECT 1 AS found FROM file_versions WHERE file_id = ?1 AND snapshot_id = ?2`),
+		relastSeenIfAt: db.prepare(`
+			UPDATE files SET last_seen_snap_id = COALESCE((
+				SELECT snapshot_id FROM file_versions WHERE file_id = files.id ORDER BY snapshot_id DESC LIMIT 1
+			), last_seen_snap_id) WHERE id = ?1 AND last_seen_snap_id = ?2
+		`),
+		deleteChangesOfFile: db.prepare(`DELETE FROM changes WHERE file_id = ?`),
+		deleteFile: db.prepare(`DELETE FROM files WHERE id = ?`),
 		tombstoneOverwrittenFile: db.prepare(`
 			UPDATE files SET path = ?1, deleted_at_snap_id = ?2, overwritten_from = ?4 WHERE id = ?3
 		`),
@@ -1191,13 +1210,14 @@ async function runDiffStream({
 // ─── Incremental (standalone, no changes table) ────────────────────────────
 
 async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
+	const context = { dirRenames: [] };
 	await runDiffStream({
 		prevSnap,
 		snap,
 		mountpoint,
 		snapPath,
 		perf,
-		flushBatch: (batch) => flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath),
+		flushBatch: (batch) => flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath, context),
 		logLabel: `  ⚡ Incremental ${snap.name} (from ${prevSnap.name})...`,
 		primeMount: true,
 		reportAnomalies: true,
@@ -1208,6 +1228,7 @@ async function doIncremental(db, stmt, perf, prevSnap, snap, datasetId, mountpoi
 // ─── Unified incremental + diff (single zfs diff pass) ─────────────────────
 
 async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, mountpoint, snapPath) {
+	const context = { dirRenames: [] };
 	// A previous run may have written changes for this snapshot and died before
 	// marking it done; clear them so a replay can't double up.
 	database.transaction(db, () => {
@@ -1219,7 +1240,7 @@ async function doIncrementalUnified(db, stmt, perf, prevSnap, snap, datasetId, m
 		mountpoint,
 		snapPath,
 		perf,
-		flushBatch: (batch) => flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath),
+		flushBatch: (batch) => flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath, context),
 		logLabel: `  ⚡ Incremental+diff ${snap.name} (from ${prevSnap.name})...`,
 		primeMount: true,
 		reportAnomalies: true,

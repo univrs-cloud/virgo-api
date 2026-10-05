@@ -241,55 +241,103 @@ function overwrittenPath(relNewPath, snapId) {
  * directory only — its children are untouched objects — so without this the whole
  * subtree keeps paths that no longer exist, and nothing ever corrects them.
  *
- * Rows already sitting under the destination are dropped first: ZFS only allows a
- * rename onto an empty directory, so anything there is stale index state, and
- * leaving it would collide with UNIQUE(dataset_id, path).
+ * Only live rows move. A deleted file keeps the path it had in the last snapshot
+ * that held it, which is where it is recovered from.
+ *
+ * Only a row whose path an incoming row is about to take is dealt with
+ * (UNIQUE(dataset_id, path)). Whatever it recorded for this snapshot belongs to
+ * the incoming file, indexed under its new path by an event that was applied
+ * first, so that version and those changes are handed over. What is left is an
+ * earlier file of the same name: history that its snapshots still hold, parked
+ * like an overwritten file. A row with nothing left is dropped. Anything else
+ * under the destination stays.
  */
-function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath) {
+function renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath, snapId, context) {
 	const oldPrefix = likeEscape(relOldPath) + '/%';
-	const newPrefix = likeEscape(relNewPath) + '/%';
 
-	stmt.deleteChangesUnderPath.run(datasetId, newPrefix);
-	stmt.deleteVersionsUnderPath.run(datasetId, newPrefix);
-	stmt.deleteFilesUnderPath.run(datasetId, newPrefix);
+	for (const collision of stmt.renameCollisions.all(datasetId, relNewPath, relOldPath.length + 1, oldPrefix)) {
+		stmt.moveVersionAtSnapshot.run(collision.target_id, collision.source_id, snapId);
+		stmt.deleteVersionAtSnapshot.run(collision.target_id, snapId);
+		stmt.moveChangesAtSnapshot.run(collision.target_id, collision.source_id, snapId);
+		if (stmt.hasVersions.get(collision.target_id)) {
+			stmt.parkFile.run(collision.target_id, snapId);
+			stmt.relastSeenIfAt.run(collision.target_id, snapId);
+		} else {
+			stmt.deleteChangesOfFile.run(collision.target_id);
+			stmt.deleteFile.run(collision.target_id);
+		}
+		perf.sqlUpdates++;
+	}
 
 	const { changes } = stmt.renameSubtree.run(relNewPath, relOldPath.length + 1, datasetId, oldPrefix);
 	perf.sqlUpdates++;
 	perf.renamedSubtreePaths = (perf.renamedSubtreePaths ?? 0) + Number(changes ?? 0);
 
-	syncMapForSubtreeRename(fileByPath, relOldPath, relNewPath);
+	context?.dirRenames?.push({ oldPath: relOldPath, newPath: relNewPath });
+	syncMapForSubtreeRename(stmt, perf, datasetId, fileByPath, relOldPath, relNewPath);
 }
 
 /**
  * Bring the batch's prefetched `fileByPath` map back in line with what
  * `renameSubtree` just did to the database.
  *
- * The map is loaded once per batch. A directory rename deletes every row under
- * the destination and repaths every row under the source, so without this a
- * later event in the same batch can hand a deleted row id to insertVersion —
- * and foreign keys are enforced (node:sqlite turns them on by default), so that
- * aborts the entire batch and skips the snapshot.
+ * The map is loaded once per batch. A directory rename repaths the live rows
+ * under the source and can park or drop rows under the destination, so every
+ * entry on either side is read again. Without this a later event in the same
+ * batch can be handed a row that no longer sits at that path.
  */
-function syncMapForSubtreeRename(fileByPath, relOldPath, relNewPath) {
+function syncMapForSubtreeRename(stmt, perf, datasetId, fileByPath, relOldPath, relNewPath) {
 	if (!fileByPath) {
 		return;
 	}
 	const oldPrefix = relOldPath + '/';
 	const newPrefix = relNewPath + '/';
-	const moved = [];
-	for (const key of fileByPath.keys()) {
-		if (key.startsWith(newPrefix)) {
+	const paths = new Set();
+	for (const key of [...fileByPath.keys()]) {
+		if (key.startsWith(oldPrefix)) {
+			paths.add(key);
+			paths.add(relNewPath + key.slice(relOldPath.length));
 			fileByPath.delete(key);
-		} else if (key.startsWith(oldPrefix)) {
-			moved.push(key);
+		} else if (key.startsWith(newPrefix)) {
+			paths.add(key);
+			fileByPath.delete(key);
 		}
 	}
-	// Re-key in a second pass: inserting during Map iteration would revisit.
-	for (const key of moved) {
-		const row = fileByPath.get(key);
-		fileByPath.delete(key);
-		fileByPath.set(relNewPath + key.slice(relOldPath.length), row);
+	if (!paths.size) {
+		return;
 	}
+
+	const rows = stmt.bulkLookupFiles.all(JSON.stringify([...paths]), datasetId);
+	perf.sqlSelects += rows.length;
+	for (const r of rows) {
+		fileByPath.set(r.path, { id: r.id, latestSize: r.latest_size ?? null });
+	}
+}
+
+/**
+ * `zfs diff` names a removed or renamed source by its path in the previous
+ * snapshot. When a directory above it was renamed in this same snapshot and that
+ * event was applied first, the row has already moved, so the path is followed
+ * through the renames applied so far.
+ */
+function findMovedSource(stmt, perf, datasetId, relPath, fileByPath, context) {
+	let path = relPath;
+	for (const rename of context?.dirRenames ?? []) {
+		if (path === rename.oldPath || path.startsWith(rename.oldPath + '/')) {
+			path = rename.newPath + path.slice(rename.oldPath.length);
+		}
+	}
+	if (path === relPath) {
+		return null;
+	}
+
+	let row = fileByPath.get(path) ?? null;
+	if (!row) {
+		const found = stmt.getFileByPath.get(datasetId, path) ?? null;
+		perf.sqlSelects++;
+		row = (found ? { id: found.id, latestSize: null } : null);
+	}
+	return { path, row };
 }
 
 /**
@@ -303,7 +351,7 @@ function syncMapForSubtreeRename(fileByPath, relOldPath, relNewPath) {
  *
  * @returns {{ fileId: number | null, oldSize: number | null }}
  */
-function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim, fileByPath) {
+function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snapId, oldFile, victim, fileByPath, context) {
 	const type = typeFromStat(st);
 
 	if (oldFile === undefined) {
@@ -316,7 +364,7 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 		const fileRow = stmt.upsertFile.get(datasetId, relNewPath, st.ino, type, snapId, snapId);
 		perf.sqlUpserts++;
 		if (type === 'dir') {
-			renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath);
+			renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath, snapId, context);
 		}
 		if (fileRow) {
 			insertVersionFromStat(stmt, perf, fileRow.id, snapId, st);
@@ -359,10 +407,41 @@ function applyFileRename(stmt, perf, datasetId, relOldPath, relNewPath, st, snap
 		return createAtNewPath();
 	}
 	if (type === 'dir') {
-		renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath);
+		renameSubtree(stmt, perf, datasetId, relOldPath, relNewPath, fileByPath, snapId, context);
 	}
 	insertVersionFromStat(stmt, perf, oldFile.id, snapId, st);
 	return { fileId: oldFile.id, oldSize };
+}
+
+/**
+ * `presentPaths` only knows this batch. An event of an earlier batch of the same
+ * snapshot that stat'ed the file left a version for this snapshot on its row,
+ * which says the same thing: the path is there, and the removal is of an object
+ * that was replaced.
+ */
+function isPresentInSnapshot(stmt, perf, presentPaths, path, fileRow, snapId) {
+	if (presentPaths.has(path)) {
+		return true;
+	}
+	perf.sqlSelects++;
+	return Boolean(stmt.hasVersionAtSnapshot.get(fileRow.id, snapId));
+}
+
+/**
+ * A removal reached through `findMovedSource` was marked on a row that a directory
+ * rename had already moved. The file never existed at that new path, so the row
+ * goes back to the path the removal named: the one its last snapshot holds.
+ */
+function restoreRemovedPaths(stmt, perf, datasetId, snapId, relPath, removedPath, fileRow, isSubtree, fileByPath) {
+	if (fileRow) {
+		stmt.restoreDeletedPath.run(relPath, fileRow.id);
+		perf.sqlUpdates++;
+	}
+	if (isSubtree) {
+		stmt.restoreDeletedSubtreePaths.run(relPath, removedPath.length + 1, datasetId, likeEscape(removedPath) + '/%', snapId);
+		perf.sqlUpdates++;
+	}
+	fileByPath.delete(removedPath);
 }
 
 // ─── Orphan sampling ─────────────────────────────────────────────────────────
@@ -410,7 +489,7 @@ function reportSnapshotAnomalies(perf, orphans0, statFails0) {
 
 // ─── Batch flush: incremental only ─────────────────────────────────────────
 
-async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
+async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath, context = { dirRenames: [] }) {
 	const { statMap, relPaths, relNewPaths, fileByPath, presentPaths } = await prepareIncrementalFlushContext(
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
@@ -434,11 +513,15 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					}
 				}
 			} else if (c.changeType === 'removed') {
-				const fileRow = fileByPath.get(relPath);
+				const moved = (fileByPath.has(relPath) ? null : findMovedSource(stmt, perf, datasetId, relPath, fileByPath, context));
+				const removedPath = moved?.path ?? relPath;
+				const fileRow = moved?.row ?? fileByPath.get(relPath);
 				// Recreated in this same snapshot — the path is still there, so the
 				// removal applies to an object that a new one already replaced.
-				if (fileRow && !presentPaths.has(relPath)) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
-				if (c.isSubtree) { stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(relPath) + '/%'); perf.sqlUpdates++; }
+				const isGone = Boolean(fileRow) && !isPresentInSnapshot(stmt, perf, presentPaths, removedPath, fileRow, snap.id);
+				if (isGone) { stmt.markDeleted.run(snap.id, fileRow.id); perf.sqlUpdates++; }
+				if (c.isSubtree) { stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(removedPath) + '/%'); perf.sqlUpdates++; }
+				if (moved) { restoreRemovedPaths(stmt, perf, datasetId, snap.id, relPath, removedPath, (isGone ? fileRow : null), c.isSubtree, fileByPath); }
 			} else if (c.changeType === 'modified') {
 				const st = statMap.get(i);
 				if (st) {
@@ -457,10 +540,12 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 				const st = statMap.get(i);
 				if (st) {
 					const relNewPath = relNewPaths[i];
-					const oldFile = fileByPath.get(relPath) ?? null;
-					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim, fileByPath);
-					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, sizeFromStat(st));
+					const moved = (fileByPath.has(relPath) ? null : findMovedSource(stmt, perf, datasetId, relPath, fileByPath, context));
+					const sourcePath = moved?.path ?? relPath;
+					const oldFile = moved?.row ?? fileByPath.get(relPath) ?? null;
+					const victim = (sourcePath === relNewPath ? null : fileByPath.get(relNewPath) ?? null);
+					const { fileId: rid } = applyFileRename(stmt, perf, datasetId, sourcePath, relNewPath, st, snap.id, oldFile, victim, fileByPath, context);
+					syncMapForRename(fileByPath, sourcePath, relNewPath, oldFile, victim, rid, sizeFromStat(st));
 				}
 			}
 		}
@@ -470,7 +555,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 
 // ─── Batch flush: unified incremental + diff ────────────────────────────────
 
-async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath) {
+async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath, context = { dirRenames: [] }) {
 	const { statMap, relPaths, relNewPaths, fileByPath, presentPaths } = await prepareIncrementalFlushContext(
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
@@ -500,13 +585,16 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					}
 				}
 			} else if (c.changeType === 'removed') {
-				const fileRow = fileByPath.get(relPath);
+				const moved = (fileByPath.has(relPath) ? null : findMovedSource(stmt, perf, datasetId, relPath, fileByPath, context));
+				const removedPath = moved?.path ?? relPath;
+				const fileRow = moved?.row ?? fileByPath.get(relPath);
+				const isGone = Boolean(fileRow) && !isPresentInSnapshot(stmt, perf, presentPaths, removedPath, fileRow, snap.id);
 				if (fileRow) {
 					fileId = fileRow.id;
 					oldSize = fileRow.latestSize;
 					// See presentPathsIn: a delete-and-recreate in one snapshot emits
 					// both events for the same path; the file is not gone.
-					if (!presentPaths.has(relPath)) {
+					if (isGone) {
 						stmt.markDeleted.run(snap.id, fileId);
 						perf.sqlUpdates++;
 					} else {
@@ -514,8 +602,11 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 					}
 				}
 				if (c.isSubtree) {
-					stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(relPath) + '/%');
+					stmt.markSubtreeDeleted.run(snap.id, datasetId, likeEscape(removedPath) + '/%');
 					perf.sqlUpdates++;
+				}
+				if (moved) {
+					restoreRemovedPaths(stmt, perf, datasetId, snap.id, relPath, removedPath, (isGone ? fileRow : null), c.isSubtree, fileByPath);
 				}
 			} else if (c.changeType === 'modified') {
 				if (st) {
@@ -539,12 +630,14 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 			} else if (c.changeType === 'renamed') {
 				if (st) {
 					newSize = sizeFromStat(st);
-					const oldFile = fileByPath.get(relPath) ?? null;
-					const victim = fileByPath.get(relNewPath) ?? null;
-					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, relPath, relNewPath, st, snap.id, oldFile, victim, fileByPath);
+					const moved = (fileByPath.has(relPath) ? null : findMovedSource(stmt, perf, datasetId, relPath, fileByPath, context));
+					const sourcePath = moved?.path ?? relPath;
+					const oldFile = moved?.row ?? fileByPath.get(relPath) ?? null;
+					const victim = (sourcePath === relNewPath ? null : fileByPath.get(relNewPath) ?? null);
+					const { fileId: rid, oldSize: rold } = applyFileRename(stmt, perf, datasetId, sourcePath, relNewPath, st, snap.id, oldFile, victim, fileByPath, context);
 					fileId = rid;
 					oldSize = rold;
-					syncMapForRename(fileByPath, relPath, relNewPath, oldFile, victim, rid, newSize);
+					syncMapForRename(fileByPath, sourcePath, relNewPath, oldFile, victim, rid, newSize);
 				}
 			}
 
