@@ -4,6 +4,7 @@ import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 
 let appsNetworkSnapshot = {};
+let appsStorageRetry = null;
 
 const getContainers = async (module) => {
 	try {
@@ -17,16 +18,17 @@ const getContainers = async (module) => {
 };
 
 const getAppsStorageResouceMetrics = async (module) => {
-	const apps = (module.getState('configured') || []).filter((item) => { return item.type === 'app'; });
-	if (apps.length === 0) {
-		setTimeout(() => { getAppsStorageResouceMetrics(module); }, 100);
+	if (!Array.isArray(module.getState('configured'))) {
+		if (!appsStorageRetry) {
+			appsStorageRetry = setTimeout(() => {
+				appsStorageRetry = null;
+				getAppsStorageResouceMetrics(module);
+			}, 2000);
+		}
 		return;
 	}
 
-	const datasetNameToAppName = apps.reduce((acc, app) => {
-		acc[`${module.appsDataset}/${app.name}`] = app.name;
-		return acc;
-	}, {});
+	const appsDatasetPrefix = `${module.appsDataset}/`.toLowerCase();
 	let datasets = {};
 	try {
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int']);
@@ -38,8 +40,13 @@ const getAppsStorageResouceMetrics = async (module) => {
 	const appsStorageResourceMetrics = {};
 
 	for (const dataset of Object.values(datasets)) {
-		const appName = datasetNameToAppName[dataset?.name];
-		if (!appName) {
+		const datasetName = dataset?.name;
+		if (!datasetName?.toLowerCase().startsWith(appsDatasetPrefix)) {
+			continue;
+		}
+
+		const appName = datasetName.slice(appsDatasetPrefix.length);
+		if (!appName || appName.includes('/')) {
 			continue;
 		}
 
@@ -53,15 +60,15 @@ const getAppsStorageResouceMetrics = async (module) => {
 };
 
 const getAppsComputeResourceMetrics = async (module) => {
-	const apps = (module.getState('configured') || []).filter((item) => { return item.type === 'app'; });
-	if (apps.length === 0) {
-		setTimeout(() => { getAppsComputeResourceMetrics(module); }, 100);
+	const configured = module.getState('configured');
+	if (!Array.isArray(configured)) {
 		return;
 	}
+
+	const apps = configured.filter((item) => { return item.type === 'app'; });
 	
 	const containers = module.getState('containers');
 	if (!Array.isArray(containers) || containers.length === 0) {
-		setTimeout(() => { getAppsComputeResourceMetrics(module); }, 100);
 		return;
 	}
 
@@ -69,11 +76,7 @@ const getAppsComputeResourceMetrics = async (module) => {
 	try {
 		const dockerStats = await si.dockerContainerStats('*');
 		const containersByApp = containers.reduce((acc, container) => {
-			const appName = container.labels?.comDockerComposeProject;
-			if (!appName) {
-				return acc;
-			}
-
+			const appName = container.labels?.comDockerComposeProject || container.id;
 			if (!acc[appName]) {
 				acc[appName] = [];
 			}
@@ -116,8 +119,9 @@ const getAppsComputeResourceMetrics = async (module) => {
 		appsNetworkSnapshot = currentNetworkSnapshot;
 		const appsStorageResourceMetrics = module.getState('appsStorageResourceMetrics') || {};
 
-		for (const app of apps) {
-			const projectContainers = containersByApp[app.name] || [];
+		const names = [...new Set([...apps.map((app) => { return app.name; }), ...Object.keys(containersByApp)])];
+		for (const name of names) {
+			const projectContainers = containersByApp[name] || [];
 			const appStat = { cpuPercent: 0, memPercent: 0, memUsage: 0, networkRx: 0, networkTx: 0 };
 			const appContainersStats = [];
 
@@ -148,9 +152,9 @@ const getAppsComputeResourceMetrics = async (module) => {
 					}
 				});
 			}
-			const appStorage = appsStorageResourceMetrics[app.name] || { dataset: 0, snapshots: 0 };
+			const appStorage = appsStorageResourceMetrics[name] || { dataset: 0, snapshots: 0 };
 			appsResourceMetrics.push({
-				name: app.name,
+				name,
 				cpu: {
 					percent: appStat?.cpuPercent || 0
 				},

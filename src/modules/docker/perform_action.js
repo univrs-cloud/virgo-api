@@ -4,8 +4,10 @@ import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 import DataService from '../../database/data_service.js';
+
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
-const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause'];
+const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause', 'remove'];
+const allowedUnmanagedActions = ['start', 'stop', 'kill', 'restart'];
 
 /** Recreating is how a broken or outdated app is put back together, so it is built from the template
  * again rather than from whatever is on disk. The project's `.env` is left alone: that is the
@@ -39,12 +41,13 @@ const performAppAction = async (job, module) => {
 	}
 
 	const existingApp = await DataService.getApplication(config?.name);
-	if (!existingApp) {
+	if (!existingApp && !allowedUnmanagedActions.includes(config.action)) {
 		throw new Error(`App not found.`);
 	}
 
+	const title = existingApp?.title || config.name;
 	const actionVerbs = module.nlp.conjugate(config.action);
-	await module.updateJobProgress(job, `${existingApp.title} app is ${actionVerbs.gerund}...`);
+	await module.updateJobProgress(job, `${title} app is ${actionVerbs.gerund}...`);
 	const containers = await module.findContainersByAppName(config.name);
 	if (containers.length === 0) {
 		throw new Error(`Containers for app '${config.name}' not found.`);
@@ -53,9 +56,9 @@ const performAppAction = async (job, module) => {
 	const container = containers[0];
 	const composeProject = container.labels?.comDockerComposeProject ?? false;
 	if (composeProject === false) {
-		throw new Error(`${existingApp.title} app is not set up to perform ${config.action} action.`);
+		throw new Error(`${title} app is not set up to perform ${config.action} action.`);
 	}
-		
+	
 	let action = [config.action];
 	if (config.action === 'recreate') {
 		action = ['up', '-d', '--force-recreate', '--remove-orphans'];
@@ -67,15 +70,16 @@ const performAppAction = async (job, module) => {
 	if (config.action === 'recreate') {
 		await downloadComposeFile(job, module, config.name, composeProjectDir);
 	}
-
-	await execa('docker', ['compose', '-p', composeProject, ...action], {
+	
+	const composeFiles = (existingApp ? [] : (container.labels?.comDockerComposeProjectConfigFiles || '').split(',').filter(Boolean));
+	await execa('docker', ['compose', '-p', composeProject, ...composeFiles.flatMap((file) => { return ['-f', file]; }), ...action], {
 		cwd: composeProjectDir
 	});
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		module.eventEmitter.emit('configured:updated');
 	}
-	return `${existingApp.title} app ${actionVerbs.pastTense}.`;
+	return `${title} app ${actionVerbs.pastTense}.`;
 };
 
 const performServiceAction = async (job, module) => {
@@ -90,11 +94,19 @@ const performServiceAction = async (job, module) => {
 	if (!container) {
 		throw new Error(`Service not found.`);
 	}
+
+	if (config.action === 'remove' && container.labels?.comDockerComposeProject) {
+		throw new Error(`Not allowed to perform ${config.action} on services.`);
+	}
 	
-	const serviceName = container.labels?.comDockerComposeService;
+	const serviceName = container.labels?.comDockerComposeService || container.names?.[0]?.replace(/^\//, '');
 	const actionVerbs = module.nlp.conjugate(config.action);
 	await module.updateJobProgress(job, `${serviceName} service is ${actionVerbs.gerund}...`);
-	await docker.getContainer(container.id)[config.action]();
+	if (config.action === 'remove') {
+		await docker.getContainer(container.id).remove({ force: true });
+	} else {
+		await docker.getContainer(container.id)[config.action]();
+	}
 	return `${serviceName} service ${actionVerbs.pastTense}.`;
 };
 

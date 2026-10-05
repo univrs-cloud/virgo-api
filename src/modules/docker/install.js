@@ -27,7 +27,7 @@ const instanceOf = (template, templates, env) => {
 		return { name: template.name, title: template.title };
 	}
 
-	if (!(template.env || []).some((field) => { return String(field?.name ?? '').toLowerCase() === 'instance'; })) {
+	if (!(template.env || []).some((field) => { return field?.name?.toLowerCase() === 'instance'; })) {
 		throw new Error(`${template.title} can't be installed.`);
 	}
 

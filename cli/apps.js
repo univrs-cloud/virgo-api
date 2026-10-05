@@ -164,7 +164,7 @@ const exploreApps = async (options) => {
 
 	const available = templates.filter((template) => {
 		if (template.multiple === true) {
-			return (template.env || []).some((field) => { return String(field?.name ?? '').toLowerCase() === 'instance'; });
+			return (template.env || []).some((field) => { return field?.name?.toLowerCase() === 'instance'; });
 		}
 
 		return !installedNames.has(template.name);
