@@ -32,19 +32,22 @@ function restartIndexerFromBeginning(message) {
 /**
  * Single error-handling path for all snapshot processing.
  *
+ * A snapshot is processed in one transaction (see processSnapshotWithTiming),
+ * so by the time this runs everything it wrote has been rolled back and there is
+ * nothing to clean up.
+ *
  *   - Known recoverable failures (zfs diff died, snapshot mount unreadable):
- *     log + cleanup partial rows + throw INDEXER_RESTART_FROM_BEGINNING so the
- *     outer run loop retries the whole pass (lets retention/automount races
- *     settle on their own).
- *   - Anything else (FK violation, unexpected JS error, etc.): log + cleanup
- *     partial rows + throw SNAPSHOT_SKIPPED so the snapshot loop catches it
- *     and moves on to the next snapshot. The snapshot stays `indexed_at = NULL`
- *     so the next run will re-attempt it cleanly. We never lose the entire run
- *     to a single bad snapshot.
+ *     log + throw INDEXER_RESTART_FROM_BEGINNING so the outer run loop retries
+ *     the whole pass (lets retention/automount races settle on their own).
+ *   - Anything else (FK violation, unexpected JS error, etc.): log + throw
+ *     SNAPSHOT_SKIPPED so the snapshot loop catches it and moves on to the next
+ *     snapshot. The snapshot stays `indexed_at = NULL` so the next run will
+ *     re-attempt it cleanly. We never lose the entire run to a single bad
+ *     snapshot.
  *
  * @returns {never}
  */
-function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode) {
+function handleSnapshotError(perf, e, snap, prevSnap, datasetId) {
 	let recoverable = zfs.isZfsDiffFailure(e) || isSnapshotStatFailure(e);
 	// Retention taking a snapshot away is routine on a node that snapshots hourly
 	// and indexes for half an hour. Counting it as a failed snapshot put it in the
@@ -85,12 +88,6 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 			message: e.message,
 		});
 	}
-	console.log('  🧹 Cleaning up partial index/diff rows for this snapshot…');
-	try {
-		cleanupPartialDiffWork(db, stmt, snap.id, datasetId, mode);
-	} catch (cleanupErr) {
-		console.warn(`  ⚠  Cleanup also failed: ${cleanupErr.message}`);
-	}
 	// A restart only helps when the cause was a race (retention, a lagging
 	// automount). If the same snapshot fails again the cause is deterministic, and
 	// restarting just burns whole passes until the attempt budget runs out — so
@@ -110,23 +107,6 @@ function handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode)
 	skip.code = 'SNAPSHOT_SKIPPED';
 	skip.cause = e;
 	throw skip;
-}
-
-function cleanupPartialDiffWork(db, stmt, snapId, datasetId, mode) {
-	database.transaction(db, () => {
-		stmt.deleteChangesBySnapshot.run(snapId);
-		if (mode === 'changes_only') {
-			return;
-		}
-		stmt.deleteVersionsBySnapshot.run(snapId);
-		stmt.clearFirstSeen.run(snapId);
-		stmt.clearLastSeen.run(snapId);
-		stmt.clearDeletedAt.run(snapId);
-		stmt.repairLastSeenNull.run(datasetId);
-		stmt.repairFirstSeenNull.run(datasetId);
-		stmt.deleteChangesForOrphanedFiles.run();
-		stmt.deleteOrphanedFiles.run();
-	});
 }
 
 function datasetInIncludeScope(name, includeDatasets) {
@@ -215,6 +195,10 @@ function pruneStaleIndexedDatasets(db, stmt, includeDatasets, liveNames) {
  * pruned snapshot was still live there. Files deleted in between are left to
  * orphan out: their last remaining evidence is going away, so there is nothing
  * left to recover and nothing worth listing.
+ *
+ * Versions are handed to the very next snapshot, pruned or not, and travel on
+ * from there when that one goes too. Jumping straight to the survivor would let
+ * the oldest of several pruned versions claim it and shut the newer ones out.
  */
 function pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullNames) {
 	let pruned = 0;
@@ -228,7 +212,7 @@ function pruneDeletedSnapshots(db, stmt, filteredDatasets, datasetIds, liveFullN
 			}
 			const survivor = dsSnaps.slice(i + 1).find(s => liveFullNames.has(s.full_name)) ?? null;
 			console.log(`  🗑  Pruning: ${snap.full_name}${survivor ? ` (versions re-anchored to ${survivor.name})` : ''}`);
-			pruneSnapshotRow(db, stmt, snap, survivor);
+			pruneSnapshotRow(db, stmt, snap, (survivor ? dsSnaps[i + 1] : null));
 			pruned++;
 		}
 	}
@@ -315,7 +299,7 @@ function pruneVanishedSnapshots(db, stmt, perf) {
 		}
 		const survivor = dsSnaps.slice(idx + 1).find(s => !vanishedNames.has(s.full_name)) ?? null;
 		console.log(`  🗑  Removing ${fullName} (destroyed mid-run)${survivor ? ` — versions re-anchored to ${survivor.name}` : ''}`);
-		pruneSnapshotRow(db, stmt, dsSnaps[idx], survivor);
+		pruneSnapshotRow(db, stmt, dsSnaps[idx], (survivor ? dsSnaps[idx + 1] : null));
 		pruned++;
 	}
 	perf.vanishedList = [];
@@ -393,13 +377,21 @@ function finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, message) 
 	printStats(db, perf, sessionWallT0, restartCount);
 }
 
-async function processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, datasetId, mode, work) {
+/**
+ * Runs one snapshot's work and `markDone` in a single transaction, so the rows
+ * and the flag that says they are complete are recorded together or not at all.
+ */
+async function processSnapshotWithTiming(db, perf, snap, prevSnap, datasetId, work, markDone) {
 	const t0 = Date.now();
 	try {
-		const result = await work();
+		const result = await database.atomic(db, async () => {
+			const value = await work();
+			markDone();
+			return value;
+		});
 		return { ms: Date.now() - t0, result };
 	} catch (e) {
-		handleSnapshotError(db, stmt, perf, e, snap, prevSnap, datasetId, mode);
+		handleSnapshotError(perf, e, snap, prevSnap, datasetId);
 	}
 }
 
@@ -762,6 +754,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 	let inBulkMode = false;
 	const onSignal = (sig) => {
 		console.log(`\n⚠  Received ${sig} during indexing, restoring DB state…`);
+		database.abandon(db);
 		if (inBulkMode) {
 			try {
 				database.disableBulkMode(db);
@@ -908,7 +901,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 					const needIndex = !snap.indexed_at;
 					const needDiff = prevSnap && prevSnapIsImmediate && !snap.diff_done;
 					const canIncremental = needIndex && prevSnap && prevSnap.indexed_at;
-					let diffDone = false;
+					const markIndexed = () => { stmt.markIndexed.run(Math.floor(Date.now() / 1000), snap.id); };
 
 					if (needIndex) {
 						if (!snapPath) {
@@ -918,37 +911,30 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 						}
 
 						if (canIncremental && needDiff) {
-							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+							const { ms } = await processSnapshotWithTiming(db, perf, snap, prevSnap, dsId, () =>
 								doIncrementalUnified(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
-							);
+							, () => {
+								stmt.markDiffDone.run(snap.id);
+								markIndexed();
+							});
 							perf.incrMs += ms;
 							perf.snapsIncremental++;
 							perf.diffsDone++;
-							diffDone = true;
 						} else if (canIncremental) {
-							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+							const { ms } = await processSnapshotWithTiming(db, perf, snap, prevSnap, dsId, () =>
 								doIncremental(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint, snapPath)
-							);
+							, markIndexed);
 							perf.incrMs += ms;
 							perf.snapsIncremental++;
 						} else {
-							const { ms, result: count } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'incremental', () =>
+							const { ms, result: count } = await processSnapshotWithTiming(db, perf, snap, prevSnap, dsId, () =>
 								doCrawl(db, stmt, perf, snap.id, dsId, snapPath, snap.full_name)
-							);
+							, markIndexed);
 							perf.filesCrawled += count;
 							perf.crawlMs += ms;
 							perf.snapsCrawled++;
 						}
 
-						// One transaction: a crash between the two flags would leave the
-						// snapshot indexed but its diff pending (or the reverse), and the
-						// next pass would re-derive it from the wrong branch.
-						database.transaction(db, () => {
-							if (diffDone) {
-								stmt.markDiffDone.run(snap.id);
-							}
-							stmt.markIndexed.run(Math.floor(Date.now() / 1000), snap.id);
-						});
 						snap.indexed_at = 1;
 						umountSnapshot(snapPath);
 					} else {
@@ -959,12 +945,11 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 					if (needDiff && !canIncremental) {
 						if (prevSnap) {
 							console.log(`  ↔️  diff ${prevSnap.name} → ${snap.name}`);
-							const { ms } = await processSnapshotWithTiming(db, stmt, perf, snap, prevSnap, dsId, 'changes_only', () =>
+							const { ms } = await processSnapshotWithTiming(db, perf, snap, prevSnap, dsId, () =>
 								doDiff(db, stmt, perf, prevSnap, snap, dsId, d.mountpoint)
-							);
+							, () => { stmt.markDiffDone.run(snap.id); });
 							perf.diffMs += ms;
 							perf.diffsDone++;
-							stmt.markDiffDone.run(snap.id);
 						}
 					}
 

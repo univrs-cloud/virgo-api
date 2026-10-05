@@ -298,14 +298,49 @@ function open(dbPath = null) {
 	return db;
 }
 
+const openTransactions = new WeakSet();
+
+function rollback(db) {
+	try {
+		db.exec('ROLLBACK');
+	} catch (err) {
+		console.warn(`  ⚠  Rollback failed: ${err.message}`);
+	}
+}
+
+/** Inside `atomic` this joins the transaction already open, so it commits or rolls back with it. */
 function transaction(db, fn) {
+	if (openTransactions.has(db)) {
+		return fn();
+	}
+
 	db.exec('BEGIN');
 	try {
 		const result = fn();
 		db.exec('COMMIT');
 		return result;
 	} catch (err) {
-		db.exec('ROLLBACK');
+		rollback(db);
+		throw err;
+	}
+}
+
+/**
+ * One transaction around work that awaits between its writes. Every `transaction`
+ * it runs joins in, so the work is recorded whole or not at all: a failure, or the
+ * process dying, leaves the index exactly as it was before.
+ */
+async function atomic(db, work) {
+	db.exec('BEGIN');
+	openTransactions.add(db);
+	try {
+		const result = await work();
+		openTransactions.delete(db);
+		db.exec('COMMIT');
+		return result;
+	} catch (err) {
+		openTransactions.delete(db);
+		rollback(db);
 		throw err;
 	}
 }
@@ -381,4 +416,11 @@ function disableBulkMode(db) {
 	checkpoint(db);
 }
 
-export { INDEX_DB_DIR, INDEX_DB_PATH, open, transaction, enableBulkMode, disableBulkMode, checkpoint, vacuumIfBloated };
+/** Drops the work of an `atomic` that will never finish, such as when the process is told to stop. */
+function abandon(db) {
+	if (openTransactions.delete(db)) {
+		rollback(db);
+	}
+}
+
+export { INDEX_DB_DIR, INDEX_DB_PATH, open, transaction, atomic, abandon, enableBulkMode, disableBulkMode, checkpoint, vacuumIfBloated };

@@ -440,7 +440,7 @@ function scopeDiffEntry(entry, mountpoint) {
 		return { ...entry, changeType: 'removed', newPath: null, isSubtree: isDir };
 	}
 	if (isTargetInScope) {
-		return { ...entry, changeType: 'added', path: entry.newPath, newPath: null };
+		return { ...entry, changeType: 'added', path: entry.newPath, newPath: null, isSubtree: isDir };
 	}
 	return null;
 }
@@ -452,4 +452,4 @@ function snapshotMountPath(datasetMountpoint, snapshotName) {
 	return `${datasetMountpoint}/.zfs/snapshot/${snapshotName}`;
 }
 
-export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, snapshotExists, cleanupStaleTempFiles };
+export { discoverAll, diffSnapshots, snapshotMountPath, isZfsDiffFailure, snapshotExists, cleanupStaleTempFiles, scopeDiffEntry };

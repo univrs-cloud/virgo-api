@@ -24,7 +24,8 @@ async function primeMount(snapshotPath) {
 }
 
 /**
- * Depth-first crawl of a snapshot mount. Runs entirely on the main thread so we
+ * Depth-first crawl of a snapshot mount, or of the one directory in it named by
+ * `startRelPath` (its contents, not the directory itself). Runs entirely on the main thread so we
  * avoid worker <-> main IPC and lock-free ring races that were wedging crawls on Pi.
  *
  * Stats are performed asynchronously in batches to avoid blocking the event loop.
@@ -33,10 +34,10 @@ async function primeMount(snapshotPath) {
  * silent-drop counts in the run summary. Throws `SNAPSHOT_STAT_FAILED` if the
  * mount becomes unreadable wholesale (either at start or mid-crawl).
  */
-async function walkSnapshot(snapshotPath, onBatch) {
+async function walkSnapshot(snapshotPath, onBatch, startRelPath = '') {
 	await primeMount(snapshotPath);
 
-	const dirs = [snapshotPath];
+	const dirs = [snapshotPath + startRelPath];
 	let pending = [];
 	let total = 0;
 	let skippedDirs = 0;

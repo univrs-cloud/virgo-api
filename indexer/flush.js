@@ -1,6 +1,7 @@
 import * as database from './db.js';
 import { snapshotMountPath } from './zfs.js';
 import { STAT_CONCURRENCY } from './constants.js';
+import { walkSnapshot } from './walker.js';
 import {
 	safeStatAsync,
 	primeMountReadable,
@@ -487,6 +488,42 @@ function reportSnapshotAnomalies(perf, orphans0, statFails0) {
 	perf.orphanSamples = [];
 }
 
+// ─── Directories that enter the indexed scope ───────────────────────────────
+
+/**
+ * A directory renamed in from outside the indexed scope reaches us as a single
+ * `added` event: `zfs diff` reports the rename, not the files that came with it,
+ * and until now none of them existed for the index. So its contents are crawled
+ * from the snapshot, the way a baseline crawl would have found them.
+ */
+async function crawlEnteredDirs(db, stmt, perf, entered, snap, datasetId, snapPath, recordsChanges) {
+	for (const dir of entered) {
+		const result = await walkSnapshot(snapPath, (batch) => {
+			const t = Date.now();
+			database.transaction(db, () => {
+				perf.sqlTxns++;
+				for (const e of batch) {
+					const fileRow = stmt.upsertFile.get(datasetId, e.path, e.inode, e.type, snap.id, snap.id);
+					perf.sqlUpserts++;
+					if (!fileRow) {
+						continue;
+					}
+					stmt.insertVersion.run(fileRow.id, snap.id, e.size, e.mtime, e.ctime, e.nlink, e.mode);
+					perf.sqlInserts++;
+					if (recordsChanges) {
+						stmt.insertChange.run(snap.id, fileRow.id, 'added', e.path, null, null, e.size, e.size, dir.changedAt);
+						perf.sqlInserts++;
+						perf.diffChanges++;
+					}
+				}
+			});
+			perf.sqlMs += Date.now() - t;
+		}, dir.relPath);
+		perf.statFailures += result.statFailures;
+		perf.enteredDirFiles = (perf.enteredDirFiles ?? 0) + result.total;
+	}
+}
+
 // ─── Batch flush: incremental only ─────────────────────────────────────────
 
 async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mountpoint, snapPath, context = { dirRenames: [] }) {
@@ -494,6 +531,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
 
+	const entered = [];
 	const t = Date.now();
 	database.transaction(db, () => {
 		perf.sqlTxns++;
@@ -510,6 +548,9 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 					if (fileRow) {
 						const newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
+					}
+					if (c.isSubtree) {
+						entered.push({ relPath, changedAt: c.changedAt ?? null });
 					}
 				}
 			} else if (c.changeType === 'removed') {
@@ -551,6 +592,7 @@ async function flushIncrementalBatch(db, stmt, perf, batch, snap, datasetId, mou
 		}
 	});
 	perf.sqlMs += Date.now() - t;
+	await crawlEnteredDirs(db, stmt, perf, entered, snap, datasetId, snapPath, false);
 }
 
 // ─── Batch flush: unified incremental + diff ────────────────────────────────
@@ -560,6 +602,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 		batch, snap, snapPath, mountpoint, perf, datasetId, stmt
 	);
 
+	const entered = [];
 	const t = Date.now();
 	database.transaction(db, () => {
 		perf.sqlTxns++;
@@ -582,6 +625,9 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 						fileId = fileRow.id;
 						newSize = insertVersionFromStat(stmt, perf, fileRow.id, snap.id, st);
 						fileByPath.set(relPath, { id: fileRow.id, latestSize: newSize });
+					}
+					if (c.isSubtree) {
+						entered.push({ relPath, changedAt: c.changedAt ?? null });
 					}
 				}
 			} else if (c.changeType === 'removed') {
@@ -659,6 +705,7 @@ async function flushUnifiedBatch(db, stmt, perf, batch, snap, datasetId, mountpo
 		}
 	});
 	perf.sqlMs += Date.now() - t;
+	await crawlEnteredDirs(db, stmt, perf, entered, snap, datasetId, snapPath, true);
 }
 
 // ─── Diff for changes table (standalone, when both snaps already indexed) ──

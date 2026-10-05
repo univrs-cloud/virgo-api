@@ -127,27 +127,26 @@ function search(db, pattern, opts = {}) {
 		}
 		fileIds = likeSearch(glob);
 	} else {
-		// Trailing `*` makes it a prefix query, so `invoice` matches the `invoice`
-		// token in `/data/invoices/q1.pdf` as well as `invoice.pdf`.
+		// Two ways to match, one result list. The FTS prefix query finds whole
+		// tokens however they are written (`invoice` in `/data/Invoices/q1.pdf`,
+		// `stefan` in `Ștefan`, `budget 2026` in `budget_2026.xlsx`), and the
+		// substring scan finds a term inside a token (`voice` in `invoice.pdf`).
+		// They are combined before ordering and paging: answering one page from
+		// the first and the next from the second repeated some files and never
+		// showed others.
 		const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"*';
+		const substring = '%' + pattern + '%';
 		try {
 			fileIds = db.prepare(`
-				SELECT DISTINCT f.id, f.dataset_id, f.path FROM fts_paths fp
-				JOIN files f ON f.id = fp.rowid
+				SELECT DISTINCT f.id, f.dataset_id, f.path FROM files f
 				JOIN datasets d ON d.id = f.dataset_id ${VER_JOIN}
-				WHERE fts_paths MATCH ? ${DS_FILTER} ${TYPE_FILTER} ${STATE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
+				WHERE (f.id IN (SELECT rowid FROM fts_paths WHERE fts_paths MATCH ?) OR f.path LIKE ?)
+				${DS_FILTER} ${TYPE_FILTER} ${STATE_FILTER} ${SIZE_MIN} ${SIZE_MAX} ${SINCE} ${UNTIL} ${PATH_FILTER}
 				${ORDER}
 				LIMIT ? OFFSET ?
-			`).all(ftsQuery, ...baseParams, ...filterParams, ...pathParams, limit, offset);
+			`).all(ftsQuery, substring, ...baseParams, ...filterParams, ...pathParams, limit, offset);
 		} catch {
-			fileIds = [];
-		}
-
-		// FTS matches whole tokens only, so fall back to a substring scan for
-		// things like `voice` inside `invoice.pdf`. Runs at any offset — gating
-		// this on offset === 0 made page 2 of a fallback result set come back empty.
-		if (!fileIds.length) {
-			fileIds = likeSearch('%' + pattern + '%');
+			fileIds = likeSearch(substring);
 		}
 	}
 
@@ -270,6 +269,33 @@ function history(db, path, opts = {}) {
 	const scopes = parseDatasetScopes(opts);
 	const { clause: DS_FILTER, params: dsParams } = sqlDatasetScope(scopes, 'd');
 
+	// The path may be one the file had earlier. Folders above it that were renamed
+	// since give the names it went on to have, and a change event that names any of
+	// them identifies the file through its own renames.
+	const fileIds = new Set();
+	const datasets = db.prepare(`SELECT d.id FROM datasets d WHERE 1 = 1${DS_FILTER}`).all(...dsParams);
+	for (const dataset of datasets) {
+		const steps = renameStepsAfter(db, { dataset_id: dataset.id, created_at: -1 });
+		const names = JSON.stringify(folderImages(steps, path).prefixes);
+		const rows = db.prepare(`
+			SELECT f.id FROM files f
+			WHERE f.dataset_id = ?1 AND f.path IN (SELECT value FROM json_each(?2))
+			UNION
+			SELECT f.id FROM json_each(?2) name
+			JOIN files f ON f.dataset_id = ?1 AND f.path >= name.value || '#overwritten@' AND f.path < name.value || '#overwritten@~'
+			WHERE f.overwritten_from = name.value
+			UNION
+			SELECT c.file_id AS id FROM changes c
+			JOIN snapshots s ON s.id = c.snapshot_id
+			WHERE s.dataset_id = ?1 AND c.file_id IS NOT NULL
+			AND (c.old_path IN (SELECT value FROM json_each(?2)) OR c.new_path IN (SELECT value FROM json_each(?2)))
+		`).all(dataset.id, names);
+		for (const r of rows) {
+			fileIds.add(r.id);
+		}
+	}
+	const ids = JSON.stringify([...fileIds]);
+
 	const versions = db.prepare(`
 		SELECT
 			d.name AS dataset,
@@ -277,7 +303,7 @@ function history(db, path, opts = {}) {
 			s.name AS snapshot,
 			s.full_name,
 			strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at, 'unixepoch') AS snapshot_date,
-			f.path,
+			COALESCE(f.overwritten_from, f.path) AS path,
 			fv.path AS version_path,
 			fv.size,
 			strftime('%Y-%m-%dT%H:%M:%SZ', fv.mtime, 'unixepoch') AS modified,
@@ -286,11 +312,10 @@ function history(db, path, opts = {}) {
 		JOIN files f ON f.id = fv.file_id
 		JOIN datasets d ON d.id = f.dataset_id
 		JOIN snapshots s ON s.id = fv.snapshot_id
-		WHERE f.path = ?${DS_FILTER}
-		ORDER BY d.name, s.created_at
-	`).all(path, ...dsParams);
+		WHERE f.id IN (SELECT value FROM json_each(?))
+		ORDER BY d.name, s.created_at, fv.id
+	`).all(ids);
 
-	const chScope = sqlDatasetScope(scopes, 'd');
 	const chgs = db.prepare(`
 		SELECT
 			s.name AS snapshot,
@@ -304,10 +329,9 @@ function history(db, path, opts = {}) {
 			strftime('%Y-%m-%dT%H:%M:%SZ', c.changed_at, 'unixepoch') AS changed_on
 		FROM changes c
 		JOIN snapshots s ON s.id = c.snapshot_id
-		JOIN datasets d ON d.id = s.dataset_id
-		WHERE (c.old_path = ? OR c.new_path = ?)${chScope.clause}
-		ORDER BY s.created_at
-	`).all(path, path, ...chScope.params);
+		WHERE c.file_id IN (SELECT value FROM json_each(?))
+		ORDER BY s.created_at, c.id
+	`).all(ids);
 
 	if (!versions.length && !chgs.length) {
 		if (!json) {
@@ -586,10 +610,13 @@ function diff(db, snapA, snapB, opts = {}) {
 	}
 
 	// Every change event in (from, to], collapsed to one row per file: the state
-	// it was in entering the span and the state it left in.
+	// it was in entering the span and the state it left in. A file replaced inside
+	// one snapshot has a removal and an addition there, in whichever order zfs
+	// listed them, so within a snapshot the addition is read last: the old object
+	// went and the new one is what is left.
 	const SPAN = `
 		WITH span AS (
-			SELECT c.file_id, c.change_type, c.old_path, c.new_path, c.old_size, c.new_size, s.created_at
+			SELECT c.id, c.file_id, c.change_type, c.old_path, c.new_path, c.old_size, c.new_size, s.created_at
 			FROM changes c
 			JOIN snapshots s ON s.id = c.snapshot_id
 			WHERE s.dataset_id = ?1 AND s.created_at > ?2 AND s.created_at <= ?3
@@ -601,12 +628,12 @@ function diff(db, snapA, snapB, opts = {}) {
 				LAST_VALUE(change_type)  OVER w AS last_type,
 				FIRST_VALUE(old_size)    OVER w AS size_a,
 				LAST_VALUE(new_size)     OVER w AS size_b,
-				FIRST_VALUE(old_path)    OVER w AS from_path,
-				LAST_VALUE(new_path)     OVER w AS to_path,
+				LAST_VALUE(COALESCE(new_path, old_path)) OVER w AS end_path,
+				LAST_VALUE(created_at)   OVER w AS end_at,
 				ROW_NUMBER()             OVER w AS rn
 			FROM span
 			WINDOW w AS (
-				PARTITION BY file_id ORDER BY created_at
+				PARTITION BY file_id ORDER BY created_at, (change_type = 'added'), id
 				ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
 			)
 		)
@@ -618,13 +645,26 @@ function diff(db, snapA, snapB, opts = {}) {
 
 	const rows = db.prepare(`
 		${SPAN}
-		SELECT c.file_id, c.first_type, c.last_type, c.size_a, c.size_b, c.from_path, c.to_path, f.path AS current_path
+		SELECT c.file_id, c.first_type, c.last_type, c.size_a, c.size_b, c.end_path, c.end_at
 		FROM collapsed c
-		LEFT JOIN files f ON f.id = c.file_id
 		WHERE c.rn = 1 AND NOT (c.first_type = 'added' AND c.last_type = 'removed')
-		ORDER BY COALESCE(f.path, c.to_path, c.from_path)
+		ORDER BY c.end_path, c.file_id
 		LIMIT ?4 OFFSET ?5
 	`).all(...spanParams, limit, offset);
+
+	// The path a file had at `to`, not the one it has today: its last event in the
+	// span names it, and a folder above it renamed later in the span moves it on.
+	const steps = renameStepsAfter(db, from).filter((step) => { return step.createdAt <= to.created_at; });
+	const pathAtEnd = (r) => {
+		let path = r.end_path;
+		for (const step of steps) {
+			const dir = (step.createdAt > r.end_at ? longestDir(step.dirs, path, 'oldPath') : null);
+			if (dir && path !== dir.oldPath) {
+				path = dir.newPath + path.slice(dir.oldPath.length);
+			}
+		}
+		return path;
+	};
 
 	const files = rows.map((r) => {
 		const status = r.last_type === 'removed' ? 'removed'
@@ -634,7 +674,7 @@ function diff(db, snapA, snapB, opts = {}) {
 		const sizeA = status === 'added' ? null : r.size_a;
 		const sizeB = status === 'removed' ? null : r.size_b;
 		return {
-			path: r.current_path ?? r.to_path ?? r.from_path,
+			path: pathAtEnd(r),
 			size_a: sizeA,
 			size_b: sizeB,
 			delta: (sizeB ?? 0) - (sizeA ?? 0),
