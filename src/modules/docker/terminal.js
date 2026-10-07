@@ -5,6 +5,40 @@ import docker from '../../utils/docker_client.js';
 // Track active terminal sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
 
+const killExecSession = async (containerExec) => {
+	try {
+		const { Pid: pid } = await containerExec.inspect();
+		if (!Number.isInteger(pid) || pid <= 0) {
+			return;
+		}
+
+		if ((await signalSessionChildren(pid, 'SIGHUP')) > 0) {
+			await new Promise(resolve => setTimeout(resolve, 250));
+			if ((await signalSessionChildren(pid, 'SIGKILL')) > 0) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		}
+		await execa('pkill', ['-HUP', '-s', String(pid)], { reject: false });
+		await new Promise(resolve => setTimeout(resolve, 100));
+		await execa('pkill', ['-KILL', '-s', String(pid)], { reject: false });
+	} catch {
+		return;
+	}
+};
+
+const signalSessionChildren = async (leaderPid, signal) => {
+	const { stdout } = await execa('pgrep', ['-s', String(leaderPid)], { reject: false });
+	const pids = stdout.split('\n').map(Number).filter((pid) => { return Number.isInteger(pid) && pid > 0 && pid !== leaderPid; });
+	for (const pid of pids) {
+		try {
+			process.kill(pid, signal);
+		} catch {
+			continue;
+		}
+	}
+	return pids.length;
+};
+
 const cleanupSession = async (socket) => {
 	const session = activeSessions.get(socket);
 	if (!session) {
@@ -19,24 +53,10 @@ const cleanupSession = async (socket) => {
 	socket.off('docker:container:terminal:resize', session.resizeHandler);
 	socket.off('docker:container:terminal:disconnect', session.disconnectHandler);
 	socket.off('disconnect', session.socketDisconnectHandler);
-	// Kill the exec process before destroying the stream
 	if (session.containerExec) {
-		try {
-			// Send exit command to gracefully close the shell
-			if (session.terminalStream && !session.terminalStream.destroyed) {
-				session.terminalStream.write('exit\n');
-			}
-			
-			// Give it a moment to exit gracefully, then destroy
-			await new Promise(resolve => setTimeout(resolve, 100));
-			session.terminalStream?.destroy();
-		} catch (error) {
-			// Exec may already be gone, just destroy the stream
-			session.terminalStream?.destroy();
-		}
-	} else {
-		session.terminalStream?.destroy();
+		await killExecSession(session.containerExec);
 	}
+	session.terminalStream?.destroy();
 
 	// The shell exiting is the common way a session ends, and without this the client is never told:
 	// it keeps showing the session as live, and the reconnect link that only appears once it is marked
