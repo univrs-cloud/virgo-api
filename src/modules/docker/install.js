@@ -148,6 +148,7 @@ const install = async (job, module, template, name, title) => {
 	const app = {
 		name: name,
 		canBeRemoved: !isCoreApp(name),
+		canEmbed: (typeof template.embed === 'boolean' ? template.embed : null),
 		category: template.categories.find((_, index) => { return index === 0; }),
 		icon: icon,
 		title: title

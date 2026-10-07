@@ -163,6 +163,7 @@ class DataService {
 				title: applicationData.title,
 				icon: applicationData.icon,
 				canBeRemoved: applicationData.canBeRemoved,
+				canEmbed: applicationData.canEmbed ?? null,
 			}, { returning: true });
 			const application = entry.get({ plain: true });
 			const order = await DataService.getNextOrderForCategory(application.category);

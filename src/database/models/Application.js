@@ -28,6 +28,10 @@ const Application = sequelize.define('Application', {
 		type: DataTypes.BOOLEAN,
 		allowNull: false,
 		defaultValue: true
+	},
+	canEmbed: {
+		type: DataTypes.BOOLEAN,
+		allowNull: true
 	}
 });
 

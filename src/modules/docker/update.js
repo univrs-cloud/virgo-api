@@ -36,7 +36,7 @@ const updateApp = async (job, module) => {
 				const responseIcon = await fetch(template.logo);
 				if (responseIcon.ok) {
 					await streamPipeline(responseIcon.body, createWriteStream(path.join(module.appIconsDir, icon)));
-					const updatedApp = { ...existingApp, icon: icon };
+					const updatedApp = { ...existingApp, icon: icon, canEmbed: (typeof template.embed === 'boolean' ? template.embed : existingApp.canEmbed) };
 					await DataService.setApplication(updatedApp);
 					module.eventEmitter.emit('configured:updated');
 				}
