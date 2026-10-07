@@ -495,7 +495,8 @@ class BaseModule {
 
 				try {
 					if (command.job) {
-						const job = await this.addJob(command.job, { config, username: socket.username }, { parallel: command.parallel === true });
+						const parallel = (typeof command.parallel === 'function' ? command.parallel(config) : command.parallel === true);
+						const job = await this.addJob(command.job, { config, username: socket.username }, { parallel });
 						ack(job ? { status: 'succeeded' } : { status: 'failed', message: 'Could not start job' });
 						return;
 					}

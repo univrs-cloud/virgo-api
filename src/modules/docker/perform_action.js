@@ -123,7 +123,7 @@ export default {
 	name: 'perform_action',
 	commands: {
 		'app:service:performAction': { job: 'app:service:performAction', parallel: true },
-		'app:performAction': { job: 'app:performAction', parallel: true }
+		'app:performAction': { job: 'app:performAction', parallel: (config) => { return String(config?.action ?? '').toLowerCase() !== 'recreate'; } }
 	},
 	jobs: {
 		'app:performAction': (job, module) => {
