@@ -14,6 +14,18 @@ const withoutRenderedStatus = (containers) => {
 	return containers.map(({ status, ...container }) => { return container; });
 };
 
+const configuredFor = (configured, tier) => {
+	const visible = configured.map((entry) => {
+		if (!entry.traefik) {
+			return entry;
+		}
+
+		const { backendUrl, configFile, ...traefik } = entry.traefik;
+		return { ...entry, traefik };
+	});
+	return (tier === 'admin' ? configured : visible);
+};
+
 class DockerModule extends BaseModule {
 	#composeDir = '.docker';
 	#appsDataset = 'messier/apps';
@@ -28,7 +40,11 @@ class DockerModule extends BaseModule {
 		this.#appsDir = `/${this.#appsDataset}`;
 
 		this.declareState({
-			configured: { event: 'app:configured', when: (value) => { return Boolean(value); } },
+			configured: {
+				event: 'app:configured',
+				when: (value) => { return Boolean(value); },
+				project: configuredFor
+			},
 			containers: { event: 'app:containers', gated: true, normalize: withoutRenderedStatus, sortArrays: true },
 			templates: { event: 'app:templates', gated: true, when: (value) => { return Boolean(value); } },
 			appsResourceMetrics: { event: 'app:resourceMetrics', audience: 'admin' },
