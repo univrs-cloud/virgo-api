@@ -83,6 +83,8 @@ export default {
 		'app:update': { job: 'app:update' }
 	},
 	jobs: {
-		'app:update': updateApp
+		'app:update': (job, module) => {
+			return module.withAppLock(job.data?.config?.name, () => { return updateApp(job, module); });
+		}
 	}
 };

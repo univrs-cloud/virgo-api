@@ -1,4 +1,3 @@
-import fs from 'fs';
 import chokidar from 'chokidar';
 
 class FileWatcher {

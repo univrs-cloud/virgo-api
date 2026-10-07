@@ -54,6 +54,11 @@ const installApp = async (job, module) => {
 	}
 
 	const { name, title } = instanceOf(template, templates, config?.env);
+	return await module.withAppLock(name, () => { return install(job, module, template, name, title); });
+};
+
+const install = async (job, module, template, name, title) => {
+	const { config } = job.data;
 
 	// An imported pool arrives with its apps already in the registry, still configured for the name the
 	// node had before. Forcing rewrites the project files and brings the stack back up on the current

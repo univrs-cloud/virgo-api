@@ -1,7 +1,5 @@
 import path from 'path';
-import camelcaseKeys from 'camelcase-keys';
 import config from '../../../config.js';
-import docker from '../../utils/docker_client.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 
@@ -22,6 +20,7 @@ class DockerModule extends BaseModule {
 	#appsDir;
 	#appIconsDir = '/messier/.config/assets/img/apps';
 	#platform = (process.arch === 'x64' ? 'amd64' : process.arch);
+	#appLocks = new Map();
 
 	constructor() {
 		super('docker');
@@ -84,6 +83,19 @@ class DockerModule extends BaseModule {
 
 	get appIconsDir() {
 		return this.#appIconsDir;
+	}
+
+	async withAppLock(name, task) {
+		const previous = this.#appLocks.get(name) ?? Promise.resolve();
+		const current = previous.catch(() => {}).then(task);
+		this.#appLocks.set(name, current);
+		try {
+			return await current;
+		} finally {
+			if (this.#appLocks.get(name) === current) {
+				this.#appLocks.delete(name);
+			}
+		}
 	}
 
 	async getTemplates() {

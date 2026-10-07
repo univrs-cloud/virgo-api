@@ -13,7 +13,19 @@ const getQueueName = (moduleName) => `${moduleName}-jobs`;
 /** Cron / repeatable jobs only (`addJobSchedule`). Regular `addJob` stays on `getQueueName`. */
 const getScheduledQueueName = (moduleName) => `${moduleName}-scheduled-jobs`;
 
-const QUEUE_NAMES = MODULES.flatMap((module) => [getQueueName(module), getScheduledQueueName(module)]);
+const PARALLEL_CONCURRENCY = {
+	docker: 4
+};
+
+const getParallelQueueName = (moduleName) => `${moduleName}-parallel-jobs`;
+
+const getParallelConcurrency = (moduleName) => PARALLEL_CONCURRENCY[moduleName] ?? 0;
+
+const QUEUE_NAMES = MODULES.flatMap((module) => [
+	getQueueName(module),
+	getScheduledQueueName(module),
+	...(getParallelConcurrency(module) > 0 ? [getParallelQueueName(module)] : [])
+]);
 
 let hasCleanedUp = false;
 
@@ -48,5 +60,7 @@ export {
 	QUEUE_NAMES,
 	getQueueName,
 	getScheduledQueueName,
+	getParallelQueueName,
+	getParallelConcurrency,
 	cleanupQueues
 };

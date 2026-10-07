@@ -82,15 +82,18 @@ const performAppAction = async (job, module) => {
 	return `${title} app ${actionVerbs.pastTense}.`;
 };
 
+const findContainer = async (id) => {
+	const containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
+	return containers.find((container) => { return container.id === id; });
+};
+
 const performServiceAction = async (job, module) => {
 	const { config } = job.data;
 	if (!allowedServiceActions.includes(config?.action)) {
 		throw new Error(`Not allowed to perform ${config?.action} on services.`);
 	}
 
-	let containers = await docker.listContainers({ all: true });
-	containers = camelcaseKeys(containers, { deep: true });
-	const container = containers.find((container) => { return container.id === config?.id; });
+	const container = await findContainer(config?.id);
 	if (!container) {
 		throw new Error(`Service not found.`);
 	}
@@ -101,23 +104,31 @@ const performServiceAction = async (job, module) => {
 	
 	const serviceName = container.labels?.comDockerComposeService || container.names?.[0]?.replace(/^\//, '');
 	const actionVerbs = module.nlp.conjugate(config.action);
-	await module.updateJobProgress(job, `${serviceName} service is ${actionVerbs.gerund}...`);
-	if (config.action === 'remove') {
-		await docker.getContainer(container.id).remove({ force: true });
-	} else {
-		await docker.getContainer(container.id)[config.action]();
-	}
+	await module.withAppLock(container.labels?.comDockerComposeProject || container.id, async () => {
+		if (!(await findContainer(container.id))) {
+			throw new Error(`Service not found.`);
+		}
+
+		await module.updateJobProgress(job, `${serviceName} service is ${actionVerbs.gerund}...`);
+		if (config.action === 'remove') {
+			await docker.getContainer(container.id).remove({ force: true });
+		} else {
+			await docker.getContainer(container.id)[config.action]();
+		}
+	});
 	return `${serviceName} service ${actionVerbs.pastTense}.`;
 };
 
 export default {
 	name: 'perform_action',
 	commands: {
-		'app:service:performAction': { job: 'app:service:performAction' },
-		'app:performAction': { job: 'app:performAction' }
+		'app:service:performAction': { job: 'app:service:performAction', parallel: true },
+		'app:performAction': { job: 'app:performAction', parallel: true }
 	},
 	jobs: {
-		'app:performAction': performAppAction,
+		'app:performAction': (job, module) => {
+			return module.withAppLock(job.data?.config?.name, () => { return performAppAction(job, module); });
+		},
 		'app:service:performAction': performServiceAction
 	}
 };

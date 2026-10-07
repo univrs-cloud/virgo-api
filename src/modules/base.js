@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { randomUUID } from 'crypto';
 import { Queue, Worker } from 'bullmq';
 import config from '../../config.js';
 import eventEmitter from '../utils/event_emitter.js';
@@ -13,7 +14,7 @@ import * as authelia from '../utils/authelia.js';
 import * as nlp from '../utils/nlp.js';
 import * as proxyCredential from '../utils/proxy_credential.js';
 import { isPrivateAddress, isLoopbackAddress } from '../utils/private_address.js';
-import { getQueueName, getScheduledQueueName } from '../queues.js';
+import { getQueueName, getScheduledQueueName, getParallelQueueName, getParallelConcurrency } from '../queues.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // How long a socket goes on trusting the identity it resolved before checking it again.
@@ -70,6 +71,8 @@ class BaseModule {
 	#worker;
 	#scheduledQueue;
 	#scheduledWorker;
+	#parallelQueue;
+	#parallelWorker;
 	#plugins = [];
 	#stateDeclarations = new Map();
 	#pollers = [];
@@ -238,9 +241,10 @@ class BaseModule {
 		return this.#pollers.find((poller) => { return poller.name === name; });
 	}
 
-	async addJob(name, data) {
+	async addJob(name, data, { parallel = false } = {}) {
 		try {
-			return await this.#queue.add(name, data);
+			const queue = (parallel && this.#parallelQueue ? this.#parallelQueue : this.#queue);
+			return await queue.add(name, data, { jobId: randomUUID() });
 		} catch (error) {
 			console.error(`Error starting job:`, error);
 			return null;
@@ -491,7 +495,7 @@ class BaseModule {
 
 				try {
 					if (command.job) {
-						const job = await this.addJob(command.job, { config, username: socket.username });
+						const job = await this.addJob(command.job, { config, username: socket.username }, { parallel: command.parallel === true });
 						ack(job ? { status: 'succeeded' } : { status: 'failed', message: 'Could not start job' });
 						return;
 					}
@@ -566,6 +570,23 @@ class BaseModule {
 			{ connection }
 		);
 		this.#wireWorkerEvents(this.#scheduledWorker);
+
+		const parallelConcurrency = getParallelConcurrency(this.#name);
+		if (parallelConcurrency > 0) {
+			const parallelName = getParallelQueueName(this.#name);
+			this.#parallelQueue = new Queue(parallelName, {
+				connection,
+				defaultJobOptions: defaultOpts
+			});
+			this.#parallelWorker = new Worker(
+				parallelName,
+				async (job) => {
+					return await this.#processJob(job);
+				},
+				{ connection, concurrency: parallelConcurrency }
+			);
+			this.#wireWorkerEvents(this.#parallelWorker);
+		}
 	}
 
 	async #loadPlugins() {
