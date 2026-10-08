@@ -6,6 +6,8 @@ const MIN_RESTART_DELAY_MS = 1000;
 const MAX_RESTART_DELAY_MS = 60000;
 const HEALTHY_AFTER_MS = 30000;
 const SETTLE_MS = 3000;
+const REFRESH_DELAY_MS = 5000;
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 /** avahi-browse escapes `;` inside a field, so splitting on a bare separator would shift every
  * following index whenever a node's name contains one. */
@@ -83,6 +85,8 @@ let generation = 0;
 let watcher = null;
 let restartDelay = MIN_RESTART_DELAY_MS;
 let onChange = null;
+let refreshTimer = null;
+let refreshRequested = false;
 
 const publish = () => {
 	onChange?.();
@@ -211,17 +215,37 @@ const watch = async () => {
 			watcher = null;
 		}
 
-		const delay = restartDelay;
+		const refreshed = refreshRequested;
+		const delay = (refreshed ? 0 : restartDelay);
+
+		refreshRequested = false;
 
 		setTimeout(() => {
-			restartDelay = Math.min(
-				delay * 2,
-				MAX_RESTART_DELAY_MS
-			);
+			if (!refreshed) {
+				restartDelay = Math.min(
+					delay * 2,
+					MAX_RESTART_DELAY_MS
+				);
+			}
 
 			watch();
 		}, delay);
 	}
+};
+
+const refresh = () => {
+	if (!watcher) {
+		return;
+	}
+
+	refreshRequested = true;
+	watcher.kill();
+};
+
+const scheduleRefresh = () => {
+	clearTimeout(refreshTimer);
+	refreshTimer = setTimeout(refresh, REFRESH_DELAY_MS);
+	refreshTimer.unref();
 };
 
 const discover = () => {
@@ -251,6 +275,18 @@ const register = (module) => {
 	};
 
 	watch();
+	setInterval(refresh, REFRESH_INTERVAL_MS).unref();
+
+	module.eventEmitter
+		.on('host:peer:updated', () => {
+			scheduleRefresh();
+		})
+		.on('host:network:virtualIp:updated', () => {
+			scheduleRefresh();
+		})
+		.on('host:peer:virtualIp:configure', () => {
+			scheduleRefresh();
+		});
 };
 
 export default {
