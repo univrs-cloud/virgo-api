@@ -160,8 +160,18 @@ const getNodeIdentifier = async () => {
 	return {
 		hostname,
 		domainName,
-		address: await getNodeAddress(domainName)
+		address: await getNodeAddress(domainName),
+		nodeAddress: await getOwnNodeAddress()
 	};
+};
+
+const getOwnNodeAddress = async () => {
+	try {
+		const configured = await virtualIp.readConfiguration();
+		return (await network.getOwnAddress(configured?.address || null) || '');
+	} catch (error) {
+		return '';
+	}
 };
 
 /** The virtual IP wins when this node is the one holding it: it is the address the router forwards to
@@ -272,7 +282,7 @@ const disconnect = () => {
 	fleetState.resetRuntimeState();
 };
 
-const registerNode = ({ email, password, token, registrationToken, nodeId, name, hostname, domainName, address }) => {
+const registerNode = ({ email, password, token, registrationToken, nodeId, name, hostname, domainName, address, nodeAddress }) => {
 	return new Promise((resolve, reject) => {
 		const socket = io(`${fleetUrl}/node`, {
 			path: '/api',
@@ -286,7 +296,7 @@ const registerNode = ({ email, password, token, registrationToken, nodeId, name,
 			reject(new Error(error?.message || 'Failed to connect to fleet'));
 		});
 		socket.on('connect', () => {
-			socket.timeout(REGISTRATION_TIMEOUT_MS).emit('node:register', { nodeId, name, hostname, domainName, address, email, password, token, registrationToken }, (error, response) => {
+			socket.timeout(REGISTRATION_TIMEOUT_MS).emit('node:register', { nodeId, name, hostname, domainName, address, nodeAddress, email, password, token, registrationToken }, (error, response) => {
 				socket.disconnect();
 				if (error) {
 					reject(new Error('Fleet registration interrupted or timed out. Please try again.'));
