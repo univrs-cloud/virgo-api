@@ -24,7 +24,7 @@ const IDENTITY_TTL = 30000;
 // that replaces it while the node is updating, rebooting or shutting down, which is everybody's
 // business. Everything else waits until the node knows the socket belongs to somebody, or to somewhere
 // it lets in unasked.
-const PUBLIC_EVENTS = ['role', 'host:setupCompleted', 'host:update', 'host:reboot', 'host:shutdown'];
+const PUBLIC_EVENTS = ['role', 'user:role', 'host:setupCompleted', 'host:update', 'host:reboot', 'host:shutdown'];
 const ADMIN_GROUP = 'admins';
 
 const isVisible = (socket, event) => {

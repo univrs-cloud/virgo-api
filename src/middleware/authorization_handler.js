@@ -1,3 +1,4 @@
+import { isIP } from 'net';
 import * as setup from '../utils/setup_state.js';
 import * as authelia from '../utils/authelia.js';
 import * as traefikConfig from '../utils/traefik_config.js';
@@ -34,24 +35,30 @@ const cookieDomain = async (req) => {
 };
 
 /** A readable copy of who Authelia says is here, for the shell to build itself from before it has
- * spoken to anything. Removed rather than emptied when nobody is, and at both reaches: the session it
+ * spoken to anything. Removed rather than emptied when nobody is, and at every reach: the session it
  * copies may have been established when the node answered to another name. */
 const cookieName = (req) => {
 	const host = ((setup.isCompleted() && traefikConfig.getDomain()) || req.hostname);
 	return `account_${host.toLowerCase().split('.')[0]}`;
 };
 
+const reaches = (hostname) => {
+	if (isIP(hostname)) {
+		return [hostname];
+	}
+
+	const labels = hostname.split('.');
+	return labels.slice(0, Math.max(labels.length - 1, 1)).map((label, index) => { return labels.slice(index).join('.'); });
+};
+
 const writeAccount = async (req, res, identity) => {
-	const domain = await cookieDomain(req);
 	const name = cookieName(req);
 	if (!identity) {
-		res.clearCookie(name, { domain, path: '/' });
-		if (domain !== req.hostname) {
-			res.clearCookie(name, { domain: req.hostname, path: '/' });
-		}
+		reaches(req.hostname).forEach((domain) => { res.clearCookie(name, { domain, path: '/' }); });
 		return;
 	}
 
+	const domain = await cookieDomain(req);
 	const account = { name: identity.name, user: identity.username, email: identity.email, groups: identity.groups };
 	res.cookie(name, Buffer.from(JSON.stringify(account)).toString('base64'), {
 		domain,

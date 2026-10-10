@@ -5,6 +5,15 @@ import linuxSysUser from 'linux-sys-user';
 import BaseModule from '../base.js';
 
 const linuxUser = linuxSysUser.promise();
+const ROLE_CHECK_INTERVAL = 30000;
+
+const roleOf = (socket) => {
+	if (!socket.isAuthenticated) {
+		return null;
+	}
+
+	return (socket.isAdmin ? 'admin' : 'user');
+};
 
 class UserModule extends BaseModule {
 	#autheliaUsersFile = '/messier/apps/authelia/config/users.yml';
@@ -35,6 +44,19 @@ class UserModule extends BaseModule {
 				await this.#loadUsers();
 				this.#emitUsers();
 			});
+	}
+
+	onConnection(socket) {
+		socket.emit('user:role', roleOf(socket));
+		socket.data.roleCheck = setInterval(() => { roleOf(socket); }, ROLE_CHECK_INTERVAL);
+	}
+
+	onTierChange(socket) {
+		socket.emit('user:role', roleOf(socket));
+	}
+
+	onDisconnect(socket) {
+		clearInterval(socket.data.roleCheck);
 	}
 
 	get autheliaUsersFile() {
