@@ -16,7 +16,7 @@ const RESERVED_CLUSTER_NAMES = new Set([
 	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static'
 ]);
 const RESERVED_NODE_NAMES = new Set([
-	'analytics', 'auth', 'autoconfig', 'autodiscover', 'dockhand', 'euro-office', 'gitea', 'mail',
+	'analytics', 'auth', 'autoconfig', 'autodiscover', 'dockhand', 'gitea', 'mail',
 	'nextcloud', 'pihole', 'rspamd', 'talk', 'terminal', 'torrent', 'traefik', 'vpn'
 ]);
 const FALLBACK_INTERFACES = ['eth0', 'eth1'];
