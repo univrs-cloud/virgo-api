@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import ini from 'ini';
 import { execa } from 'execa';
+import * as sanoid from '../../utils/sanoid.js';
 
 const slug = (comment) => {
 	return (comment || '').toLowerCase().trim().replace(/\s+/g, '_');
@@ -9,10 +10,11 @@ const slug = (comment) => {
 
 const createFolder = async (job, module) => {
 	const { config } = job.data;
-	const { comment, validUsers = [], refquota: refquotaRaw, path: customPath } = config;
+	const { comment, validUsers = [], refquota: refquotaRaw, path: customPath, snapshots } = config;
 	await module.updateJobProgress(job, `Creating folder ${comment}...`);
 
 	let sharePath;
+	let snapshotsError = null;
 	if (customPath) {
 		if (!fs.existsSync(customPath)) {
 			throw new Error(`Path "${customPath}" does not exist.`);
@@ -26,6 +28,13 @@ const createFolder = async (job, module) => {
 			await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
 		}
 		sharePath = `/messier/folders/${slug(comment)}`;
+		if (snapshots === false) {
+			try {
+				await sanoid.setMode(dataset, 'disabled');
+			} catch (error) {
+				snapshotsError = error;
+			}
+		}
 	}
 
 	let shares = {};
@@ -65,6 +74,10 @@ const createFolder = async (job, module) => {
 		await module.addJob('share:projectspace:apply', { sharePath, comment });
 	}
 	module.eventEmitter.emit('shares:updated');
+	if (snapshotsError) {
+		throw new Error(`Folder ${comment} created, but its snapshots could not be disabled: ${snapshotsError.message}`);
+	}
+
 	return `Folder ${comment} created.`;
 
 	function isNextcloudCustomPath(pathToCheck) {
