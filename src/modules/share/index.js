@@ -5,6 +5,7 @@ import { execa } from 'execa';
 import ini from 'ini';
 import BaseModule from '../base.js';
 import TimeMachine from '../../utils/time_machine.js';
+import * as sanoid from '../../utils/sanoid.js';
 
 class ShareModule extends BaseModule {
 	#configurationFiles = [
@@ -81,6 +82,13 @@ class ShareModule extends BaseModule {
 			}
 		}
 		return null;
+	}
+
+	isFolderDataset(dataset) {
+		const prefix = `${this.foldersDataset}/`.toLowerCase();
+		const name = String(dataset ?? '').toLowerCase();
+		const child = name.slice(prefix.length);
+		return (name.startsWith(prefix) && child !== '' && !child.includes('/'));
 	}
 
 	async pathToZfsDataset(sharePath) {
@@ -191,12 +199,18 @@ class ShareModule extends BaseModule {
 				projectspaceUsageByDataset.set(datasetName, await this.#getProjectspaceUsage(datasetName));
 			}));
 
+			const folderDatasets = Object.values(shares)
+				.map((value) => { return datasetByMountpoint.get(value['path'])?.name; })
+				.filter((dataset) => { return this.isFolderDataset(dataset); });
+			const snapshotPolicies = await sanoid.getPolicies(folderDatasets);
+
 			let promises = Object.entries(shares).map(async ([name, value]) => {
 				let share = {
 					name: name,
 					comment: value['comment'],
 					path: value['path'],
 					dataset: null,
+					snapshotPolicy: null,
 					validUsers: value['valid users']?.split(/[\s,]+/).filter(Boolean),
 					size: 0,
 					free: 0,
@@ -209,6 +223,7 @@ class ShareModule extends BaseModule {
 					const dataset = datasetByMountpoint.get(value['path']);
 					if (dataset) {
 						share.dataset = dataset.name;
+						share.snapshotPolicy = snapshotPolicies[dataset.name] ?? null;
 						share.alloc = dataset.referenced ?? 0;
 						share.size = dataset.refquota ?? ((dataset.used ?? 0) + (dataset.available ?? 0));
 						share.free = Math.max(share.size - share.alloc, 0);

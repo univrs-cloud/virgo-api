@@ -1,6 +1,7 @@
 import fs from 'fs';
 import ini from 'ini';
 import { execa } from 'execa';
+import * as sanoid from '../../utils/sanoid.js';
 
 const deleteFolder = async (job, module) => {
 	const { config } = job.data;
@@ -27,6 +28,11 @@ const deleteFolder = async (job, module) => {
 	await module.updateJobProgress(job, `Deleting folder ${share.comment}...`);
 	if (isVirgoManagedDataset) {
 		await execa('zfs', ['destroy', '-r', dataset]);
+		try {
+			await sanoid.removeSection(dataset);
+		} catch (error) {
+			console.error(`Could not remove the ${dataset} snapshots configuration: ${error.message}`);
+		}
 	}
 	delete shares[name];
 	fs.writeFileSync(shareConfigFile, ini.stringify(shares), 'utf8');

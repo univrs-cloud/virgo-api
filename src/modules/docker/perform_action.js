@@ -4,6 +4,7 @@ import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 import DataService from '../../database/data_service.js';
+import * as sanoid from '../../utils/sanoid.js';
 
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause', 'remove'];
@@ -77,6 +78,15 @@ const performAppAction = async (job, module) => {
 	});
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
+		try {
+			const dataset = `${module.appsDataset}/${existingApp.name}`;
+			const policies = await sanoid.getPolicies([dataset]);
+			if (policies[dataset]?.mode === 'enabled') {
+				await sanoid.setMode(dataset, 'paused');
+			}
+		} catch (error) {
+			console.error(`Could not pause the ${existingApp.name} snapshots: ${error.message}`);
+		}
 		module.eventEmitter.emit('configured:updated');
 	}
 	return `${title} app ${actionVerbs.pastTense}.`;

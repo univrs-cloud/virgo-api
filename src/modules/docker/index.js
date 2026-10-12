@@ -1,7 +1,10 @@
 import path from 'path';
+import camelcaseKeys from 'camelcase-keys';
 import config from '../../../config.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
+import docker from '../../utils/docker_client.js';
+import * as sanoid from '../../utils/sanoid.js';
 
 // Digest-only projection: Docker renders `status` as prose ("Up 4 minutes"), so it advances on its own clock
 // even when nothing about the container changed. `state` says the same thing as an enum, which is all
@@ -151,6 +154,16 @@ class DockerModule extends BaseModule {
 		return projectContainers;
 	}
 
+	async hasDatasetMounts(appName) {
+		const containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
+		const prefix = `${this.appsDir}/${appName}/`.toLowerCase();
+		return containers.some((container) => {
+			return String(container.labels?.comDockerComposeProject ?? '').toLowerCase() === String(appName).toLowerCase() && this.toArray(container.mounts).some((mount) => {
+				return String(mount.source ?? '').toLowerCase().startsWith(prefix);
+			});
+		});
+	}
+
 	/** The available app updates grouped per app for remote consumers (the fleet), which only ever see
 	 * this node through what it reports: `[{ name, title, services }]`, or false while unknown. The
 	 * local `updates` state stays a flat container list, since that is what this node's own pages
@@ -192,10 +205,13 @@ class DockerModule extends BaseModule {
 	async #loadConfigured() {
 		try {
 			const configured = await DataService.getConfigured();
-			for (const entry of configured) {
-				if (entry.type === 'app') {
-					entry.dataset = `${this.appsDataset}/${entry.name}`;
-				}
+			const apps = configured.filter((entry) => { return entry.type === 'app'; });
+			for (const entry of apps) {
+				entry.dataset = `${this.appsDataset}/${entry.name}`;
+			}
+			const policies = await sanoid.getPolicies(apps.map((entry) => { return entry.dataset; }));
+			for (const entry of apps) {
+				entry.snapshotPolicy = policies[entry.dataset];
 			}
 			this.setState('configured', configured);
 		} catch (error) {

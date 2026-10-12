@@ -8,6 +8,7 @@ import validator from 'validator';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
+import * as sanoid from '../../utils/sanoid.js';
 
 const streamPipeline = promisify(stream.pipeline);
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -138,6 +139,17 @@ const install = async (job, module, template, name, title) => {
 			module.updateJobProgress(job, chunk.toString());
 		}
 	});
+
+	try {
+		const policies = await sanoid.getPolicies([dataset]);
+		if (!(await module.hasDatasetMounts(name))) {
+			await sanoid.setMode(dataset, 'disabled');
+		} else if (policies[dataset]?.mode === 'paused' && !existingApp) {
+			await sanoid.setMode(dataset, 'enabled');
+		}
+	} catch (error) {
+		console.error(`Could not set the ${name} snapshots configuration: ${error.message}`);
+	}
 
 	const icon = template.logo.split('/').pop();
 	await fs.mkdir(module.appIconsDir, { recursive: true });
