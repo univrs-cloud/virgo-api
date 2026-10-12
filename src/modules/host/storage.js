@@ -1,12 +1,8 @@
-import path from 'path';
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
-import config from '../../../config.js';
 import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
-import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 import { getTopology, getVdevArguments } from '../../utils/topology.js';
-import { getOwnAddress } from '../../utils/network.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -33,18 +29,6 @@ const SHARES_DIR = `/${POOL_NAME}/.shares`;
 const CONFIG_DIR = `/${POOL_NAME}/.config`;
 const SHARE_FILES = ['downloads.conf', 'folders.conf', 'time_machines.conf'];
 const OWNER = 'voyager:users';
-// Nothing can be signed into until these exist: traefik answers on the node's name, authelia owns the
-// accounts and the file the password step writes to. DOMAIN is the node's own name, which each
-// template prefixes itself, routing to traefik.<fqdn> and auth.<fqdn>. Certificates come from Let's
-// Encrypt, with expiry notices going to us rather than the customer — they never asked for one, and
-// it is obtained on their node's behalf.
-const SSL_EMAIL = 'voyager@univrs.cloud';
-const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
-const CORE_APP_ENV = {
-	authelia: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
-	traefik: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; },
-	wetty: ({ fqdn, address }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), SSHHOST: address }; }
-};
 
 let scanning = null;
 
@@ -294,47 +278,6 @@ const createDirectories = async () => {
 	}
 };
 
-const getNodeAddress = async () => {
-	const { virtualIp } = await DataService.getConfiguration();
-	return getOwnAddress(virtualIp?.address);
-};
-
-/** Queues the apps the node cannot be used without, through the same command an operator would run.
- * The command returns once the work is queued; the installs themselves report their own progress.
- * Forced, because an imported pool already lists them: they are reconfigured for this node's name.
- * They are named after the node, so without a name there is nothing to install — a job that
- * reported that as done would be claiming work it never did. */
-const installCoreApps = async (job, module) => {
-	const fqdn = module.getState('system')?.osInfo?.fqdn;
-	if (!fqdn) {
-		throw new Error('Core apps were not installed: this node has no name yet.');
-	}
-
-	const address = await getNodeAddress();
-	if (!address) {
-		throw new Error('Core apps were not installed: this node has no address yet.');
-	}
-
-	// Every app is attempted before the job gives up: they are independent, and one that fails should not
-	// hide whether the other would have worked. What failed is reported once, at the end.
-	const failedApps = [];
-	for (const name of getCoreApps()) {
-		const title = getCoreAppTitle(name);
-		await module.updateJobProgress(job, `Installing ${title}...`);
-		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name]({ fqdn, address }))], { reject: false });
-		if (exitCode !== 0) {
-			failedApps.push(title);
-			console.error(`Could not install ${title}: ${stderr}`);
-		}
-	}
-
-	if (failedApps.length) {
-		throw new Error(`Could not install ${failedApps.join(' and ')}.`);
-	}
-
-	return `Core apps installed.`;
-};
-
 /** Everything the pool needs before anything can be installed on it. Each part checks its own work
  * first, so a job that failed halfway can be run again. */
 const prepare = async (job, module) => {
@@ -447,7 +390,6 @@ export default {
 		// Drives can settle after boot and disks get plugged in mid-wizard, so the answer is re-taken
 		// on request rather than trusting the one from startup.
 		'host:storage:importable:fetch': { handler: (config, socket, module) => { scanImportablePools(module); } },
-		'host:apps:core:install': { job: 'host:apps:core:install' },
 		'host:storage:pool:import': { job: 'host:storage:pool:import' },
 		'host:storage:pool:create': { job: 'host:storage:pool:create' }
 	},
@@ -455,7 +397,6 @@ export default {
 	onConnection,
 	jobs: {
 		'host:storage:pool:import': importPool,
-		'host:storage:pool:create': createPool,
-		'host:apps:core:install': installCoreApps
+		'host:storage:pool:create': createPool
 	}
 };
