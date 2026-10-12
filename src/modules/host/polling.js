@@ -4,6 +4,7 @@ import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import { CronExpressionParser } from 'cron-parser';
+import DataService from '../../database/data_service.js';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
 import { getTopologies } from '../../utils/topology.js';
@@ -482,12 +483,27 @@ const getCertificate = async (module) => {
 	}
 };
 
+const startCertificatePoll = (module) => {
+	certificatePoll = certificatePoll || module.registerPoller(getCertificate, CERTIFICATE_INTERVAL_MS);
+	certificatePoll.start();
+};
+
+const resumeCertificatePoll = async (module) => {
+	if (!setup.isCompleted() && await DataService.getApplication('traefik')) {
+		startCertificatePoll(module);
+	}
+};
+
 const register = (module) => {
 	if (setup.isCompleted()) {
 		getCertificate(module);
 	}
+	resumeCertificatePoll(module)
+		.catch((error) => { console.error('resumeCertificatePoll:', error); });
 	module.eventEmitter.on('host:storage:fetch', () => {
 		getStorage(module);
+		resumeCertificatePoll(module)
+			.catch((error) => { console.error('resumeCertificatePoll:', error); });
 	});
 	module.eventEmitter.on('app:installed', ({ name } = {}) => {
 		if (name !== 'traefik') {
@@ -499,8 +515,7 @@ const register = (module) => {
 			return;
 		}
 
-		certificatePoll = certificatePoll || module.registerPoller(getCertificate, CERTIFICATE_INTERVAL_MS);
-		certificatePoll.start();
+		startCertificatePoll(module);
 	});
 };
 
