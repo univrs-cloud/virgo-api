@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
+import { CronExpressionParser } from 'cron-parser';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
 import { getTopologies } from '../../utils/topology.js';
@@ -14,6 +15,12 @@ const SYSTEM_MOUNTPOINTS = ['/', '[SWAP]'];
 // empty drive, so nothing but the name tells them apart from something a pool can be built on.
 const VOLATILE_DEVICE = /^(?:zram|ram)\d+$/;
 const CERTIFICATE_INTERVAL_MS = 10000;
+const SCRUB_CRON_FILE = '/etc/cron.d/zfsutils-linux';
+const SCRUB_SCRIPT = '/usr/lib/zfs-linux/scrub';
+const SCRUB_PROPERTY = 'org.debian:periodic-scrub';
+const SCRUB_PROPERTY_ENABLED = ['-', 'auto', 'enable'];
+const SCRUB_WEEKDAY_TEST = /date \+\\?%w\)\s+-eq\s+([0-7])/;
+const SCRUB_MAX_LOOKAHEAD = 1000;
 const KELVIN_OFFSET = 273;
 const DEFAULT_TEMPERATURE_THRESHOLD = 99;
 const ATA_PREFAIL_ATTRIBUTES = new Map([
@@ -335,6 +342,42 @@ const getDrives = async (module) => {
 
 ;
 
+const getNextScrub = async () => {
+	try {
+		await fs.access(SCRUB_SCRIPT, fs.constants.X_OK);
+		const cron = await fs.readFile(SCRUB_CRON_FILE, 'utf8');
+		const line = cron.split('\n').find((line) => { return !line.trim().startsWith('#') && line.includes(SCRUB_SCRIPT); });
+		if (!line) {
+			return null;
+		}
+
+		const schedule = line.trim().split(/\s+/).slice(0, 5).join(' ');
+		const weekdayTest = SCRUB_WEEKDAY_TEST.exec(line);
+		const weekday = (weekdayTest ? Number(weekdayTest[1]) % 7 : null);
+		const runs = CronExpressionParser.parse(schedule);
+		for (let i = 0; i < SCRUB_MAX_LOOKAHEAD; i++) {
+			const run = runs.next().toDate();
+			if (weekday === null || run.getDay() === weekday) {
+				return run.toISOString();
+			}
+		}
+	} catch (error) {
+		if (error?.code !== 'ENOENT') {
+			console.error('getNextScrub:', error);
+		}
+	}
+	return null;
+};
+
+const getScrubProperties = async (names) => {
+	if (names.length === 0) {
+		return {};
+	}
+
+	const { stdout: zfsGet } = await execa('zfs', ['get', '-H', '-o', 'name,value', SCRUB_PROPERTY, ...names], { reject: false });
+	return Object.fromEntries(zfsGet.split('\n').filter(Boolean).map((line) => { return line.split('\t'); }));
+};
+
 const getStorage = async (module) => {
 	try {
 		const [{ stdout: zpoolList }, { stdout: zpoolStatus }, { stdout: zfsList }] = await Promise.all([
@@ -345,6 +388,10 @@ const getStorage = async (module) => {
 		const pools = JSON.parse(zpoolList || '{}')?.pools || {};
 		const statuses = JSON.parse(zpoolStatus || '{}')?.pools || {};
 		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
+		const [nextScrub, scrubProperties] = await Promise.all([
+			getNextScrub(),
+			getScrubProperties(Object.keys(pools))
+		]);
 		let storage = [];
 		for (const pool of Object.values(pools)) {
 			const poolDatasets = Object.values(datasets).filter((dataset) => {
@@ -364,7 +411,8 @@ const getStorage = async (module) => {
 			pool.properties.logicalused = { value: logicalUsed };
 			pool.properties.compressratio = { value: (used > 0 ? logicalUsed / used : 1) };
 			pool.properties.savedbycompression = { value: Math.max(logicalUsed - used, 0) };
-			storage.push({ ...pool, ...statuses[pool.name] });
+			const isScrubbed = (pool?.properties?.health?.value?.toLowerCase() === 'online' && SCRUB_PROPERTY_ENABLED.includes(scrubProperties[pool.name]?.toLowerCase()));
+			storage.push({ ...pool, ...statuses[pool.name], nextScrub: (isScrubbed ? nextScrub : null) });
 		}
 		const filesystems = await si.fsSize();
 		const filesystem = filesystems.find((filesystem) => { return filesystem.mount === '/'; });
