@@ -159,12 +159,13 @@ const setMode = (dataset, mode) => {
 		}
 
 		const sections = await read();
-		if (policyOf(sections, dataset)?.mode === mode) {
-			return;
-		}
-
-		const next = sections.filter((section) => { return section.name.toLowerCase() !== dataset.toLowerCase(); });
 		const template = MODE_TEMPLATES[mode];
+		const next = sections
+			.filter((section) => { return section.name.toLowerCase() !== dataset.toLowerCase(); })
+			.map((section) => {
+				const name = section.name.toLowerCase().slice(TEMPLATE_PREFIX.length);
+				return (isTemplate(section) && Object.hasOwn(TEMPLATES, name) ? { name: section.name, values: { ...TEMPLATES[name] } } : section);
+			});
 		if (template) {
 			if (!findSection(next, `${TEMPLATE_PREFIX}${template}`)) {
 				next.push({ name: `${TEMPLATE_PREFIX}${template}`, values: { ...TEMPLATES[template] } });
@@ -175,7 +176,9 @@ const setMode = (dataset, mode) => {
 			throw new Error(`Snapshots of ${dataset} cannot be ${mode}.`);
 		}
 
-		await write(next);
+		if (stringify(next) !== stringify(sections)) {
+			await write(next);
+		}
 	});
 };
 
