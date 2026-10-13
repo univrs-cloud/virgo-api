@@ -11,6 +11,7 @@ import * as socket from '../socket.js';
 import * as setup from '../utils/setup_state.js';
 import * as trustedProxy from '../utils/trusted_proxy.js';
 import * as authelia from '../utils/authelia.js';
+import * as sessions from '../utils/sessions.js';
 import * as nlp from '../utils/nlp.js';
 import * as proxyCredential from '../utils/proxy_credential.js';
 import { isPrivateAddress, isLoopbackAddress } from '../utils/private_address.js';
@@ -377,6 +378,13 @@ class BaseModule {
 			};
 
 			let account = await resolve();
+			if (account?.isAuthenticated && !vouched().isAuthenticated) {
+				try {
+					const sessionId = await authelia.getSessionId({ fqdn, cookie });
+					socket.data.sessionHash = sessions.hashOf(sessionId);
+					sessions.touch({ sessionId, ipAddress: address, userAgent: socket.handshake.headers['user-agent'] }).catch(() => {});
+				} catch (error) {}
+			}
 			// A session ends on the node's clock, not this connection's, and a socket outlives both. So
 			// the answer is renewed as the socket is used: a read past its age starts the next check and
 			// keeps going with what it has, since nothing here can wait.
@@ -410,6 +418,11 @@ class BaseModule {
 						socket.data.onTierChange?.();
 					}
 				}).catch(() => {});
+			};
+
+			socket.data.renewIdentity = () => {
+				resolvedAt = 0;
+				renew();
 			};
 
 			// First-run setup has no account to authenticate against, so the wizard's sockets act as an
@@ -457,6 +470,7 @@ class BaseModule {
 				});
 			};
 
+			sessions.track(socket);
 			this.#pollers.forEach((poller) => { poller.start(); });
 			this.replayState(socket);
 			if (typeof this.onConnection === 'function') {

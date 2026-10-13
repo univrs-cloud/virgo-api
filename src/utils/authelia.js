@@ -20,6 +20,7 @@ const READINESS_PROBE_TIMEOUT = 2000;
 const READINESS_CACHE = 1000;
 
 let cookieDomain;
+let cookieName;
 let askedAt = 0;
 let readiness = { ready: false, at: 0 };
 let readinessProbe = null;
@@ -58,9 +59,20 @@ const sessionCookies = (response) => {
 	const domain = cookies.map((cookie) => { return cookie.match(/;\s*Domain=([^;]+)/i)?.[1]; }).find(Boolean);
 	if (domain) {
 		cookieDomain = domain.trim().replace(/^\./, '');
+		cookieName = cookies.find((cookie) => { return /;\s*Domain=/i.test(cookie); }).split('=')[0].trim();
 	}
 
 	return cookies;
+};
+
+const sessionIdIn = (pairs) => {
+	if (!cookieName) {
+		return undefined;
+	}
+
+	const prefix = `${cookieName}=`;
+	const pair = pairs.map((entry) => { return entry.trim(); }).find((entry) => { return entry.startsWith(prefix); });
+	return (pair ? pair.slice(prefix.length) : undefined) || undefined;
 };
 
 /** Whoever the session belongs to, as Authelia describes them: it authenticates before it weighs any
@@ -135,10 +147,21 @@ const login = async ({ username, password, keepMeLoggedIn = false, fqdn, clientA
 		clientAddress,
 		body: { username, password, keepMeLoggedIn }
 	});
+	const cookies = sessionCookies(response);
 	return {
 		isAuthenticated: response.ok,
-		cookies: sessionCookies(response)
+		cookies,
+		sessionId: sessionIdIn(cookies.map((cookie) => { return cookie.split(';')[0]; }))
 	};
+};
+
+const getSessionId = async ({ fqdn, cookie }) => {
+	if (!cookie) {
+		return undefined;
+	}
+
+	await getCookieDomain({ fqdn });
+	return sessionIdIn(String(cookie).split(';'));
 };
 
 /** The domain Authelia's session cookie carries, so anything the node writes alongside it can be
@@ -173,6 +196,7 @@ const logout = async ({ fqdn, cookie }) => {
 
 export {
 	getCookieDomain,
+	getSessionId,
 	isReady,
 	authorize,
 	login,

@@ -21,6 +21,7 @@ const deleteUser = async (job, module) => {
 	await execa('smbpasswd', ['-s', '-x', config.username]);
 	await module.updateJobProgress(job, `Deleting system user ${config.username}...`);
 	await linuxUser.removeUser(config.username);
+	module.eventEmitter.emit('user:deleted', { username: config.username });
 	module.eventEmitter.emit('users:updated');
 	return `User ${config.username} deleted.`
 

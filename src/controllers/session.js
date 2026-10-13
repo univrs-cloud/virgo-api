@@ -1,5 +1,6 @@
 import express from 'express';
 import * as authelia from '../utils/authelia.js';
+import * as sessions from '../utils/sessions.js';
 
 /**
  * Signing in and out. The session itself is Authelia's: these routes carry credentials to it and its
@@ -23,7 +24,7 @@ router.post('/session', async (req, res, next) => {
 	}
 
 	try {
-		const { isAuthenticated, cookies } = await authelia.login({
+		const { isAuthenticated, cookies, sessionId } = await authelia.login({
 			username,
 			password,
 			keepMeLoggedIn: Boolean(keepMeLoggedIn),
@@ -36,6 +37,7 @@ router.post('/session', async (req, res, next) => {
 			return;
 		}
 
+		await sessions.create({ sessionId, username, ipAddress: req.ip, userAgent: req.headers['user-agent'] });
 		res.setHeader('set-cookie', cookies);
 		res.sendStatus(200);
 	} catch (error) {
@@ -52,6 +54,7 @@ router.delete('/session', async (req, res, next) => {
 			return;
 		}
 
+		await sessions.remove({ sessionId: await authelia.getSessionId({ fqdn: requestFqdn(req), cookie: req.headers.cookie }) });
 		// The account cookie is written from a page's own authorization, and the next page will find no
 		// session to describe; this answer only has to carry Authelia's cookies away.
 		res.setHeader('set-cookie', cookies);

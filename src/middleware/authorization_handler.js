@@ -1,6 +1,7 @@
 import { isIP } from 'net';
 import * as setup from '../utils/setup_state.js';
 import * as authelia from '../utils/authelia.js';
+import * as sessions from '../utils/sessions.js';
 import * as traefikConfig from '../utils/traefik_config.js';
 import { isPrivateAddress } from '../utils/private_address.js';
 
@@ -123,6 +124,10 @@ export default async (req, res, next) => {
 			cookie: req.headers.cookie
 		});
 		await writeAccount(req, res, identity);
+		if (identity) {
+			const sessionId = await authelia.getSessionId({ fqdn: req.hostname, cookie: req.headers.cookie });
+			sessions.touch({ sessionId, ipAddress: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+		}
 		if (isAllowed) {
 			next();
 			return;

@@ -1,5 +1,6 @@
 import * as database from './index.js';
 import Configuration from './models/Configuration.js';
+import Session from './models/Session.js';
 import { Application, Shortcut, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
 import { getCoreApps } from '../utils/core_apps.js';
@@ -24,6 +25,7 @@ class DataService {
 			await Application.sync({ force: false });
 			await Shortcut.sync({ force: false });
 			await ItemOrder.sync({ force: false });
+			await Session.sync({ force: false });
 			console.log(`Database models synchronized.`);
 			await Application.update({ canBeRemoved: false }, { where: { name: getCoreApps(), canBeRemoved: true } });
 			return true;
@@ -423,6 +425,68 @@ class DataService {
 		} catch (error) {
 			console.error(`Error getting next order for category '${category}':`, error);
 			return 1;
+		}
+	}
+
+	static async getSessions() {
+		if (!await database.ensureOpen()) {
+			return [];
+		}
+
+		try {
+			const sessions = await Session.findAll({
+				order: [['lastSeenAt', 'DESC']]
+			});
+			return sessions.map((session) => { return session.get({ plain: true }); });
+		} catch (error) {
+			console.error(`Error reading sessions from database:`, error);
+			return [];
+		}
+	}
+
+	static async setSession(sessionData) {
+		if (!await database.ensureOpen()) {
+			return false;
+		}
+
+		try {
+			await Session.upsert(sessionData);
+			return true;
+		} catch (error) {
+			console.error(`Error writing session to database:`, error);
+			return false;
+		}
+	}
+
+	static async updateSession(hash, values) {
+		if (!await database.ensureOpen()) {
+			return false;
+		}
+
+		try {
+			const [updated] = await Session.update(values, {
+				where: { hash }
+			});
+			return updated > 0;
+		} catch (error) {
+			console.error(`Error updating session in database:`, error);
+			return false;
+		}
+	}
+
+	static async deleteSessions(hashes) {
+		if (!await database.ensureOpen()) {
+			return false;
+		}
+
+		try {
+			const deleted = await Session.destroy({
+				where: { hash: hashes }
+			});
+			return deleted > 0;
+		} catch (error) {
+			console.error(`Error deleting sessions from database:`, error);
+			return false;
 		}
 	}
 
