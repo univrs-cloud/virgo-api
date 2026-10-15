@@ -380,7 +380,7 @@ class BaseModule {
 			let account = await resolve();
 			if (account?.isAuthenticated && !vouched().isAuthenticated) {
 				try {
-					const sessionId = await authelia.getSessionId({ fqdn, cookie });
+					const sessionId = authelia.getSessionId({ cookie });
 					socket.data.sessionHash = sessions.hashOf(sessionId);
 					sessions.touch({ sessionId, ipAddress: address, userAgent: socket.handshake.headers['user-agent'] }).catch(() => {});
 				} catch (error) {}

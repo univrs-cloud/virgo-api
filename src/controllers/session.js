@@ -54,7 +54,7 @@ router.delete('/session', async (req, res, next) => {
 			return;
 		}
 
-		await sessions.remove({ sessionId: await authelia.getSessionId({ fqdn: requestFqdn(req), cookie: req.headers.cookie }) });
+		await sessions.remove({ sessionId: authelia.getSessionId({ cookie: req.headers.cookie }) });
 		// The account cookie is written from a page's own authorization, and the next page will find no
 		// session to describe; this answer only has to carry Authelia's cookies away.
 		res.setHeader('set-cookie', cookies);

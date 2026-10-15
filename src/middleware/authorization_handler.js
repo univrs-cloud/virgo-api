@@ -29,8 +29,8 @@ const requestedUrl = (req) => {
  * outside it, an address rather than a name, gets a cookie of its own: the browser would refuse one
  * scoped to a domain it is not visiting. Nothing to ask before Authelia is installed, and nothing it
  * could answer: the wizard is reached by address. */
-const cookieDomain = async (req) => {
-	const domain = (setup.isCompleted() ? await authelia.getCookieDomain({ fqdn: req.hostname }) : undefined);
+const cookieDomain = (req) => {
+	const domain = (setup.isCompleted() ? authelia.getCookieDomain() : undefined);
 	const isWithin = (domain && (req.hostname === domain || req.hostname.endsWith(`.${domain}`)));
 	return (isWithin ? domain : req.hostname);
 };
@@ -59,7 +59,7 @@ const writeAccount = async (req, res, identity) => {
 		return;
 	}
 
-	const domain = await cookieDomain(req);
+	const domain = cookieDomain(req);
 	const account = { name: identity.name, user: identity.username, email: identity.email, groups: identity.groups };
 	res.cookie(name, Buffer.from(JSON.stringify(account)).toString('base64'), {
 		domain,
@@ -125,7 +125,7 @@ export default async (req, res, next) => {
 		});
 		await writeAccount(req, res, identity);
 		if (identity) {
-			const sessionId = await authelia.getSessionId({ fqdn: req.hostname, cookie: req.headers.cookie });
+			const sessionId = authelia.getSessionId({ cookie: req.headers.cookie });
 			sessions.touch({ sessionId, ipAddress: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
 		}
 		if (isAllowed) {

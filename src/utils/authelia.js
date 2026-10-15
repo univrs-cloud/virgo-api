@@ -1,4 +1,5 @@
 import config from '../../config.js';
+import * as traefikConfig from './traefik_config.js';
 
 /**
  * Authelia owns every session on this node: it issues them, validates them and expires them. This
@@ -13,15 +14,11 @@ import config from '../../config.js';
 const BASE_URL = config.authelia.url;
 // The one thing this node concludes for itself from what Authelia reports: which of its groups runs it.
 const ADMIN_GROUP = 'admins';
-// How long to wait before asking again, when Authelia had nothing to say about its cookie — it has
-// nothing to say until it is installed.
-const DOMAIN_RETRY = 60000;
 const READINESS_PROBE_TIMEOUT = 2000;
 const READINESS_CACHE = 1000;
 
 let cookieDomain;
 let cookieName;
-let askedAt = 0;
 let readiness = { ready: false, at: 0 };
 let readinessProbe = null;
 
@@ -29,7 +26,7 @@ let readinessProbe = null;
  * falling back to whoever opened the connection. Both matter: the target decides which session cookie
  * domain applies, and the address is what its rate limiting counts and what its network rules match —
  * left out, every login on the node looks like it came from virgo-api itself. */
-const forwardedHeaders = (fqdn, clientAddress) => {
+const buildForwardedHeaders = (fqdn, clientAddress) => {
 	return {
 		'x-forwarded-proto': 'https',
 		'x-forwarded-host': fqdn,
@@ -42,7 +39,7 @@ const request = async (path, { fqdn, clientAddress, cookie, body } = {}) => {
 	return fetch(`${BASE_URL}${path}`, {
 		method: (body ? 'POST' : 'GET'),
 		headers: {
-			...forwardedHeaders(fqdn, clientAddress),
+			...buildForwardedHeaders(fqdn, clientAddress),
 			...(cookie ? { cookie } : {}),
 			...(body ? { 'content-type': 'application/json' } : {})
 		},
@@ -65,8 +62,17 @@ const sessionCookies = (response) => {
 	return cookies;
 };
 
-const sessionIdIn = (pairs) => {
+const getCookieName = () => {
 	if (!cookieName) {
+		const domain = traefikConfig.getDomain();
+		cookieName = (domain ? `virgoOS_${domain.split('.')[0]}` : undefined);
+	}
+
+	return cookieName;
+};
+
+const sessionIdIn = (pairs) => {
+	if (!getCookieName()) {
 		return undefined;
 	}
 
@@ -77,7 +83,7 @@ const sessionIdIn = (pairs) => {
 
 /** Whoever the session belongs to, as Authelia describes them: it authenticates before it weighs any
  * rule, so a request it lets through unasked still names the person holding it. */
-const identity = (response) => {
+const parseIdentity = (response) => {
 	const username = response.headers.get('remote-user');
 	if (!username) {
 		return undefined;
@@ -126,7 +132,7 @@ const authorize = async ({ fqdn, uri = '/', clientAddress, cookie }) => {
 	const response = await fetch(`${BASE_URL}/api/authz/forward-auth?authelia_url=${autheliaUrl}`, {
 		redirect: 'manual',
 		headers: {
-			...forwardedHeaders(fqdn, clientAddress),
+			...buildForwardedHeaders(fqdn, clientAddress),
 			'x-forwarded-uri': uri,
 			'x-forwarded-method': 'GET',
 			...(cookie ? { cookie } : {})
@@ -135,7 +141,7 @@ const authorize = async ({ fqdn, uri = '/', clientAddress, cookie }) => {
 	return {
 		isAllowed: response.ok,
 		location: response.headers.get('location'),
-		identity: identity(response)
+		identity: parseIdentity(response)
 	};
 };
 
@@ -147,37 +153,25 @@ const login = async ({ username, password, keepMeLoggedIn = false, fqdn, clientA
 		clientAddress,
 		body: { username, password, keepMeLoggedIn }
 	});
-	const cookies = sessionCookies(response);
+	const cookies = readSessionCookies(response);
 	return {
 		isAuthenticated: response.ok,
 		cookies,
-		sessionId: sessionIdIn(cookies.map((cookie) => { return cookie.split(';')[0]; }))
+		sessionId: findSessionId(cookies.map((cookie) => { return cookie.split(';')[0]; }))
 	};
 };
 
-const getSessionId = async ({ fqdn, cookie }) => {
+const getSessionId = ({ cookie }) => {
 	if (!cookie) {
 		return undefined;
 	}
 
-	await getCookieDomain({ fqdn });
-	return sessionIdIn(String(cookie).split(';'));
+	return findSessionId(String(cookie).split(';'));
 };
 
-/** The domain Authelia's session cookie carries, so anything the node writes alongside it can be
- * scoped to reach exactly as far. Taken from the cookies themselves; until one has been seen, asking
- * to end a session nobody holds is a harmless way to be shown one, since the cookie that clears a
- * session names the same domain as the cookie that starts it. */
-const getCookieDomain = async ({ fqdn }) => {
-	if (cookieDomain || (Date.now() - askedAt) < DOMAIN_RETRY) {
-		return cookieDomain;
-	}
-
-	askedAt = Date.now();
-	try {
-		await logout({ fqdn });
-	} catch (error) {
-		// Not installed yet, or not answering: the caller falls back to the name it was asked by.
+const getCookieDomain = () => {
+	if (!cookieDomain) {
+		cookieDomain = traefikConfig.getClusterDomain();
 	}
 
 	return cookieDomain;
@@ -190,7 +184,7 @@ const logout = async ({ fqdn, cookie }) => {
 	return {
 		isEnded: response.ok,
 		status: response.status,
-		cookies: sessionCookies(response)
+		cookies: readSessionCookies(response)
 	};
 };
 
