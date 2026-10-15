@@ -294,6 +294,7 @@ const enrichShortcuts = async (shortcuts) => {
 
 export {
 	getDomain,
+	getClusterDomain,
 	getCertresolver,
 	readAll,
 	match,
