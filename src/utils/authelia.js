@@ -51,7 +51,7 @@ const request = async (path, { fqdn, clientAddress, cookie, body } = {}) => {
  * domain, flags and lifetime are Authelia's configuration, and copying any of it here would be a
  * second answer to the same question. Every one of them states the domain it is for, which is the only
  * place that domain is written down by whoever decides it, so it is noted on the way past. */
-const sessionCookies = (response) => {
+const readSessionCookies = (response) => {
 	const cookies = response.headers.getSetCookie();
 	const domain = cookies.map((cookie) => { return cookie.match(/;\s*Domain=([^;]+)/i)?.[1]; }).find(Boolean);
 	if (domain) {
@@ -71,7 +71,7 @@ const getCookieName = () => {
 	return cookieName;
 };
 
-const sessionIdIn = (pairs) => {
+const findSessionId = (pairs) => {
 	if (!getCookieName()) {
 		return undefined;
 	}
