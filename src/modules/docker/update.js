@@ -3,11 +3,55 @@ import path from 'path';
 import stream from 'stream';
 import { promisify } from 'util';
 import dockerCompose from 'docker-compose';
+import { execa } from 'execa';
+import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 
 const streamPipeline = promisify(stream.pipeline);
+const SNAPSHOT_PREFIX = 'update_';
+const IMAGES_PROPERTY = 'univrs:images';
+
+const generateSnapshotName = () => {
+	const now = new Date();
+	const pad = (value) => { return String(value).padStart(2, '0'); };
+	return `${SNAPSHOT_PREFIX}${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+};
+
+const getServiceImageDigests = async (containers) => {
+	const images = camelcaseKeys(await docker.listImages({ all: true, digests: true }), { deep: true });
+	const result = {};
+	for (const container of containers) {
+		const image = images.find((image) => { return image.id === container.imageId; });
+		const digest = image?.repoDigests?.[0]?.split('@')[1];
+		if (digest) {
+			result[container.labels?.comDockerComposeService] = { image: container.image, digest };
+		}
+	}
+	return result;
+};
+
+const takeSnapshot = async (job, module, name, title, containers) => {
+	const dataset = `${module.appsDataset}/${name}`;
+	const snapshotName = generateSnapshotName();
+	await module.updateJobProgress(job, `Taking ${title} snapshot...`);
+	try {
+		await execa('zfs', ['snapshot', '-r', '-o', `${IMAGES_PROPERTY}=${JSON.stringify(await getServiceImageDigests(containers))}`, `${dataset}@${snapshotName}`]);
+	} catch (error) {
+		throw new Error(`Could not take ${title} snapshot.`);
+	}
+
+	const { stdout } = await execa('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', '-d', '1', dataset]);
+	const previousSnapshots = stdout.split('\n').filter((line) => {
+		const [, current] = line.split('@');
+		return current?.startsWith(SNAPSHOT_PREFIX) && current !== snapshotName;
+	});
+	for (const previousSnapshot of previousSnapshots) {
+		await execa('zfs', ['destroy', '-r', previousSnapshot]);
+	}
+};
+
 const updateApp = async (job, module) => {
 	const { config } = job.data;
 	const existingApp = await DataService.getApplication(config?.name);
@@ -24,6 +68,7 @@ const updateApp = async (job, module) => {
 	const composeProject = container.labels?.comDockerComposeProject;
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
+	await takeSnapshot(job, module, config.name, existingApp.title, containers);
 	const template = module.findTemplateByAppName(await module.getTemplates(), config.name);
 	if (template) {
 		try {
