@@ -301,6 +301,7 @@ const fetchStackFiles = async (module) => {
 
 				// Replace the docker-compose.yml file
 				await fs.writeFile(composeFilePath, stack, 'utf-8');
+				await module.ensureAppDirEnv(path.dirname(composeFilePath));
 				console.log(`Updated docker-compose.yml for ${appName}`);
 			} catch (error) {
 				console.warn(`Error updating compose file for ${appName}:`, error.message);

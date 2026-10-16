@@ -70,6 +70,7 @@ const performAppAction = async (job, module) => {
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	if (config.action === 'recreate') {
 		await downloadComposeFile(job, module, config.name, composeProjectDir);
+		await module.ensureAppDirEnv(composeProjectDir);
 	}
 	
 	const composeFiles = (existingApp ? [] : (container.labels?.comDockerComposeProjectConfigFiles || '').split(',').filter(Boolean));

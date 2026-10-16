@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs';
 import path from 'path';
 import camelcaseKeys from 'camelcase-keys';
 import config from '../../../config.js';
@@ -152,6 +153,25 @@ class DockerModule extends BaseModule {
 			return container.labels?.comDockerComposeProject === appName;
 		});
 		return projectContainers;
+	}
+
+	async ensureAppDirEnv(composeProjectDir) {
+		const envFile = path.join(composeProjectDir, '.env');
+		let content = '';
+		try {
+			content = await fs.readFile(envFile, 'utf-8');
+		} catch (error) {
+			if (error.code !== 'ENOENT') {
+				throw error;
+			}
+		}
+
+		const lines = content.split('\n').filter((line) => { return line.trim() !== '' && !line.trim().toLowerCase().startsWith('app_dir='); });
+		lines.push(`APP_DIR="${path.dirname(composeProjectDir)}"`);
+		const next = lines.join('\n');
+		if (next !== content) {
+			await fs.writeFile(envFile, next, 'utf-8');
+		}
 	}
 
 	async hasDatasetMounts(appName) {

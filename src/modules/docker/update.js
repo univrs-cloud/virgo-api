@@ -44,6 +44,7 @@ const updateApp = async (job, module) => {
 		} catch (error) {}
 	}
 
+	await module.ensureAppDirEnv(composeProjectDir);
 	await module.updateJobProgress(job, `Downloading ${existingApp.title}...`);
 	const parsePullProgress = dockerPullProgressParser();
 	await dockerCompose.pullAll({

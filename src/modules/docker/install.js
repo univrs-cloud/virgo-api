@@ -94,6 +94,7 @@ const install = async (job, module, template, name, title) => {
 	
 	const stack = await response.text();
 	const env = Object.entries(config?.env || {})
+		.filter(([key]) => { return key.toLowerCase() !== 'app_dir'; })
 		.map(([key, value]) => {
 			if (!ENV_KEY_PATTERN.test(key)) {
 				throw new Error(`Invalid environment variable name: ${key}`);
@@ -109,6 +110,7 @@ const install = async (job, module, template, name, title) => {
 
 			return envLine(key, value);
 		})
+		.concat(envLine('APP_DIR', appDir))
 		.join('\n');
 	const composeProjectDir = path.join(module.appsDir, name, module.composeDir);
 	await module.updateJobProgress(job, `Making ${title} project directory...`);
@@ -117,7 +119,7 @@ const install = async (job, module, template, name, title) => {
 	await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
 	await module.updateJobProgress(job, `Writing ${title} project configuration...`);
 	await fs.writeFile(path.join(composeProjectDir, '.env'), env, 'utf-8');
-	
+
 	await module.updateJobProgress(job, `Downloading ${title}...`);
 	const parsePullProgress = dockerPullProgressParser();
 	await dockerCompose.pullAll({

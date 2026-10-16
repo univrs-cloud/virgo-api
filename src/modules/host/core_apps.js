@@ -55,7 +55,8 @@ const hasCurrentEnv = async (name, env) => {
 	}
 
 	const keys = Object.keys(env);
-	return Object.keys(installedEnv).length === keys.length
+	const installedKeys = Object.keys(installedEnv).filter((key) => { return key.toLowerCase() !== 'app_dir'; });
+	return installedKeys.length === keys.length
 		&& keys.every((key) => { return String(installedEnv[key] ?? '').toLowerCase() === String(env[key] ?? '').toLowerCase(); });
 };
 
