@@ -45,19 +45,19 @@
 		"change-case": "^5.4.4",
 		"chokidar": "^5.0.0",
 		"commander": "^15.0.0",
+		"compression": "^1.8.2",
 		"compromise": "^14.18.0",
+		"cron-parser": "^5.10.2",
 		"docker-compose": "^1.5.0",
 		"dockerode": "^5.0.1",
 		"dotenv": "^18.0.8",
 		"execa": "^10.1.1",
-		"compression": "^1.8.2",
-		"cron-parser": "^5.10.2",
 		"express": "^5.3.0",
 		"express-rate-limit": "^8.7.1",
 		"express-validator": "^7.3.2",
 		"ini": "^7.0.0",
 		"ioredis": "^6.0.0",
-		"js-yaml": "^5.4.3",
+		"js-yaml": "^5.5.0",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^2.0.2",
 		"node-datachannel": "^0.33.4",
@@ -73,8 +73,7 @@
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
-		"bufferutil": "*",
-		"utf-8-validate": "*"
+		"bufferutil": "*"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.5",
@@ -87,11 +86,6 @@
 	},
 	"allowScripts": {
 		"bufferutil@4.1.0": true,
-		"cpu-features@0.0.10": true,
-		"msgpackr-extract@3.0.4": true,
-		"protobufjs@7.6.6": true,
-		"sqlite3@6.0.1": true,
-		"ssh2@1.17.0": true,
-		"utf-8-validate@6.0.6": true
+		"sqlite3@6.0.1": true
 	}
 }
