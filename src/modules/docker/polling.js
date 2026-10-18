@@ -86,8 +86,7 @@ const getAppsComputeResourceMetrics = async (module) => {
 		const currentNetworkSnapshot = {};
 		const currentTimestamp = Date.now();
 		const containerStats = dockerStats?.map((container) => {
-			const rxTotal = container.netIO?.rx ?? 0;
-			const txTotal = container.netIO?.wx ?? 0;
+			const { rx: rxTotal, tx: txTotal } = networkTotals(container);
 			const previousSnapshot = appsNetworkSnapshot[container.id] || { rx: 0, tx: 0, timestamp: currentTimestamp };
 			const elapsedSeconds = (currentTimestamp - previousSnapshot.timestamp) / 1000;
 
@@ -178,6 +177,17 @@ const getAppsComputeResourceMetrics = async (module) => {
 		module.setState('appsResourceMetrics', false);
 	}
 	module.eventEmitter.emit('app:resourceMetrics:fetched');
+
+	function networkTotals(container) {
+		const networks = Object.values(container.networks || {});
+		if (networks.length === 0) {
+			return { rx: container.netIO?.rx ?? 0, tx: container.netIO?.wx ?? 0 };
+		}
+
+		return networks.reduce((totals, network) => {
+			return { rx: totals.rx + (Number(network?.rx_bytes) || 0), tx: totals.tx + (Number(network?.tx_bytes) || 0) };
+		}, { rx: 0, tx: 0 });
+	}
 };
 
 const register = (module) => {
