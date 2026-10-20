@@ -23,6 +23,30 @@ install_virtual_ip_unit() {
 	systemctl daemon-reload
 }
 
+exclude_virtual_ip_from_mdns() {
+	local environment_file="/etc/default/virgo-virtual-ip"
+	if [ ! -f "$environment_file" ]; then
+		return
+	fi
+
+	local cidr device
+	cidr=$(sed -n 's/^VIRTUAL_IP_CIDR=//p' "$environment_file")
+	device=$(sed -n 's/^VIRTUAL_IP_DEV=//p' "$environment_file")
+	if [ -z "$cidr" ] || [ -z "$device" ]; then
+		return
+	fi
+
+	local line
+	line=$(ip -4 -o addr show dev "$device" 2>/dev/null | grep -F " $cidr ")
+	if [ -z "$line" ] || grep -qw "deprecated" <<< "$line"; then
+		return
+	fi
+
+	ip addr change "$cidr" dev "$device" preferred_lft 0
+	systemctl restart avahi-daemon
+	echo "Stopped publishing $cidr as this node's own address."
+}
+
 configure_services() {
 	systemctl disable nvmf-autoconnect.service nvmefc-boot-connections.service # not needed, installed by nvme-cli
 	systemctl enable virgo-api.service
@@ -76,6 +100,7 @@ configure_services
 if ! ischroot; then
 	generate_certificate
 	install_virtual_ip_unit
+	exclude_virtual_ip_from_mdns
 	configure_nonlocal_bind
 	install_avahi_interfaces
 	install_mdns_dispatcher

@@ -1,5 +1,7 @@
 import { execa } from 'execa';
 
+const SNAPSHOT_MAX_AGE_MS = 5000;
+
 let socketSnapshot = {};
 
 const getShares = async (module) => {
@@ -21,7 +23,7 @@ const getClients = async (module) => {
 		const snapshot = {};
 		for (const [peer, totals] of Object.entries(sockets)) {
 			const previous = socketSnapshot[peer];
-			const elapsed = (previous ? (now - previous.time) / 1000 : 0);
+			const elapsed = (previous && now - previous.time <= SNAPSHOT_MAX_AGE_MS ? (now - previous.time) / 1000 : 0);
 			rates[peer] = {
 				rx: (elapsed > 0 ? Math.max(0, (totals.rx - previous.rx) / elapsed) : 0),
 				tx: (elapsed > 0 ? Math.max(0, (totals.tx - previous.tx) / elapsed) : 0)
