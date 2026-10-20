@@ -20,7 +20,8 @@ class ShareModule extends BaseModule {
 		super('share');
 
 		this.declareState({
-			shares: { event: 'shares', gated: true, when: (value) => { return Boolean(value); } }
+			shares: { event: 'shares', gated: true, when: (value) => { return Boolean(value); } },
+			clients: { event: 'share:clients', audience: 'admin' }
 		});
 
 		(async () => {
@@ -149,7 +150,7 @@ class ShareModule extends BaseModule {
 	}
 
 	async #getZfsDatasets() {
-		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint,used,available,referenced,refquota', '-j', '--json-int']);
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'name,mountpoint,used,available,referenced,refquota,usedbydataset,usedbysnapshots,logicalused', '-j', '--json-int']);
 		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		return Object.values(datasets).map((dataset) => {
 			const props = dataset.properties || {};
@@ -159,7 +160,10 @@ class ShareModule extends BaseModule {
 				used: props.used?.value ?? null,
 				available: props.available?.value ?? null,
 				referenced: props.referenced?.value ?? null,
-				refquota: props.refquota?.value || null
+				refquota: props.refquota?.value || null,
+				usedbydataset: props.usedbydataset?.value ?? null,
+				usedbysnapshots: props.usedbysnapshots?.value ?? null,
+				logicalused: props.logicalused?.value ?? null
 			};
 		});
 	}
@@ -216,6 +220,12 @@ class ShareModule extends BaseModule {
 					free: 0,
 					alloc: 0,
 					cap: 0,
+					storage: {
+						dataset: 0,
+						snapshots: 0,
+						compressratio: 0,
+						savedbycompression: 0
+					},
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
 					isTimeMachine: (value['fruit:time machine'] === 'yes')
 				};
@@ -227,6 +237,12 @@ class ShareModule extends BaseModule {
 						share.alloc = dataset.referenced ?? 0;
 						share.size = dataset.refquota ?? ((dataset.used ?? 0) + (dataset.available ?? 0));
 						share.free = Math.max(share.size - share.alloc, 0);
+						share.storage = {
+							dataset: dataset.usedbydataset ?? 0,
+							snapshots: dataset.usedbysnapshots ?? 0,
+							compressratio: (dataset.used > 0 ? (dataset.logicalused ?? 0) / dataset.used : 0),
+							savedbycompression: Math.max((dataset.logicalused ?? 0) - (dataset.used ?? 0), 0)
+						};
 					} else if (value['path']) {
 						const parent = findParentDataset(value['path']);
 						const projectspace = projectspaceByPath.get(value['path']) ?? null;

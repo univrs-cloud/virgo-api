@@ -31,7 +31,7 @@ const getAppsStorageResouceMetrics = async (module) => {
 	const appsDatasetPrefix = `${module.appsDataset}/`.toLowerCase();
 	let datasets = {};
 	try {
-		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots', '-j', '--json-int']);
+		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots,logicalused', '-j', '--json-int']);
 		datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 	} catch (error) {
 		console.warn(`Could not read app storage metrics: ${error.message}`);
@@ -50,9 +50,13 @@ const getAppsStorageResouceMetrics = async (module) => {
 			continue;
 		}
 
+		const used = dataset?.properties?.used?.value || 0;
+		const logicalUsed = dataset?.properties?.logicalused?.value || 0;
 		appsStorageResourceMetrics[appName] = {
 			dataset: dataset?.properties?.usedbydataset?.value || 0,
-			snapshots: dataset?.properties?.usedbysnapshots?.value || 0
+			snapshots: dataset?.properties?.usedbysnapshots?.value || 0,
+			compressratio: (used > 0 ? logicalUsed / used : 0),
+			savedbycompression: Math.max(logicalUsed - used, 0)
 		};
 	}
 
@@ -151,7 +155,7 @@ const getAppsComputeResourceMetrics = async (module) => {
 					}
 				});
 			}
-			const appStorage = appsStorageResourceMetrics[name] || { dataset: 0, snapshots: 0 };
+			const appStorage = appsStorageResourceMetrics[name] || { dataset: 0, snapshots: 0, compressratio: 0, savedbycompression: 0 };
 			appsResourceMetrics.push({
 				name,
 				cpu: {
@@ -167,7 +171,9 @@ const getAppsComputeResourceMetrics = async (module) => {
 				},
 				storage: {
 					dataset: appStorage.dataset,
-					snapshots: appStorage.snapshots
+					snapshots: appStorage.snapshots,
+					compressratio: appStorage.compressratio,
+					savedbycompression: appStorage.savedbycompression
 				},
 				containers: appContainersStats
 			});
