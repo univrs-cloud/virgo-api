@@ -30,8 +30,8 @@
 		}
 	},
 	"engines": {
-		"node": ">=24.13.0",
-		"npm": ">=11.6.2"
+		"node": ">=24.22.1",
+		"npm": ">=11.19.1"
 	},
 	"type": "module",
 	"cpu": [
@@ -40,7 +40,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^6.3.19",
+		"bullmq": "^6.4.0",
 		"camelcase-keys": "^10.0.3",
 		"change-case": "^5.4.4",
 		"chokidar": "^6.0.0",
