@@ -939,8 +939,12 @@ const register = (module) => {
 	hostModule = module;
 	attachNamespace();
 	publishPeers();
-	module.eventEmitter.on('host:discovery:updated', () => { scheduleReconcile(); });
-	module.eventEmitter.on('host:network:identifier:updated', () => { syncPeerRoutes(); });
+	module.eventEmitter.on('host:discovery:updated', () => {
+		scheduleReconcile();
+	});
+	module.eventEmitter.on('host:network:identifier:updated', () => {
+		syncPeerRoutes();
+	});
 	setInterval(() => {
 		reconciled.clear();
 		scheduleReconcile();

@@ -378,11 +378,21 @@ const announce = async () => {
 
 const register = (module) => {
 	announce();
-	module.eventEmitter.on('host:peer:virtualIp:received', (received) => { adoptConfiguration(received, module); });
-	module.eventEmitter.on('host:peer:virtualIp:configure', (received) => { receiveConfiguration(received, module); });
-	module.eventEmitter.on('host:network:virtualIp:updated', () => { propagate(module); });
-	module.eventEmitter.on('host:network:interface:updated', () => { reassert(module); });
-	module.eventEmitter.on('host:network:identifier:updated', () => { reassert(module); });
+	module.eventEmitter.on('host:peer:virtualIp:received', (received) => {
+		adoptConfiguration(received, module);
+	});
+	module.eventEmitter.on('host:peer:virtualIp:configure', (received) => {
+		receiveConfiguration(received, module);
+	});
+	module.eventEmitter.on('host:network:virtualIp:updated', () => {
+		propagate(module);
+	});
+	module.eventEmitter.on('host:network:interface:updated', () => {
+		reassert(module);
+	});
+	module.eventEmitter.on('host:network:identifier:updated', () => {
+		reassert(module);
+	});
 };
 
 export default {

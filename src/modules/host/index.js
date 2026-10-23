@@ -85,6 +85,7 @@ class HostModule extends BaseModule {
 			.on('host:network:interface:updated', async () => {
 				await this.#loadNetworkInterfaces();
 				this.emitState('system');
+				this.eventEmitter.emit('host:network:interfaces:loaded');
 			})
 			.on('host:network:virtualIp:updated', async () => {
 				await this.#loadVirtualIp();

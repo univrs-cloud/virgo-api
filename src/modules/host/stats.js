@@ -13,6 +13,7 @@ const NETWORK_DIR = '/sys/class/net';
 
 let history = [];
 let flushedUntil = 0;
+let iface = null;
 let previous = null;
 let isFlushing = false;
 
@@ -51,9 +52,16 @@ const readMemory = async () => {
 	return { total, used: total - (readKilobytes('MemAvailable') * 1024) };
 };
 
-const readNetworkBytes = async (module) => {
+const readDefaultInterface = (module) => {
 	const system = module.getState('system');
-	const iface = system?.networkInterfaces?.find((networkInterface) => { return networkInterface.default; })?.ifname;
+	iface = (system?.networkInterfaces?.find?.((networkInterface) => { return networkInterface.default; })?.ifname ?? null);
+};
+
+const readNetworkBytes = async (module) => {
+	if (!iface) {
+		readDefaultInterface(module);
+	}
+
 	if (!iface) {
 		return null;
 	}
@@ -137,6 +145,9 @@ const register = (module) => {
 		stats: { event: 'host:stats:history' }
 	});
 	module.setState('memory', { total: os.totalmem() });
+	module.eventEmitter.on('host:network:interfaces:loaded', () => {
+		readDefaultInterface(module);
+	});
 	module.setState('stats', history);
 	start(module)
 		.catch((error) => { console.error('startStats:', error); });
