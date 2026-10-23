@@ -34,7 +34,7 @@ class StatsService {
 		}
 	}
 
-	static async saveSamples(samples, before) {
+	static async saveSamples(samples, expiredBefore) {
 		try {
 			if (!await ensureReady()) {
 				return false;
@@ -42,7 +42,7 @@ class StatsService {
 
 			await database.sequelize.transaction(async (transaction) => {
 				await Sample.bulkCreate(samples, { ignoreDuplicates: true, transaction });
-				await Sample.destroy({ where: { time: { [Op.lte]: before } }, transaction });
+				await Sample.destroy({ where: { time: { [Op.lte]: expiredBefore } }, transaction });
 			});
 			return true;
 		} catch (error) {

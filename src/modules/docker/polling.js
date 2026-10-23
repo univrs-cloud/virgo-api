@@ -1,9 +1,8 @@
 import { execa } from 'execa';
-import si from 'systeminformation';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 
-let appsNetworkSnapshot = {};
+let containersSnapshot = {};
 let appsStorageRetry = null;
 
 const getContainers = async (module) => {
@@ -63,6 +62,14 @@ const getAppsStorageResouceMetrics = async (module) => {
 	module.setState('appsStorageResourceMetrics', appsStorageResourceMetrics);
 };
 
+const getContainerStats = async (container) => {
+	try {
+		return { ...(await docker.getContainer(container.id).stats({ stream: false, 'one-shot': true })), id: container.id };
+	} catch (error) {
+		return null;
+	}
+};
+
 const getAppsComputeResourceMetrics = async (module) => {
 	const configured = module.getState('configured');
 	if (!Array.isArray(configured)) {
@@ -78,7 +85,8 @@ const getAppsComputeResourceMetrics = async (module) => {
 
 	let appsResourceMetrics = [];
 	try {
-		const dockerStats = await si.dockerContainerStats('*');
+		const runningContainers = containers.filter((container) => { return container.state?.toLowerCase() === 'running'; });
+		const dockerStats = (await Promise.all(runningContainers.map(getContainerStats))).filter(Boolean);
 		const containersByApp = containers.reduce((acc, container) => {
 			const appName = container.labels?.comDockerComposeProject || container.id;
 			if (!acc[appName]) {
@@ -87,11 +95,13 @@ const getAppsComputeResourceMetrics = async (module) => {
 			acc[appName].push(container);
 			return acc;
 		}, {});
-		const currentNetworkSnapshot = {};
+		const currentSnapshot = {};
 		const currentTimestamp = Date.now();
-		const containerStats = dockerStats?.map((container) => {
-			const { rx: rxTotal, tx: txTotal } = networkTotals(container);
-			const previousSnapshot = appsNetworkSnapshot[container.id] || { rx: 0, tx: 0, timestamp: currentTimestamp };
+		const containerStats = dockerStats.map((stats) => {
+			const { rx: rxTotal, tx: txTotal } = networkTotals(stats.networks);
+			const cpuTotal = (stats.cpu_stats?.cpu_usage?.total_usage ?? 0);
+			const systemTotal = (stats.cpu_stats?.system_cpu_usage ?? 0);
+			const previousSnapshot = containersSnapshot[stats.id] || { rx: 0, tx: 0, cpu: cpuTotal, system: systemTotal, timestamp: currentTimestamp };
 			const elapsedSeconds = (currentTimestamp - previousSnapshot.timestamp) / 1000;
 
 			let networkRx = 0;
@@ -101,25 +111,33 @@ const getAppsComputeResourceMetrics = async (module) => {
 				networkTx = Math.max(0, (txTotal - previousSnapshot.tx) / elapsedSeconds);
 			}
 
-			currentNetworkSnapshot[container.id] = {
+			const cpuDelta = cpuTotal - previousSnapshot.cpu;
+			const systemDelta = systemTotal - previousSnapshot.system;
+			const onlineCpus = (stats.cpu_stats?.online_cpus || stats.cpu_stats?.cpu_usage?.percpu_usage?.length || 1);
+			const memUsage = (stats.memory_stats?.usage ?? 0);
+			const memLimit = (stats.memory_stats?.limit ?? 0);
+
+			currentSnapshot[stats.id] = {
 				rx: rxTotal,
 				tx: txTotal,
+				cpu: cpuTotal,
+				system: systemTotal,
 				timestamp: currentTimestamp
 			};
 
 			return {
-				id: container.id,
-				cpuPercent: container.cpuPercent || 0,
-				memPercent: container.memPercent || 0,
-				memUsage: container.memUsage || 0,
+				id: stats.id,
+				cpuPercent: (cpuDelta > 0 && systemDelta > 0 ? (cpuDelta / systemDelta) * onlineCpus * 100 : 0),
+				memPercent: (memLimit > 0 ? (memUsage / memLimit) * 100 : 0),
+				memUsage,
 				networkRx,
 				networkTx
 			};
-		}) || [];
+		});
 		const statsById = new Map(containerStats.map((containerStat) => {
 			return [containerStat.id, containerStat];
 		}));
-		appsNetworkSnapshot = currentNetworkSnapshot;
+		containersSnapshot = currentSnapshot;
 		const appsStorageResourceMetrics = module.getState('appsStorageResourceMetrics') || {};
 
 		const names = [...new Set([...apps.map((app) => { return app.name; }), ...Object.keys(containersByApp)])];
@@ -184,13 +202,8 @@ const getAppsComputeResourceMetrics = async (module) => {
 	}
 	module.eventEmitter.emit('app:resourceMetrics:fetched');
 
-	function networkTotals(container) {
-		const networks = Object.values(container.networks || {});
-		if (networks.length === 0) {
-			return { rx: container.netIO?.rx ?? 0, tx: container.netIO?.wx ?? 0 };
-		}
-
-		return networks.reduce((totals, network) => {
+	function networkTotals(networks) {
+		return Object.values(networks || {}).reduce((totals, network) => {
 			return { rx: totals.rx + (Number(network?.rx_bytes) || 0), tx: totals.tx + (Number(network?.tx_bytes) || 0) };
 		}, { rx: 0, tx: 0 });
 	}
