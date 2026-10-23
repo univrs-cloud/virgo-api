@@ -1,8 +1,33 @@
+import path from 'path';
+import { promises as fs } from 'fs';
 import { execa } from 'execa';
 
 const SNAPSHOT_MAX_AGE_MS = 5000;
 
 let socketSnapshot = {};
+
+const isRegularFile = async (filePath) => {
+	try {
+		return (await fs.stat(filePath)).isFile();
+	} catch (error) {
+		return false;
+	}
+};
+
+const getOpenPaths = async (openFiles) => {
+	const openPaths = new Map();
+	await Promise.all(openFiles.map(async (file) => {
+		if (!file.service_path || !await isRegularFile(path.join(file.service_path, file.filename ?? ''))) {
+			return;
+		}
+
+		for (const open of Object.values(file.opens || {})) {
+			const pid = open.server_id?.pid;
+			openPaths.set(pid, new Set([...(openPaths.get(pid) || []), path.resolve(file.service_path)]));
+		}
+	}));
+	return openPaths;
+};
 
 const getShares = async (module) => {
 	module.eventEmitter.emit('shares:updated');
@@ -10,13 +35,16 @@ const getShares = async (module) => {
 
 const getClients = async (module) => {
 	try {
-		const [sessionsOutput, sharesOutput, socketsOutput] = await Promise.all([
+		const [sessionsOutput, sharesOutput, locksOutput, socketsOutput] = await Promise.all([
 			execa('smbstatus', ['--json', '--brief']),
 			execa('smbstatus', ['--json', '--shares']),
+			execa('smbstatus', ['--json', '--locks']),
 			execa('ss', ['-tinH', 'state', 'established', '( sport = :445 )'])
 		]);
 		const sessions = Object.values(JSON.parse(sessionsOutput.stdout || '{}').sessions || {});
 		const tcons = Object.values(JSON.parse(sharesOutput.stdout || '{}').tcons || {});
+		const openPaths = await getOpenPaths(Object.values(JSON.parse(locksOutput.stdout || '{}').open_files || {}));
+		const sharePaths = new Map((module.getState('shares') || []).map((share) => { return [share.name?.toLowerCase(), (share.path ? path.resolve(share.path) : null)]; }));
 		const now = Date.now();
 		const sockets = readSockets(socketsOutput.stdout);
 		const rates = {};
@@ -34,14 +62,18 @@ const getClients = async (module) => {
 
 		const clients = sessions.map((session) => {
 			const peers = Object.values(session.channels || {}).map((channel) => { return addressOf(channel.remote_address); });
-			const shares = [...new Set(tcons
-				.filter((tcon) => { return tcon.session_id === session.session_id && tcon.service?.toLowerCase() !== 'ipc$'; })
-				.map((tcon) => { return tcon.service; }))];
+			const sessionTcons = tcons.filter((tcon) => { return tcon.session_id === session.session_id && tcon.service?.toLowerCase() !== 'ipc$'; });
+			const shares = [...new Set(sessionTcons.map((tcon) => { return tcon.service; }))];
+			const activeShares = shares.filter((share) => {
+				const sharePath = sharePaths.get(share?.toLowerCase());
+				return sharePath && sessionTcons.some((tcon) => { return openPaths.get(tcon.server_id?.pid)?.has(sharePath); });
+			});
 			return {
 				id: session.session_id,
 				username: session.username,
 				address: session.remote_machine,
 				shares,
+				activeShares,
 				rx: peers.reduce((total, peer) => { return total + (rates[peer]?.rx ?? 0); }, 0),
 				tx: peers.reduce((total, peer) => { return total + (rates[peer]?.tx ?? 0); }, 0)
 			};
