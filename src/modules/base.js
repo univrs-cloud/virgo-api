@@ -232,8 +232,8 @@ class BaseModule {
 		}
 	}
 
-	registerPoller(run, interval, { audience = 'any', name } = {}) {
-		const poller = new Poller(this, run, interval, { audience, name });
+	registerPoller(run, interval, { audience = 'any', name, keepAlive, aligned } = {}) {
+		const poller = new Poller(this, run, interval, { audience, name, keepAlive, aligned });
 		this.#pollers.push(poller);
 		return poller;
 	}
@@ -620,8 +620,8 @@ class BaseModule {
 					plugin.register(this);
 				}
 				if (Array.isArray(plugin.pollers)) {
-					plugin.pollers.forEach(({ run, interval, audience, name }) => {
-						this.registerPoller(run, interval, { audience, name });
+					plugin.pollers.forEach(({ run, interval, audience, name, keepAlive, aligned }) => {
+						this.registerPoller(run, interval, { audience, name, keepAlive, aligned });
 					});
 				}
 			} catch (error) {

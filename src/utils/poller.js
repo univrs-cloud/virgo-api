@@ -6,18 +6,22 @@ class Poller {
 	#audience;
 	#name;
 	#idleTtl;
+	#keepAlive;
+	#aligned;
 	#isRunning = false;
 	#idleTimeout = null;
 	#pollingTimeout = null;
 	#generation = 0;
 
-	constructor(module, callback, interval, { audience = 'any', idleTtl, name } = {}) {
+	constructor(module, callback, interval, { audience = 'any', idleTtl, name, keepAlive = false, aligned = false } = {}) {
 		this.#module = module;
 		this.#callback = callback;
 		this.#interval = interval;
 		this.#audience = audience;
 		this.#name = name;
 		this.#idleTtl = idleTtl ?? this.#CACHE_TTL;
+		this.#keepAlive = keepAlive;
+		this.#aligned = aligned;
 
 		this.start();
 	}
@@ -64,7 +68,7 @@ class Poller {
 			return;
 		}
 
-		const hasClients = this.#module.hasAudience(this.#audience);
+		const hasClients = this.#keepAlive || this.#module.hasAudience(this.#audience);
 		if (!hasClients) {
 			if (this.#idleTimeout === null) {
 				this.#idleTimeout = setTimeout(() => {
@@ -90,7 +94,8 @@ class Poller {
 		}
 
 		if (this.#isRunning && generation === this.#generation) {
-			this.#pollingTimeout = setTimeout(() => { this.#loop(generation); }, this.#interval);
+			const delay = (this.#aligned ? this.#interval - (Date.now() % this.#interval) : this.#interval);
+			this.#pollingTimeout = setTimeout(() => { this.#loop(generation); }, delay);
 		}
 	}
 }

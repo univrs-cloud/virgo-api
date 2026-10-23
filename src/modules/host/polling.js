@@ -53,57 +53,6 @@ const parseJson = (stdout) => {
 	}
 };
 
-const getNetworkStats = async (module) => {
-	try {
-		const system = module.getState('system');
-		const defaultInterface = system?.networkInterfaces?.find((iface) => { return iface.default; });
-		const ifaceName = defaultInterface?.ifname || null;
-		const networkStats = await si.networkStats(ifaceName);
-		let networkInterfaceStats = networkStats[0];
-		if (!networkInterfaceStats) {
-			networkInterfaceStats = {
-				rx_sec: 0,
-				tx_sec: 0
-			};
-		}
-		if (networkInterfaceStats?.rx_sec === null) {
-			networkInterfaceStats.rx_sec = 0;
-		}
-		if (networkInterfaceStats.tx_sec === null) {
-			networkInterfaceStats.tx_sec = 0;
-		}
-		module.setState('networkStats', networkInterfaceStats);
-	} catch (error) {
-		console.error('getNetworkStats:', error);
-		module.setState('networkStats', false);
-	}
-	module.nsp.emit('host:network:stats', module.getState('networkStats'));
-};
-
-const getCpuStats = async (module) => {
-	try {
-		const currentLoad = await si.currentLoad();
-		const cpuTemperature = await si.cpuTemperature();
-		const { stdout: fan } = await execa('cat /sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input || true', { shell: true });
-		module.setState('cpuStats', { ...currentLoad, temperature: cpuTemperature, fan: (fan ? fan.trim() : '') });
-	} catch (error) {
-		console.error('getCpuStats:', error);
-		module.setState('cpuStats', false);
-	}
-	module.nsp.emit('host:cpu:stats', module.getState('cpuStats'));
-};
-
-const getMemory = async (module) => {
-	try {
-		const memory = await si.mem();
-		module.setState('memory', memory);
-	} catch (error) {
-		console.error('getMemory:', error);
-		module.setState('memory', false);
-	}
-	module.nsp.emit('host:memory', module.getState('memory'));
-};
-
 /** Maps each drive's controller device to every `/dev/disk/by-id` alias pointing at it. Device names
  * are assigned in probe order and can move between boots, so these are the identifiers anything
  * pointing at a specific drive — zpool above all — has to use, and a pool records whichever alias it
@@ -524,9 +473,6 @@ export default {
 	register,
 	refreshStorage: getStorage,
 	pollers: [
-		{ run: getNetworkStats, interval: 2000 },
-		{ run: getCpuStats, interval: 5000 },
-		{ run: getMemory, interval: 10000 },
 		{ run: getDrives, interval: 60000 },
 		{ run: getStorage, interval: 60000, name: 'storage' },
 		{ run: getSnapshots, interval: 60 * 60 * 1000, audience: 'admin' },
