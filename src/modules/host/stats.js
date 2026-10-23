@@ -15,22 +15,22 @@ let history = [];
 let flushedUntil = 0;
 let iface = null;
 let previous = null;
-let isFlushing = false;
+let saving = Promise.resolve();
 
-const flush = async () => {
-	if (isFlushing) {
-		return;
-	}
-
-	isFlushing = true;
+const save = async () => {
 	try {
 		const pending = history.filter((sample) => { return sample.time > flushedUntil; });
 		if (await StatsService.saveSamples(pending, Date.now() - HISTORY_MS)) {
 			flushedUntil = (pending.at(-1)?.time ?? flushedUntil);
 		}
-	} finally {
-		isFlushing = false;
+	} catch (error) {
+		console.error('flushStats:', error);
 	}
+};
+
+const flush = () => {
+	saving = saving.then(save);
+	return saving;
 };
 
 const readCpuTimes = () => {
@@ -134,8 +134,9 @@ const start = async (module) => {
 	module.setState('stats', history);
 	module.registerPoller(sample, SAMPLE_INTERVAL_MS, { keepAlive: true, aligned: true });
 	module.registerPoller(flush, FLUSH_INTERVAL_MS, { keepAlive: true });
-	process.on('SIGTERM', flush);
-	process.on('SIGINT', flush);
+	module.eventEmitter.on('api:shutdown', (pending) => {
+		pending.push(flush());
+	});
 };
 
 const register = (module) => {

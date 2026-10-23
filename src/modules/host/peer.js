@@ -926,13 +926,12 @@ const remove = async (job, module) => {
 	return `${peer.name || peer.address} removed.`;
 };
 
-const onConnection = (socket, module) => {
+const onConnection = async (socket, module) => {
 	// emitChanged suppresses a repeat of the last payload, so a browser connecting after the last
 	// change would otherwise see nothing until the next adoption.
 	if (socket.isAuthenticated && socket.isAdmin) {
-		readConfiguration().then((peers) => { socket.emit('host:peers', withoutKeys(peers)); });
+		socket.emit('host:peers', withoutKeys(await readConfiguration()));
 	}
-
 };
 
 const register = (module) => {

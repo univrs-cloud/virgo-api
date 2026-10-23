@@ -7,6 +7,7 @@ import * as socket from './src/socket.js';
 import DataService from './src/database/data_service.js';
 import modules from './src/modules/index.js';
 import * as webrtcProxy from './src/utils/webrtc_proxy.js';
+import eventEmitter from './src/utils/event_emitter.js';
 
 async function main() {
 	const app = createApp();
@@ -28,17 +29,21 @@ async function main() {
 const SHUTDOWN_GRACE_MS = 500;
 
 let stopping = false;
-const stop = () => {
+const stop = async () => {
 	if (stopping) {
 		return;
 	}
 	stopping = true;
 	webrtcProxy.shutdown();
-	setTimeout(() => { process.exit(0); }, SHUTDOWN_GRACE_MS);
+	const pending = [];
+	eventEmitter.emit('api:shutdown', pending);
+	await Promise.allSettled([...pending, new Promise((resolve) => { setTimeout(resolve, SHUTDOWN_GRACE_MS); })]);
+	process.exit(0);
 };
 
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);
+process.on('SIGHUP', stop);
 
 main().catch((error) => {
 	console.error('Failed to start server:', error);
