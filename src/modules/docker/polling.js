@@ -2,7 +2,11 @@ import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 
+const EVENTS_RECONNECT_DELAY_MS = 5000;
+const CONTAINERS_DEBOUNCE_MS = 250;
+
 let containersSnapshot = {};
+let containersTimer = null;
 let appsStorageRetry = null;
 
 const getContainers = async (module) => {
@@ -14,6 +18,53 @@ const getContainers = async (module) => {
 		module.setState('containers', false);
 	}
 	module.eventEmitter.emit('app:containers:fetched');
+};
+
+const scheduleContainers = (module) => {
+	clearTimeout(containersTimer);
+	containersTimer = setTimeout(() => {
+		getContainers(module);
+	}, CONTAINERS_DEBOUNCE_MS);
+};
+
+const watchContainerEvents = async (module) => {
+	let isReconnecting = false;
+	const reconnect = () => {
+		if (isReconnecting) {
+			return;
+		}
+
+		isReconnecting = true;
+		setTimeout(() => {
+			watchContainerEvents(module);
+		}, EVENTS_RECONNECT_DELAY_MS);
+	};
+
+	try {
+		const stream = await docker.getEvents({ filters: { type: ['container'] } });
+		let buffer = '';
+		stream.on('data', (chunk) => {
+			buffer += chunk.toString('utf8');
+			const lines = buffer.split('\n');
+			buffer = lines.pop();
+			for (const line of lines.filter(Boolean)) {
+				try {
+					const event = JSON.parse(line);
+					if (!(event.Action ?? event.status ?? '').toLowerCase().startsWith('exec_')) {
+						scheduleContainers(module);
+					}
+				} catch (error) {
+					console.error('watchContainerEvents:', error);
+				}
+			}
+		});
+		stream.on('end', reconnect);
+		stream.on('error', reconnect);
+		getContainers(module);
+	} catch (error) {
+		console.error('watchContainerEvents:', error);
+		reconnect();
+	}
 };
 
 const getAppsStorageResouceMetrics = async (module) => {
@@ -70,7 +121,25 @@ const getContainerStats = async (container) => {
 	}
 };
 
+const hasResourceMetricsWatchers = (module) => {
+	return [...module.nsp.sockets.values()].some((socket) => {
+		return socket.data.isWatchingResourceMetrics && module.matches(socket, 'admin');
+	});
+};
+
+const watchResourceMetrics = async (isWatching, socket, module) => {
+	socket.data.isWatchingResourceMetrics = Boolean(isWatching);
+	if (socket.data.isWatchingResourceMetrics) {
+		await getAppsComputeResourceMetrics(module);
+	}
+	return { status: 'succeeded' };
+};
+
 const getAppsComputeResourceMetrics = async (module) => {
+	if (!hasResourceMetricsWatchers(module)) {
+		return;
+	}
+
 	const configured = module.getState('configured');
 	if (!Array.isArray(configured)) {
 		return;
@@ -210,7 +279,7 @@ const getAppsComputeResourceMetrics = async (module) => {
 };
 
 const register = (module) => {
-	getContainers(module);
+	watchContainerEvents(module);
 	getAppsStorageResouceMetrics(module);
 	getAppsComputeResourceMetrics(module);
 
@@ -224,8 +293,10 @@ const register = (module) => {
 export default {
 	name: 'polling',
 	register,
+	commands: {
+		'app:resourceMetrics:watch': { handler: watchResourceMetrics }
+	},
 	pollers: [
-		{ run: getContainers, interval: 2000 },
 		{ run: getAppsComputeResourceMetrics, interval: 2000 },
 		{ run: getAppsStorageResouceMetrics, interval: 60000 }
 	]
