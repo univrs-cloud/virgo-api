@@ -7,6 +7,7 @@ const SAMPLE_INTERVAL_MS = 1000;
 const SAVE_INTERVAL_MS = 60 * 1000;
 const HISTORY_MS = 60 * 60 * 1000;
 const MEMINFO_FILE = '/proc/meminfo';
+const ARCSTATS_FILE = '/proc/spl/kstat/zfs/arcstats';
 const NETWORK_DIR = '/sys/class/net';
 const THERMAL_DIR = '/sys/class/thermal';
 const HWMON_DIR = '/sys/class/hwmon';
@@ -53,6 +54,15 @@ const readMemory = async () => {
 	return { total, used: total - (readKilobytes('MemAvailable') * 1024) };
 };
 
+const readArcSize = async () => {
+	try {
+		const arcstats = await fs.readFile(ARCSTATS_FILE, 'utf8');
+		return Number(/^size\s+\d+\s+(\d+)$/m.exec(arcstats)?.[1] || 0);
+	} catch (error) {
+		return 0;
+	}
+};
+
 const findDefaultInterface = (module) => {
 	const system = module.getState('system');
 	return (system?.networkInterfaces?.find?.((networkInterface) => { return networkInterface.default; })?.ifname ?? null);
@@ -91,7 +101,7 @@ const getNetworkRate = (network, previousNetwork, seconds) => {
 const recordSample = async (module) => {
 	try {
 		const time = Date.now();
-		const [memory, network] = await Promise.all([readMemory(), readNetworkBytes(module)]);
+		const [memory, arc, network] = await Promise.all([readMemory(), readArcSize(), readNetworkBytes(module)]);
 		const reading = { time, cpu: readCpuTimes(), network };
 		if (previousReading) {
 			const cpuTotal = reading.cpu.total - previousReading.cpu.total;
@@ -101,6 +111,7 @@ const recordSample = async (module) => {
 				time: Math.round(time / 1000) * 1000,
 				cpu: (cpuTotal > 0 ? Math.round((cpuBusy / cpuTotal) * 1000) / 10 : 0),
 				memory: memory.used,
+				arc,
 				rx,
 				tx
 			};

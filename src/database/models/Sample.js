@@ -14,6 +14,11 @@ const Sample = sequelize.define('Sample', {
 		type: DataTypes.INTEGER,
 		allowNull: false
 	},
+	arc: {
+		type: DataTypes.INTEGER,
+		allowNull: false,
+		defaultValue: 0
+	},
 	rx: {
 		type: DataTypes.FLOAT,
 		allowNull: false

@@ -16,6 +16,9 @@
 		const { default: addApplicationCanEmbed } = await import('./005_add_application_can_embed.js');
 		await addApplicationCanEmbed();
 
+		const { default: addSampleArc } = await import('./006_add_sample_arc.js');
+		await addSampleArc();
+
 		console.log(`Post install completed successfully!`);
 	} catch (error) {
 		console.error(`Post install failed:`, error);
