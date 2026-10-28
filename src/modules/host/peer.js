@@ -952,15 +952,15 @@ const register = (module) => {
 
 export default {
 	name: 'peer',
-	commands: {
-		'host:peer:remove': { job: 'host:peer:remove' },
-		'host:peer:adopt': { job: 'host:peer:adopt' }
-	},
 	register,
 	onConnection,
 	call,
 	broadcast,
 	findHolder,
+	commands: {
+		'host:peer:remove': { job: 'host:peer:remove' },
+		'host:peer:adopt': { job: 'host:peer:adopt' }
+	},
 	jobs: {
 		'host:peer:adopt': adopt,
 		'host:peer:remove': remove

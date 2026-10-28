@@ -13,20 +13,20 @@ import { getQueueName } from '../../queues.js';
 const APPS_DIR = '/messier/apps';
 const COMPOSE_DIR = '.docker';
 const ENV_LINE_PATTERN = /^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/gm;
-const TERMINAL_APP = 'wetty';
-const REDIS_CONNECTION = { host: config.redis.host, port: config.redis.port };
-const CHILD_JOB_OPTIONS = { removeOnComplete: 100, removeOnFail: 100 };
 // Nothing can be signed into until these exist: traefik answers on the node's name, authelia owns the
 // accounts and the file the password step writes to. DOMAIN is the node's own name, which each
 // template prefixes itself, routing to traefik.<fqdn> and auth.<fqdn>. Certificates come from Let's
 // Encrypt, with expiry notices going to us rather than the customer — they never asked for one, and
 // it is obtained on their node's behalf.
 const SSL_EMAIL = 'voyager@univrs.cloud';
-const isFleetZone = (fqdn) => { return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`); };
 const CORE_APP_ENV = {
 	authelia: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le') }; },
 	traefik: ({ fqdn }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? 'ledns' : 'le'), TRAEFIK_DASHBOARD_CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), EMAIL: SSL_EMAIL }; },
 	wetty: ({ fqdn, address }) => { return { DOMAIN: fqdn, CERTRESOLVER: (isFleetZone(fqdn) ? '' : 'le'), SSHHOST: address }; }
+};
+
+const isFleetZone = (fqdn) => {
+	return String(fqdn || '').toLowerCase().endsWith(`.${config.fleet.zone}`);
 };
 
 const getNodeAddress = async () => {
@@ -127,9 +127,13 @@ const reinstallCoreApps = async (job, module, apps) => {
 	}
 
 	await module.updateJobProgress(job, `Reinstalling ${apps.map(getCoreAppTitle).join(', ')}...`);
+	const connection = {
+		host: config.redis.host,
+		port: config.redis.port
+	};
 	const queueName = getQueueName('docker');
-	const queue = new Queue(queueName, { connection: REDIS_CONNECTION });
-	const queueEvents = new QueueEvents(queueName, { connection: REDIS_CONNECTION });
+	const queue = new Queue(queueName, { connection });
+	const queueEvents = new QueueEvents(queueName, { connection });
 	try {
 		await queueEvents.waitUntilReady();
 		const children = [];
@@ -137,12 +141,16 @@ const reinstallCoreApps = async (job, module, apps) => {
 			children.push(await queue.add(
 				'app:install',
 				{ config: { name, env: CORE_APP_ENV[name]({ fqdn, address }), force: true }, username: job.data?.username },
-				{ ...CHILD_JOB_OPTIONS, jobId: randomUUID(), parent: { id: job.id, queue: job.queueQualifiedName } }
+				{ removeOnComplete: 100, removeOnFail: 100, jobId: randomUUID(), parent: { id: job.id, queue: job.queueQualifiedName } }
 			));
 		}
 
-		const results = await Promise.allSettled(children.map((child) => { return child.waitUntilFinished(queueEvents); }));
-		const failedApps = apps.filter((name, index) => { return results[index].status === 'rejected'; }).map(getCoreAppTitle);
+		const results = await Promise.allSettled(children.map((child) => {
+			return child.waitUntilFinished(queueEvents);
+		}));
+		const failedApps = apps.filter((name, index) => {
+			return results[index].status === 'rejected';
+		}).map(getCoreAppTitle);
 		if (failedApps.length) {
 			throw new Error(`Could not reinstall ${failedApps.join(' and ')}.`);
 		}
@@ -152,12 +160,10 @@ const reinstallCoreApps = async (job, module, apps) => {
 	}
 };
 
-const reinstallRenamedCoreApps = async (job, module) => {
-	await reinstallCoreApps(job, module, await getInstalledCoreApps(getCoreApps()));
-};
-
-const reinstallReaddressedTerminal = async (job, module) => {
-	await reinstallCoreApps(job, module, await getOutdatedCoreApps(await getInstalledCoreApps([TERMINAL_APP])));
+const reinstall = async (job, module) => {
+	const installedApps = await getInstalledCoreApps(getCoreApps());
+	const outdatedApps = await getOutdatedCoreApps(installedApps);
+	await reinstallCoreApps(job, module, outdatedApps);
 };
 
 /** Queues the apps the node cannot be used without, through the same command an operator would run.
@@ -198,12 +204,11 @@ const installCoreApps = async (job, module) => {
 
 export default {
 	name: 'core_apps',
+	reinstall,
 	commands: {
 		'host:apps:core:install': { handler: requestCoreApps }
 	},
 	jobs: {
 		'host:apps:core:install': installCoreApps
-	},
-	reinstallRenamedCoreApps,
-	reinstallReaddressedTerminal
+	}
 };

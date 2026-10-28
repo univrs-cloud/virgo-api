@@ -199,7 +199,7 @@ const updateIdentifier = async (job, module) => {
 	}
 	
 	module.eventEmitter.emit('host:network:identifier:updated');
-	await module.getPlugin('core_apps').reinstallRenamedCoreApps(job, module);
+	await module.getPlugin('core_apps').reinstall(job, module);
 	return `Host updated.`;
 };
 
@@ -376,7 +376,7 @@ const updateInterface = async (job, module) => {
 	await virtualIp?.apply(config.virtualIp, config, module);
 	await sleep(RECONNECT_GRACE_MS);
 	module.eventEmitter.emit('host:network:interface:updated');
-	await module.getPlugin('core_apps').reinstallReaddressedTerminal(job, module);
+	await module.getPlugin('core_apps').reinstall(job, module);
 	return `Network interface updated.`;
 };
 

@@ -23,13 +23,13 @@ const checkUps = async (module) => {
 				}
 			}
 		}
-		module.nsp.emit('host:ups', module.getState('ups'));
+		module.emitState('ups');
 		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('error', (error) => {
 		console.error('UPS socket error:', error.message);
 		module.setState('ups', { error: 'unreachable', message: error.message });
-		module.nsp.emit('host:ups', module.getState('ups'));
+		module.emitState('ups');
 		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('close', () => {
@@ -41,17 +41,13 @@ const checkUps = async (module) => {
 }
 
 const register = (module) => {
+	module.declareState({
+		ups: { event: 'host:ups' }
+	});
 	checkUps(module);
-};
-
-const onConnection = (socket, module) => {
-	if (module.getState('ups')) {
-		socket.emit('host:ups', module.getState('ups'));
-	}
 };
 
 export default {
 	name: 'ups',
-	register,
-	onConnection
+	register
 };

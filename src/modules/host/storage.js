@@ -374,18 +374,12 @@ const createPool = async (job, module) => {
 };
 
 const register = (module) => {
-	scanImportablePools(module)
-		.catch((error) => { console.error('scanImportablePools:', error); });
-};
-
-const onConnection = (socket, module) => {
-
-
-
+	scanImportablePools(module);
 };
 
 export default {
 	name: 'storage',
+	register,
 	commands: {
 		// Drives can settle after boot and disks get plugged in mid-wizard, so the answer is re-taken
 		// on request rather than trusting the one from startup.
@@ -393,8 +387,6 @@ export default {
 		'host:storage:pool:import': { job: 'host:storage:pool:import' },
 		'host:storage:pool:create': { job: 'host:storage:pool:create' }
 	},
-	register,
-	onConnection,
 	jobs: {
 		'host:storage:pool:import': importPool,
 		'host:storage:pool:create': createPool

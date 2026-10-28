@@ -112,11 +112,11 @@ const register = (module) => {
 
 export default {
 	name: 'smtp',
+	register,
+	updateNotificationConfigurationFiles,
 	commands: {
 		'configuration:smtp:update': { job: 'smtp:update' }
 	},
-	register,
-	updateNotificationConfigurationFiles,
 	jobs: {
 		'smtp:update': updateSmtpConfiguration
 	}

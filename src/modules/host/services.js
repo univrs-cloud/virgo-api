@@ -218,6 +218,7 @@ const register = (module) => {
 
 export default {
 	name: 'services',
+	register,
 	commands: {
 		'host:system:services:fetch': { handler: (config, socket, module) => { return broadcastServices(module); } },
 		'host:system:service:enable': { job: 'host:system:service:enable' },
@@ -228,7 +229,6 @@ export default {
 		'host:system:service:stop': { job: 'host:system:service:stop' },
 		'host:system:service:restart': { job: 'host:system:service:restart' }
 	},
-	register,
 	jobs: {
 		'host:system:service:enable': enableService,
 		'host:system:service:enable-start': enableStartService,

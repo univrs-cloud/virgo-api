@@ -504,6 +504,7 @@ export const relayAcmeChallenge = async (action, { fqdn, value }) => {
 
 export default {
 	name: 'fleet',
+	register,
 	commands: {
 		'configuration:fleet:domain:availability': {
 			handler: async ({ label } = {}) => { return { status: 'succeeded', ...await checkDomainAvailability(label) }; }
@@ -512,7 +513,6 @@ export default {
 		'configuration:fleet:enable': { job: 'fleet:enable' },
 		'configuration:fleet:disable': { job: 'fleet:disable' }
 	},
-	register,
 	jobs: {
 		'fleet:register': registerFleet,
 		'fleet:enable': enableFleet,

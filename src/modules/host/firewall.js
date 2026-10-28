@@ -158,11 +158,11 @@ const register = (module) => {
 
 export default {
 	name: 'firewall',
+	register,
 	commands: {
 		'host:firewall:fetch': { handler: (config, socket, module) => { return broadcastFirewall(module); } },
 		'host:firewall:unban': { job: 'host:firewall:unban' }
 	},
-	register,
 	jobs: {
 		'host:firewall:unban': unbanAddress
 	},

@@ -397,15 +397,15 @@ const register = (module) => {
 
 export default {
 	name: 'virtual_ip',
-	commands: {
-		'host:network:virtualIp:handover': { job: 'host:network:virtualIp:handover' },
-		'host:network:virtualIp:promote': { job: 'host:network:virtualIp:promote' }
-	},
 	register,
 	apply,
 	validate,
 	validateAgainstPeers,
 	adoptEnvironmentConfiguration,
+	commands: {
+		'host:network:virtualIp:handover': { job: 'host:network:virtualIp:handover' },
+		'host:network:virtualIp:promote': { job: 'host:network:virtualIp:promote' }
+	},
 	jobs: {
 		'host:network:virtualIp:promote': promote,
 		'host:network:virtualIp:handover': handover,

@@ -59,21 +59,23 @@ class HostModule extends BaseModule {
 				version: ''
 			}
 		});
-		this.#loadVirtualIp();
-		si.system(async (system) => {
+		(async () => {
+			await this.#loadVirtualIp();
+			this.emitState('system');
+		})();
+		(async () => {
+			const [system, cpu] = await Promise.all([si.system(), si.cpu()]);
+			this.mergeState('system', { ...system, cpu });
 			try {
 				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json']);
 				this.mergeState('system', {
-					...system,
 					zfs: { version: JSON.parse(zfsVesion).zfs_version.kernel.replace('zfs-kmod-', '') }
 				});
 			} catch (error) {
 				console.error(error);
 			}
-		});
-		si.cpu((cpu) => {
-			this.mergeState('system', { cpu });
-		});
+			this.emitState('system');
+		})();
 		this.eventEmitter
 			.on('host:updates:updated', () => {
 				this.emitState('updates');

@@ -209,6 +209,7 @@ const loadHistory = async (module) => {
 	history = await StatsService.getSamples(Date.now() - HISTORY_MS);
 	savedUntil = (history.at(-1)?.time ?? 0);
 	module.setState('stats', history);
+	module.emitState('stats');
 	module.registerPoller(recordSample, SAMPLE_INTERVAL_MS, { keepAlive: true, aligned: true });
 	module.registerPoller(queueSave, SAVE_INTERVAL_MS, { keepAlive: true });
 	module.eventEmitter.on('api:shutdown', (pending) => {
@@ -227,8 +228,7 @@ const register = (module) => {
 		defaultInterface = findDefaultInterface(module);
 	});
 	module.setState('stats', history);
-	loadHistory(module)
-		.catch((error) => { console.error('loadHistory:', error); });
+	loadHistory(module);
 };
 
 export default {
