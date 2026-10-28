@@ -28,8 +28,14 @@ const updateSnapshots = async (job, module) => {
 	return `${app.title} snapshots ${mode}.`;
 };
 
+const register = (module) => {
+	sanoid.setValues(module.appsDataset, { post_snapshot_script: 'virgo apps snapshots record-digests', script_timeout: '30' })
+		.catch((error) => { console.error(`Could not set the ${module.appsDataset} snapshot script: ${error.message}`); });
+};
+
 export default {
 	name: 'snapshots',
+	register,
 	commands: {
 		'app:snapshots:update': { job: 'app:snapshots:update' }
 	},

@@ -1,9 +1,14 @@
 import { execaSync } from 'execa';
 import * as commander from 'commander';
 import { Queue } from 'bullmq';
+import camelcaseKeys from 'camelcase-keys';
 import config from '../config.js';
+import docker from '../src/utils/docker_client.js';
 import DataService from '../src/database/data_service.js';
 import { getQueueName } from '../src/queues.js';
+
+const APPS_DATASET = 'messier/apps';
+const IMAGES_PROPERTY = 'univrs:images';
 
 const getHostFQDN = () => {
 	try {
@@ -302,6 +307,48 @@ const queueAppInstall = async (name, options) => {
 	}
 };
 
+const recordSnapshotDigests = async (options) => {
+	const datasets = String(options.dataset ?? '').split(',').map((dataset) => { return dataset.trim(); }).filter(Boolean);
+	const snapshotNames = String(options.snapshots ?? '').split(',').map((snapshotName) => { return snapshotName.trim(); }).filter(Boolean);
+	if (!datasets.length || !snapshotNames.length) {
+		console.error('A dataset and at least one snapshot name are required.');
+		process.exitCode = 1;
+		return;
+	}
+
+	const prefix = `${APPS_DATASET}/`;
+	const appDatasets = datasets.filter((dataset) => {
+		return dataset.toLowerCase().startsWith(prefix) && !dataset.slice(prefix.length).includes('/');
+	});
+	if (!appDatasets.length) {
+		return;
+	}
+
+	try {
+		const images = camelcaseKeys(await docker.listImages({ all: true, digests: true }), { deep: true });
+		for (const dataset of appDatasets) {
+			const name = dataset.slice(prefix.length).toLowerCase();
+			const containers = camelcaseKeys(await docker.listContainers({ all: true, filters: { label: [`com.docker.compose.project=${name}`] } }), { deep: true });
+			const serviceImageDigests = {};
+			for (const container of containers) {
+				const image = images.find((image) => { return image.id === container.imageId; });
+				const digest = image?.repoDigests?.[0]?.split('@')[1];
+				if (digest) {
+					serviceImageDigests[container.labels?.comDockerComposeService] = { image: container.image, digest };
+				}
+			}
+			if (!Object.keys(serviceImageDigests).length) {
+				continue;
+			}
+
+			execaSync('zfs', ['set', `${IMAGES_PROPERTY}=${JSON.stringify(serviceImageDigests)}`, ...snapshotNames.map((snapshotName) => { return `${dataset}@${snapshotName}`; })]);
+		}
+	} catch (error) {
+		console.error('Could not record the snapshot images:', error.message || error);
+		process.exitCode = 1;
+	}
+};
+
 const register = (program) => {
 	const envJsonHelpExample = JSON.stringify({
 		DOMAIN: getHostFQDN(),
@@ -335,6 +382,17 @@ const register = (program) => {
 		}, [])
 		.option('--force', 'Reinstall an app that is already installed: its project files are rewritten and the stack brought back up, its stored data is kept')
 		.action(queueAppInstall);
+
+	const snapshotsCmd = appsCmd
+		.command('snapshots')
+		.description('App snapshots');
+
+	snapshotsCmd
+		.command('record-digests')
+		.description('Record the image digests an app runs on its snapshots. Sanoid runs this after it snapshots an app')
+		.option('--dataset <names>', 'Comma-separated datasets the snapshots were taken of', process.env.SANOID_TARGETS)
+		.option('--snapshots <names>', 'Comma-separated snapshot names, without the dataset', process.env.SANOID_SNAPNAMES)
+		.action(recordSnapshotDigests);
 
 	function parseEnvPair(value) {
 		const index = value.indexOf('=');

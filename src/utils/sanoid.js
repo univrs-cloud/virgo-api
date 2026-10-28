@@ -182,6 +182,23 @@ const setMode = (dataset, mode) => {
 	});
 };
 
+const setValues = (dataset, values) => {
+	return serialize(async () => {
+		const sections = await read();
+		const section = findSection(sections, dataset);
+		if (!section) {
+			throw new Error(`${dataset} has no section in ${CONF_FILE}.`);
+		}
+
+		const next = sections.map((current) => {
+			return (current === section ? { name: current.name, values: { ...current.values, ...values } } : current);
+		});
+		if (stringify(next) !== stringify(sections)) {
+			await write(next);
+		}
+	});
+};
+
 const removeSection = (dataset) => {
 	return serialize(async () => {
 		const sections = await read();
@@ -195,4 +212,4 @@ const removeSection = (dataset) => {
 	});
 };
 
-export { MODES, getPolicies, setMode, removeSection };
+export { MODES, getPolicies, setMode, setValues, removeSection };
