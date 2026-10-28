@@ -40,7 +40,7 @@
 	],
 	"dependencies": {
 		"bcryptjs": "^3.0.3",
-		"bullmq": "^6.4.0",
+		"bullmq": "^6.5.1",
 		"camelcase-keys": "^10.0.3",
 		"change-case": "^5.4.4",
 		"chokidar": "^6.0.0",
@@ -60,7 +60,7 @@
 		"js-yaml": "^5.5.0",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^2.0.2",
-		"node-datachannel": "^0.33.4",
+		"node-datachannel": "^0.33.6",
 		"path": "^0.12.7",
 		"plist": "^5.0.0",
 		"pretty-bytes": "^7.2.0",
@@ -69,7 +69,7 @@
 		"socket.io": "^4.8.4",
 		"socket.io-client": "^4.8.4",
 		"sqlite3": "^6.0.1",
-		"systeminformation": "^5.33.16",
+		"systeminformation": "^5.33.18",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
