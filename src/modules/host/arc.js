@@ -16,7 +16,9 @@ const loadArc = async (module) => {
 		module.setState('arc', {
 			max: readArcstat('c_max'),
 			min: Math.max(MIN_ARC_MAX, readArcstat('c_min') + 1),
-			limit: Math.floor(os.totalmem() / 2)
+			limit: Math.floor(os.totalmem() / 2),
+			hits: readArcstat('hits'),
+			misses: readArcstat('misses')
 		});
 	} catch (error) {
 		console.error('loadArc:', error);
@@ -63,6 +65,9 @@ const register = (module) => {
 export default {
 	name: 'arc',
 	register,
+	pollers: [
+		{ run: loadArc, interval: 60000, audience: 'admin' }
+	],
 	commands: {
 		'host:arc:update': { job: 'host:arc:update' }
 	},
