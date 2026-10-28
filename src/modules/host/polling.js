@@ -454,6 +454,9 @@ const register = (module) => {
 		resumeCertificatePoll(module)
 			.catch((error) => { console.error('resumeCertificatePoll:', error); });
 	});
+	module.eventEmitter.on('host:storage:snapshots:fetch', () => {
+		getSnapshots(module);
+	});
 	module.eventEmitter.on('app:installed', ({ name } = {}) => {
 		if (name !== 'traefik') {
 			return;

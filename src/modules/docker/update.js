@@ -16,7 +16,7 @@ const IMAGES_PROPERTY = 'univrs:images';
 const generateSnapshotName = () => {
 	const now = new Date();
 	const pad = (value) => { return String(value).padStart(2, '0'); };
-	return `${SNAPSHOT_PREFIX}${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+	return `${SNAPSHOT_PREFIX}${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}_${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
 };
 
 const getServiceImageDigests = async (containers) => {
@@ -130,7 +130,13 @@ export default {
 	},
 	jobs: {
 		'app:update': (job, module) => {
-			return module.withAppLock(job.data?.config?.name, () => { return updateApp(job, module); });
+			return module.withAppLock(job.data?.config?.name, async () => {
+				try {
+					return await updateApp(job, module);
+				} finally {
+					module.eventEmitter.emit('host:storage:snapshots:fetch');
+				}
+			});
 		}
 	}
 };
