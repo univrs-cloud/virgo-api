@@ -7,7 +7,6 @@ import docker from '../../utils/docker_client.js';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 
-const SNAPSHOT_PATTERN = /^update_\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2}$/;
 const IMAGES_PROPERTY = 'univrs:images';
 const OVERRIDE_FILE = 'docker-compose.override.yml';
 const MANIFEST_ACCEPT = [
@@ -23,11 +22,18 @@ const getServiceImageDigests = async (dataset, snapshotName, title) => {
 		throw new Error(`${title} snapshot not found.`);
 	}
 
+	let serviceImageDigests;
 	try {
-		return JSON.parse(stdout.trim());
+		serviceImageDigests = JSON.parse(stdout.trim());
 	} catch (error) {
-		throw new Error(`${title} snapshot does not record its versions.`);
+		throw new Error(`${title} was not rolled back: the snapshot has no record of the image versions the app ran then.`);
 	}
+
+	if (!serviceImageDigests || typeof serviceImageDigests !== 'object' || !Object.keys(serviceImageDigests).length) {
+		throw new Error(`${title} was not rolled back: the snapshot has no record of the image versions the app ran then.`);
+	}
+
+	return serviceImageDigests;
 };
 
 const repositoryOf = (image) => {
@@ -162,10 +168,6 @@ const rollbackApp = async (job, module) => {
 	const snapshotName = String(config?.snapshot ?? '');
 	if (snapshotName === '') {
 		throw new Error(`No snapshot was given to roll ${title} back to.`);
-	}
-
-	if (!SNAPSHOT_PATTERN.test(snapshotName)) {
-		throw new Error(`${title} can only be rolled back to the snapshot taken before an update.`);
 	}
 
 	const dataset = `${module.appsDataset}/${existingApp.name}`;

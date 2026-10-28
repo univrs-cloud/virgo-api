@@ -401,7 +401,7 @@ const getStorage = async (module) => {
 
 const getSnapshots = async (module) => {
 	try {
-		const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-r', '-j', '--json-int']);
+		const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-r', '-o', 'name,used,avail,refer,mountpoint,univrs:images', '-j', '--json-int']);
 		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 		const snapshots = camelcaseKeys(datasets, { deep: true });
 		module.setState('snapshots', snapshots);
