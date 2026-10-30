@@ -399,19 +399,6 @@ const getStorage = async (module) => {
 	module.eventEmitter.emit('host:storage:updated', module.getState('storage'));
 };
 
-const getSnapshots = async (module) => {
-	try {
-		const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-r', '-o', 'name,used,avail,refer,mountpoint,univrs:images', '-j', '--json-int']);
-		const datasets = JSON.parse(zfsList || '{}')?.datasets || {};
-		const snapshots = camelcaseKeys(datasets, { deep: true });
-		module.setState('snapshots', snapshots);
-	} catch (error) {
-		console.error('getSnapshots:', error);
-		module.setState('snapshots', false);
-	}
-	module.emitChanged('host:storage:snapshots', module.getState('snapshots'), { audience: 'admin' });
-};
-
 const getTime = (module) => {
 	try {
 		const time = si.time();
@@ -454,9 +441,6 @@ const register = (module) => {
 		resumeCertificatePoll(module)
 			.catch((error) => { console.error('resumeCertificatePoll:', error); });
 	});
-	module.eventEmitter.on('host:storage:snapshots:fetch', () => {
-		getSnapshots(module);
-	});
 	module.eventEmitter.on('app:installed', ({ name } = {}) => {
 		if (name !== 'traefik') {
 			return;
@@ -478,7 +462,6 @@ export default {
 	pollers: [
 		{ run: getDrives, interval: 60000 },
 		{ run: getStorage, interval: 60000, name: 'storage' },
-		{ run: getSnapshots, interval: 60 * 60 * 1000, audience: 'admin' },
 		{ run: getTime, interval: 60000 }
 	]
 };

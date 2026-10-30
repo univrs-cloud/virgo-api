@@ -11,6 +11,11 @@ const register = (module) => {
 		'host:storage:refresh',
 		{ pattern: '0 */5 * * * *' }
 	);
+
+	module.addJobSchedule(
+		'host:storage:snapshots:refresh',
+		{ pattern: '0 1/15 * * * *' }
+	);
 };
 
 export default {
@@ -27,6 +32,10 @@ export default {
 			}
 
 			await module.getPlugin('polling')?.refreshStorage(module);
+			return ``;
+		},
+		'host:storage:snapshots:refresh': async (job, module) => {
+			module.eventEmitter.emit('host:storage:snapshots:fetch');
 			return ``;
 		}
 	}
