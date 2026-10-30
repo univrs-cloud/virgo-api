@@ -53,7 +53,7 @@
 		"dotenv": "^18.0.9",
 		"execa": "^10.2.1",
 		"express": "^5.3.0",
-		"express-rate-limit": "^8.7.1",
+		"express-rate-limit": "^8.7.2",
 		"express-validator": "^7.3.2",
 		"ini": "^7.0.0",
 		"ioredis": "^6.0.0",
@@ -69,14 +69,14 @@
 		"socket.io": "^4.8.4",
 		"socket.io-client": "^4.8.4",
 		"sqlite3": "^6.0.1",
-		"systeminformation": "^5.33.18",
+		"systeminformation": "^5.33.19",
 		"touch": "^3.1.1"
 	},
 	"optionalDependencies": {
 		"bufferutil": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.6.5",
+		"@types/node": "^26.6.6",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {
