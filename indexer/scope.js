@@ -22,7 +22,7 @@ function isInScope(dataset, relPath, isDir) {
 		return false;
 	}
 	if (!isNextcloud(dataset)) {
-		return String(dataset ?? '').toLowerCase() !== FOLDERS_DATASET;
+		return true;
 	}
 	if (relPath === NEXTCLOUD_DATA) {
 		return isDir;

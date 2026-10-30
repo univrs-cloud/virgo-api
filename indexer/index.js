@@ -109,7 +109,7 @@ function handleSnapshotError(perf, e, snap, prevSnap, datasetId) {
 }
 
 function datasetInIncludeScope(name, includeDatasets) {
-	return includeDatasets.some(p => name === p || name.startsWith(p + '/'));
+	return name !== FOLDERS_DATASET && includeDatasets.some(p => name === p || name.startsWith(p + '/'));
 }
 
 function prepareDatasetPruneStatements(db) {
