@@ -50,6 +50,11 @@ const search = async (config = {}) => {
 
 	const args = ['indexer', 'search', '--json', '--dataset', DATASET, '--limit', String(limit), '--offset', String(offset)];
 
+	const folder = cleanText(config.path);
+	if (folder) {
+		args.push('--path', `${folder}/`);
+	}
+
 	if (isSet(config.type)) {
 		const type = cleanText(config.type)?.toLowerCase();
 		if (!TYPES.includes(type)) {

@@ -7,6 +7,11 @@ import { isTrash } from './scope.js';
 // Each root matches that ZFS dataset name or any child (messier/apps → messier/apps/foo).
 // `dataset` may be comma-separated. `datasets` may be a string, comma-separated string, or array.
 
+function toPathPattern(pattern) {
+	const escaped = pattern.replace(/[\\%_]/g, '\\$&').replace(/\*/g, '%').replace(/\?/g, '_');
+	return (/[*?]/.test(pattern) ? escaped : `${escaped}%`);
+}
+
 function parseDatasetScopes(opts = {}) {
 	const chunks = [];
 	if (opts.datasets !== null && opts.datasets !== undefined && opts.datasets !== '') {
@@ -74,14 +79,8 @@ function search(db, pattern, opts = {}) {
 	const STATE_FILTER = opts.state ? STATE_FILTERS[opts.state] : '';
 	const baseParams = [...dsScopeParams, ...(typeFilter ? [typeFilter] : [])];
 
-	let pathParam = null;
-	if (pathFilterOpt) {
-		pathParam = pathFilterOpt.replace(/\*/g, '%').replace(/\?/g, '_');
-		if (!pathParam.includes('%') && !pathParam.includes('_')) {
-			pathParam += '%';
-		}
-	}
-	const PATH_FILTER = pathParam ? `AND f.path LIKE ?` : '';
+	const pathParam = (pathFilterOpt ? toPathPattern(pathFilterOpt) : null);
+	const PATH_FILTER = pathParam ? `AND f.path LIKE ? ESCAPE '\\'` : '';
 	const pathParams = pathParam ? [pathParam] : [];
 
 	const needVersionJoin = (minSize !== null && minSize !== undefined)
@@ -387,13 +386,7 @@ function deleted(db, opts = {}) {
 	const limit = opts.limit || 2000;
 	const offset = opts.offset || 0;
 
-	let pathParam = null;
-	if (pathFilter) {
-		pathParam = pathFilter.replace(/\*/g, '%').replace(/\?/g, '_');
-		if (!pathParam.includes('%') && !pathParam.includes('_')) {
-			pathParam += '%';
-		}
-	}
+	const pathParam = (pathFilter ? toPathPattern(pathFilter) : null);
 
 	const rows = db.prepare(`
 		SELECT
@@ -414,7 +407,7 @@ function deleted(db, opts = {}) {
 		JOIN file_versions fv ON fv.file_id = f.id
 			AND fv.id = (SELECT id FROM file_versions WHERE file_id = f.id ORDER BY snapshot_id DESC LIMIT 1)
 		WHERE f.deleted_at_snap_id IS NOT NULL${DS_FILTER}
-			${pathParam ? 'AND f.path LIKE ?' : ''}
+			${pathParam ? `AND f.path LIKE ? ESCAPE '\\'` : ''}
 		ORDER BY s_del.created_at DESC, f.path
 		LIMIT ? OFFSET ?
 	`).all(
@@ -466,15 +459,9 @@ function changes(db, snapshotName, opts = {}) {
 	const limit = opts.limit || 5000;
 	const offset = opts.offset || 0;
 
-	let pathParam = null;
-	if (pathFilterOpt) {
-		pathParam = pathFilterOpt.replace(/\*/g, '%').replace(/\?/g, '_');
-		if (!pathParam.includes('%') && !pathParam.includes('_')) {
-			pathParam += '%';
-		}
-	}
+	const pathParam = (pathFilterOpt ? toPathPattern(pathFilterOpt) : null);
 	const PATH_FILTER = pathParam
-		? `AND ((c.old_path LIKE ?) OR (c.new_path LIKE ?))`
+		? `AND ((c.old_path LIKE ? ESCAPE '\\') OR (c.new_path LIKE ? ESCAPE '\\'))`
 		: '';
 	const pathParams = pathParam ? [pathParam, pathParam] : [];
 
