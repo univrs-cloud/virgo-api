@@ -34,7 +34,7 @@ async function primeMount(snapshotPath) {
  * silent-drop counts in the run summary. Throws `SNAPSHOT_STAT_FAILED` if the
  * mount becomes unreadable wholesale (either at start or mid-crawl).
  */
-async function walkSnapshot(snapshotPath, onBatch, startRelPath = '') {
+async function walkSnapshot(dataset, snapshotPath, onBatch, startRelPath = '') {
 	await primeMount(snapshotPath);
 
 	const dirs = [snapshotPath + startRelPath];
@@ -119,7 +119,7 @@ async function walkSnapshot(snapshotPath, onBatch, startRelPath = '') {
 					? fullPath.slice(snapshotPath.length) || '/'
 					: fullPath;
 
-				if (!isInScope(relPath, entry.isDirectory())) {
+				if (!isInScope(dataset, relPath, entry.isDirectory())) {
 					continue;
 				}
 

@@ -779,8 +779,8 @@ function folderImages(steps, folder) {
 }
 
 function since(db, snapshotName, opts = {}) {
-	const folder = opts.path;
-	if (!snapshotName || typeof folder !== 'string' || !folder.startsWith('/') || folder.endsWith('/')) {
+	const folder = (opts.path === '/' ? '' : opts.path);
+	if (!snapshotName || typeof folder !== 'string' || (folder !== '' && (!folder.startsWith('/') || folder.endsWith('/')))) {
 		console.error('Usage: virgo indexer since <snapshot> --path <folder> [--state deleted,modified,renamed,moved] [--summary]');
 		return null;
 	}
@@ -809,6 +809,7 @@ function since(db, snapshotName, opts = {}) {
 		return { indexed: false };
 	}
 
+	const dataset = snap.full_name.split('@')[0];
 	const steps = renameStepsAfter(db, snap);
 	const images = folderImages(steps, folder);
 
@@ -878,7 +879,7 @@ function since(db, snapshotName, opts = {}) {
 
 			const isGone = f.deleted_at !== null;
 			const isReplaced = isGone && f.overwritten_from !== null && liveAt.get(snap.dataset_id, f.overwritten_from)?.type === f.type;
-			const isDeleted = !isReplaced && (isGone || isTrash(f.path));
+			const isDeleted = !isReplaced && (isGone || isTrash(dataset, f.path));
 			const path = pathBefore(steps, f.path, (isGone ? f.deleted_at : Infinity));
 			if (!isUnder(path, folder)) {
 				continue;
@@ -915,7 +916,7 @@ function since(db, snapshotName, opts = {}) {
 	}
 
 	const folderRow = db.prepare(`SELECT deleted_at_snap_id FROM files WHERE dataset_id = ? AND path = ?`).get(snap.dataset_id, images.current);
-	const isFolderDeleted = isTrash(images.current) || (folderRow?.deleted_at_snap_id ?? null) !== null;
+	const isFolderDeleted = isTrash(dataset, images.current) || (folderRow?.deleted_at_snap_id ?? null) !== null;
 	const result = {
 		snapshot: snap.full_name,
 		indexed: true,

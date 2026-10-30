@@ -13,12 +13,30 @@ const SYSTEM_FOLDER_PREFIX = 'appdata_';
 const STAT_CONCURRENCY = 64;
 const STATES = ['deleted', 'modified', 'renamed', 'moved'];
 const CHANGES_LIMIT = 500;
+const FOLDER_DATASET_PATTERN = /^messier\/folders\/[^/\0]+$/;
 
 const isUserFolder = (name) => {
 	return name !== GROUP_FOLDERS && !name.startsWith(SYSTEM_FOLDER_PREFIX) && !SYSTEM_FOLDERS.includes(name);
 };
 
-const isBrowsable = (relPath) => {
+const resolveTarget = (dataset) => {
+	if (dataset === undefined || dataset === null || dataset === '') {
+		return { dataset: DATASET, mountpoint: MOUNTPOINT, isNextcloud: true };
+	}
+
+	const name = String(dataset);
+	if (!FOLDER_DATASET_PATTERN.test(name) || ['.', '..'].includes(name.split('/')[2])) {
+		throw new Error('Invalid folder.');
+	}
+
+	return { dataset: name, mountpoint: `/${name}`, isNextcloud: false };
+};
+
+const isBrowsable = (target, relPath) => {
+	if (!target.isNextcloud) {
+		return (relPath === '' || relPath.startsWith('/'));
+	}
+
 	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
 		return false;
 	}
@@ -31,20 +49,20 @@ const byName = (a, b) => {
 	return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 };
 
-const resolveSnapshot = async (snapshot) => {
+const resolveSnapshot = async (target, snapshot) => {
 	if (typeof snapshot !== 'string' || !snapshot || snapshot.includes('/') || snapshot.includes('\0') || ['.', '..'].includes(snapshot)) {
 		throw new Error('Invalid snapshot.');
 	}
 
 	try {
-		return await realpath(`${MOUNTPOINT}/.zfs/snapshot/${snapshot}`);
+		return await realpath(`${target.mountpoint}/.zfs/snapshot/${snapshot}`);
 	} catch (error) {
 		throw new Error('The snapshot no longer exists.');
 	}
 };
 
-const resolveFolder = async (root, relPath) => {
-	if (typeof relPath !== 'string' || relPath.includes('\0') || path.posix.normalize(relPath) !== relPath || relPath.endsWith('/') || !isBrowsable(relPath)) {
+const resolveFolder = async (target, root, relPath) => {
+	if (typeof relPath !== 'string' || relPath.includes('\0') || (relPath !== '' && (path.posix.normalize(relPath) !== relPath || relPath.endsWith('/'))) || !isBrowsable(target, relPath)) {
 		throw new Error('Invalid folder.');
 	}
 
@@ -64,10 +82,10 @@ const resolveFolder = async (root, relPath) => {
 	return folder;
 };
 
-const changedSince = async (snapshot, relPath, options) => {
+const changedSince = async (target, snapshot, relPath, options) => {
 	let stdout;
 	try {
-		({ stdout } = await execa('virgo', ['indexer', 'since', '--json', '--dataset', DATASET, '--path', relPath, ...options, '--', snapshot]));
+		({ stdout } = await execa('virgo', ['indexer', 'since', '--json', '--dataset', target.dataset, '--path', (relPath || '/'), ...options, '--', snapshot]));
 	} catch (error) {
 		throw new Error(error.stderr?.trim() || error.shortMessage || error.message);
 	}
@@ -75,9 +93,9 @@ const changedSince = async (snapshot, relPath, options) => {
 	return camelcaseKeys(JSON.parse(stdout || 'null') || { indexed: false }, { deep: true });
 };
 
-const summarize = async (snapshot, relPath) => {
+const summarize = async (target, snapshot, relPath) => {
 	try {
-		return await changedSince(snapshot, relPath, ['--summary']);
+		return await changedSince(target, snapshot, relPath, ['--summary']);
 	} catch (error) {
 		return { indexed: false };
 	}
@@ -91,15 +109,16 @@ const listUsers = async (root) => {
 		return [];
 	}
 
+	const target = resolveTarget();
 	const users = [];
 	for (const entry of entries) {
 		const relPath = `${DATA_ROOT}/${entry.name}/${USER_FILES}`;
-		if (!entry.isDirectory() || !isBrowsable(relPath)) {
+		if (!entry.isDirectory() || !isBrowsable(target, relPath)) {
 			continue;
 		}
 
 		try {
-			await resolveFolder(root, relPath);
+			await resolveFolder(target, root, relPath);
 			users.push({ name: entry.name, path: relPath, states: [], currentPath: null, changesInside: 0, changeGroups: [] });
 		} catch (error) {
 			continue;
@@ -126,15 +145,17 @@ const describeFiles = async (folder, relPath, names) => {
 };
 
 const browse = async (config = {}) => {
-	const root = await resolveSnapshot(config.snapshot);
-	if (!config.path) {
+	const target = resolveTarget(config.dataset);
+	const root = await resolveSnapshot(target, config.snapshot);
+	if (!config.path && target.isNextcloud) {
 		return { status: 'succeeded', isIndexed: true, isDeleted: false, movedTo: null, folders: await listUsers(root), files: [] };
 	}
 
-	const folder = await resolveFolder(root, config.path);
+	const relPath = config.path || '';
+	const folder = await resolveFolder(target, root, relPath);
 	const [entries, summary] = await Promise.all([
 		readdir(folder, { withFileTypes: true }),
-		summarize(config.snapshot, config.path)
+		summarize(target, config.snapshot, relPath)
 	]);
 	const changed = new Map((summary.entries || []).map((entry) => { return [entry.name, entry]; }));
 	const unlisted = (summary.deleted === true ? ['deleted'] : []);
@@ -142,11 +163,11 @@ const browse = async (config = {}) => {
 		.filter((entry) => { return entry.isDirectory(); })
 		.map((entry) => {
 			const change = changed.get(entry.name);
-			return { name: entry.name, path: `${config.path}/${entry.name}`, states: change?.states || unlisted, currentPath: change?.currentPath || null, changesInside: change?.inside || 0, changeGroups: change?.insideGroups || [] };
+			return { name: entry.name, path: `${relPath}/${entry.name}`, states: change?.states || unlisted, currentPath: change?.currentPath || null, changesInside: change?.inside || 0, changeGroups: change?.insideGroups || [] };
 		})
 		.sort(byName);
 	const names = entries.filter((entry) => { return entry.isFile(); }).map((entry) => { return entry.name; });
-	const files = (await describeFiles(folder, config.path, names))
+	const files = (await describeFiles(folder, relPath, names))
 		.map((file) => {
 			const change = changed.get(file.name);
 			return { ...file, states: change?.states || unlisted, currentPath: change?.currentPath || null };
@@ -177,8 +198,10 @@ const describeChange = async (root, folder, change) => {
 };
 
 const changes = async (config = {}) => {
-	const root = await resolveSnapshot(config.snapshot);
-	await resolveFolder(root, config.path);
+	const target = resolveTarget(config.dataset);
+	const root = await resolveSnapshot(target, config.snapshot);
+	const relPath = config.path || '';
+	await resolveFolder(target, root, relPath);
 
 	const states = (Array.isArray(config.states) ? config.states.map((state) => { return String(state).toLowerCase(); }) : []);
 	if (!states.length || states.some((state) => { return !STATES.includes(state); })) {
@@ -190,7 +213,7 @@ const changes = async (config = {}) => {
 		throw new Error('Invalid offset.');
 	}
 
-	const result = await changedSince(config.snapshot, config.path, ['--state', states.join(','), '--limit', String(CHANGES_LIMIT), '--offset', String(offset)]);
+	const result = await changedSince(target, config.snapshot, relPath, ['--state', states.join(','), '--limit', String(CHANGES_LIMIT), '--offset', String(offset)]);
 	if (result.indexed !== true) {
 		throw new Error('This restore point is not indexed yet.');
 	}
@@ -198,7 +221,7 @@ const changes = async (config = {}) => {
 	const items = [];
 	for (let index = 0; index < result.files.length; index += STAT_CONCURRENCY) {
 		const batch = result.files.slice(index, index + STAT_CONCURRENCY);
-		const described = await Promise.all(batch.map((change) => { return describeChange(root, config.path, change); }));
+		const described = await Promise.all(batch.map((change) => { return describeChange(root, relPath, change); }));
 		items.push(...described.filter(Boolean));
 	}
 	return { status: 'succeeded', total: result.total, hasMore: offset + result.files.length < result.total, items };

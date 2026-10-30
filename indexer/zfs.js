@@ -276,7 +276,7 @@ function unescapeZfsPath(str) {
  * When a mountpoint is provided, the stream is pre-filtered through
  * `grep` for the indexed folder, so we never spend disk space or JS parse
  * time on change rows we'd just drop anyway. The pattern is built from the
- * same INDEX_ROOT the walker uses, so there's one source of truth for what
+ * same NEXTCLOUD_DATA the walker uses, so there's one source of truth for what
  * is indexed.
  *
  * grep exits with code 1 when no lines matched — meaning *every* zfs diff
@@ -288,7 +288,8 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 	activeTempFiles.add(tmpPath);
 
 	try {
-		const pattern = scopeGrepPattern(mountpoint);
+		const dataset = snapA.split('@')[0];
+		const pattern = scopeGrepPattern(dataset, mountpoint);
 		let result;
 		let zfsResult;
 
@@ -347,7 +348,7 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
 		});
 		for await (const line of rl) {
 			const entry = parseDiffLine(line);
-			const scoped = (entry && pattern ? scopeDiffEntry(entry, mountpoint) : entry);
+			const scoped = (entry && pattern ? scopeDiffEntry(entry, mountpoint, dataset) : entry);
 			if (scoped) {
 				yield scoped;
 			}
@@ -427,14 +428,14 @@ function parseDiffLine(line) {
 	};
 }
 
-function scopeDiffEntry(entry, mountpoint) {
+function scopeDiffEntry(entry, mountpoint, dataset) {
 	const isDir = (entry.fileType === 'dir');
-	const isSourceInScope = isInScope(resolveRelPath(entry.path, mountpoint), isDir);
+	const isSourceInScope = isInScope(dataset, resolveRelPath(entry.path, mountpoint), isDir);
 	if (entry.changeType !== 'renamed' || entry.newPath === null) {
 		return (isSourceInScope ? entry : null);
 	}
 
-	const isTargetInScope = isInScope(resolveRelPath(entry.newPath, mountpoint), isDir);
+	const isTargetInScope = isInScope(dataset, resolveRelPath(entry.newPath, mountpoint), isDir);
 	if (isSourceInScope && isTargetInScope) {
 		return entry;
 	}

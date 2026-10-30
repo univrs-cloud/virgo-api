@@ -6,7 +6,9 @@ import express from 'express';
 import * as authelia from '../utils/authelia.js';
 
 const SNAPSHOT_PATH_PATTERN = /^\/messier\/apps\/nextcloud\/\.zfs\/snapshot\/[^/]+(\/.+)$/;
-const SNAPSHOTS_ROOT = '/messier/apps/nextcloud/.zfs/snapshot';
+const FOLDER_SNAPSHOT_PATH_PATTERN = /^\/messier\/folders\/[^/]+\/\.zfs\/snapshot\/[^/]+(\/.+)$/;
+const DATASET = 'messier/apps/nextcloud';
+const FOLDER_DATASET_PATTERN = /^messier\/folders\/[^/\0]+$/;
 const SELECTION_LIMIT = '8mb';
 const MAX_SELECTION_PATHS = 50000;
 const DATA_ROOT = '/data';
@@ -39,6 +41,19 @@ const isUserContent = (relPath, isDir) => {
 		return false;
 	}
 	return (rest.length > 0 || isDir);
+};
+
+const resolveTarget = (dataset) => {
+	if (dataset === undefined || dataset === null || dataset === '') {
+		return { dataset: DATASET, mountpoint: `/${DATASET}`, isNextcloud: true };
+	}
+
+	const name = String(dataset);
+	if (!FOLDER_DATASET_PATTERN.test(name) || ['.', '..'].includes(name.split('/')[2])) {
+		return null;
+	}
+
+	return { dataset: name, mountpoint: `/${name}`, isNextcloud: false };
 };
 
 const sendFolder = (target, res) => {
@@ -113,20 +128,21 @@ const isInside = (child, folder) => {
 	return child.startsWith(`${folder}/`);
 };
 
-const resolveSnapshotRoot = async (snapshot) => {
+const resolveSnapshotRoot = async (target, snapshot) => {
 	if (typeof snapshot !== 'string' || !snapshot || snapshot.includes('/') || snapshot.includes('\0') || ['.', '..'].includes(snapshot)) {
 		return null;
 	}
 
+	const snapshotsRoot = `${target.mountpoint}/.zfs/snapshot`;
 	try {
-		const root = await realpath(`${SNAPSHOTS_ROOT}/${snapshot}`);
-		return (root === `${SNAPSHOTS_ROOT}/${snapshot}` ? root : null);
+		const root = await realpath(`${snapshotsRoot}/${snapshot}`);
+		return (root === `${snapshotsRoot}/${snapshot}` ? root : null);
 	} catch (error) {
 		return null;
 	}
 };
 
-const resolveSelection = async (root, selection) => {
+const resolveSelection = async (target, root, selection) => {
 	const paths = (Array.isArray(selection?.items) ? selection.items : []);
 	const excluded = (Array.isArray(selection?.excluded) ? selection.excluded : []);
 	if (!paths.length || paths.length + excluded.length > MAX_SELECTION_PATHS || !paths.every(isCleanPath) || !excluded.every(isCleanPath)) {
@@ -149,7 +165,7 @@ const resolveSelection = async (root, selection) => {
 			return null;
 		}
 
-		if ((!stats.isFile() && !stats.isDirectory()) || !isUserContent(relPath, stats.isDirectory())) {
+		if ((!stats.isFile() && !stats.isDirectory()) || (target.isNextcloud && !isUserContent(relPath, stats.isDirectory()))) {
 			return null;
 		}
 		items.push({ path: relPath, isDir: stats.isDirectory() });
@@ -159,16 +175,19 @@ const resolveSelection = async (root, selection) => {
 	while (common !== '/' && !items.every((item) => { return isInside(item.path, common); })) {
 		common = path.posix.dirname(common);
 	}
-	if (common === '/') {
+	if (common === '/' && target.isNextcloud) {
 		return null;
 	}
 
-	return { items, excluded: new Set(excluded), common };
+	return { items, excluded: new Set(excluded), common: (common === '/' ? '' : common) };
 };
 
-const selectionName = (selection) => {
+const selectionName = (target, selection) => {
 	if (selection.items.length === 1) {
 		return path.posix.basename(selection.items[0].path);
+	}
+	if (!target.isNextcloud) {
+		return path.posix.basename(selection.common || target.dataset);
 	}
 
 	const [, , user, , ...rest] = selection.common.split('/');
@@ -210,7 +229,7 @@ const listSelection = async (zip, root, selection) => {
 	zip.stdin.end();
 };
 
-const sendSelection = (root, selection, res) => {
+const sendSelection = (target, root, selection, res) => {
 	const zip = spawn('zip', ['-q', '-y', '-0', '-nw', '-', '-@'], { cwd: `${root}${selection.common}`, stdio: ['pipe', 'pipe', 'ignore'] });
 	let isFailed = false;
 	const fail = () => {
@@ -247,7 +266,7 @@ const sendSelection = (root, selection, res) => {
 		zip.kill();
 	});
 
-	res.attachment(`${selectionName(selection)}.zip`);
+	res.attachment(`${selectionName(target, selection)}.zip`);
 	zip.stdout.pipe(res, { end: false });
 	listSelection(zip, root, selection).catch(fail);
 };
@@ -258,7 +277,8 @@ router.get('/snapshots/download', async (req, res, next) => {
 	}
 
 	const requested = req.query.path;
-	if (typeof requested !== 'string' || !path.isAbsolute(requested) || !SNAPSHOT_PATH_PATTERN.test(path.resolve(requested))) {
+	const pattern = [SNAPSHOT_PATH_PATTERN, FOLDER_SNAPSHOT_PATH_PATTERN].find((candidate) => { return typeof requested === 'string' && candidate.test(path.resolve(requested)); });
+	if (typeof requested !== 'string' || !path.isAbsolute(requested) || !pattern) {
 		res.sendStatus(400);
 		return;
 	}
@@ -273,8 +293,8 @@ router.get('/snapshots/download', async (req, res, next) => {
 		return;
 	}
 
-	const relPath = SNAPSHOT_PATH_PATTERN.exec(target)?.[1];
-	if (!relPath || (!stats.isFile() && !stats.isDirectory()) || !isUserContent(relPath, stats.isDirectory())) {
+	const relPath = pattern.exec(target)?.[1];
+	if (!relPath || (!stats.isFile() && !stats.isDirectory()) || (pattern === SNAPSHOT_PATH_PATTERN && !isUserContent(relPath, stats.isDirectory()))) {
 		res.sendStatus(404);
 		return;
 	}
@@ -305,13 +325,19 @@ router.post('/snapshots/download', express.urlencoded({ extended: false, limit: 
 		return;
 	}
 
-	const root = await resolveSnapshotRoot(requested?.snapshot);
+	const snapshotTarget = resolveTarget(requested?.dataset);
+	if (!snapshotTarget) {
+		res.sendStatus(400);
+		return;
+	}
+
+	const root = await resolveSnapshotRoot(snapshotTarget, requested?.snapshot);
 	if (!root) {
 		res.sendStatus(404);
 		return;
 	}
 
-	const selection = await resolveSelection(root, requested);
+	const selection = await resolveSelection(snapshotTarget, root, requested);
 	if (!selection) {
 		res.sendStatus(400);
 		return;
@@ -328,7 +354,7 @@ router.post('/snapshots/download', express.urlencoded({ extended: false, limit: 
 		return;
 	}
 
-	sendSelection(root, selection, res);
+	sendSelection(snapshotTarget, root, selection, res);
 });
 
 export default router;

@@ -579,7 +579,7 @@ function reportSnapshotAnomalies(perf, orphans0, statFails0) {
  */
 async function crawlEnteredDirs(db, stmt, perf, entered, snap, datasetId, snapPath, recordsChanges) {
 	for (const dir of entered) {
-		const result = await walkSnapshot(snapPath, (batch) => {
+		const result = await walkSnapshot(snap.full_name.split('@')[0], snapPath, (batch) => {
 			const t = Date.now();
 			database.transaction(db, () => {
 				perf.sqlTxns++;

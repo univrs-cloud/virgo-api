@@ -12,11 +12,11 @@ const GROUP_FOLDERS = '__groupfolders';
 const SYSTEM_FOLDERS = ['files_external'];
 const SYSTEM_FOLDER_PREFIX = 'appdata_';
 const TRASHED_NAME_PATTERN = /\.d\d+$/;
-const SNAPSHOT_PATH_PATTERN = new RegExp(`^${MOUNTPOINT}/\\.zfs/snapshot/([^/]+)(/.+)$`);
+const DATASET = 'messier/apps/nextcloud';
+const FOLDER_DATASET_PATTERN = /^messier\/folders\/[^/\0]+$/;
 const CONFLICTS = ['copy', 'overwrite'];
 const MAX_NAME_BYTES = 255;
 const OWNER = 'voyager:users';
-const SNAPSHOTS_ROOT = `${MOUNTPOINT}/.zfs/snapshot`;
 const MAX_SELECTION_PATHS = 50000;
 const PROGRESS_STEP = 100;
 
@@ -24,7 +24,32 @@ const isUserFolder = (name) => {
 	return name !== GROUP_FOLDERS && !name.startsWith(SYSTEM_FOLDER_PREFIX) && !SYSTEM_FOLDERS.includes(name);
 };
 
-const isRestorableFile = (relPath) => {
+const resolveTarget = (dataset) => {
+	if (dataset === undefined || dataset === null || dataset === '') {
+		return { dataset: DATASET, mountpoint: MOUNTPOINT, isNextcloud: true };
+	}
+
+	const name = String(dataset);
+	if (!FOLDER_DATASET_PATTERN.test(name) || ['.', '..'].includes(name.split('/')[2])) {
+		throw new Error('Invalid folder.');
+	}
+
+	return { dataset: name, mountpoint: `/${name}`, isNextcloud: false };
+};
+
+const snapshotPathPattern = (target) => {
+	return new RegExp(`^${target.mountpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.zfs/snapshot/([^/]+)(/.+)$`);
+};
+
+const locationOf = (target, relPath) => {
+	return (target.isNextcloud ? relPath.slice(DATA_ROOT.length + 1) : `${path.posix.basename(target.dataset)}${relPath}`);
+};
+
+const isRestorableFile = (target, relPath) => {
+	if (!target.isNextcloud) {
+		return true;
+	}
+
 	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
 		return false;
 	}
@@ -36,7 +61,11 @@ const isRestorableFile = (relPath) => {
 	return isUserFolder(top) && [USER_FILES, USER_TRASH].includes(sub) && rest.length > 0;
 };
 
-const isRestoreDestination = (relPath) => {
+const isRestoreDestination = (target, relPath) => {
+	if (!target.isNextcloud) {
+		return (relPath === '' || relPath.startsWith('/'));
+	}
+
 	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
 		return false;
 	}
@@ -45,15 +74,16 @@ const isRestoreDestination = (relPath) => {
 	return isUserFolder(top) && sub === USER_FILES;
 };
 
-const restoredName = (relPath) => {
+const restoredName = (target, relPath) => {
 	const segments = relPath.split('/');
 	const name = segments[segments.length - 1];
-	const isTrashedItem = (segments.length === 6 && segments[3] === USER_TRASH && segments[4] === USER_FILES);
+	const isTrashedItem = (target.isNextcloud && segments.length === 6 && segments[3] === USER_TRASH && segments[4] === USER_FILES);
 	return (isTrashedItem ? name.replace(TRASHED_NAME_PATTERN, '') : name);
 };
 
-const resolveSource = async (snapshotPath) => {
-	if (typeof snapshotPath !== 'string' || !path.isAbsolute(snapshotPath) || !SNAPSHOT_PATH_PATTERN.test(path.resolve(snapshotPath))) {
+const resolveSource = async (target, snapshotPath) => {
+	const pattern = snapshotPathPattern(target);
+	if (typeof snapshotPath !== 'string' || !path.isAbsolute(snapshotPath) || !pattern.test(path.resolve(snapshotPath))) {
 		throw new Error('Invalid file.');
 	}
 
@@ -66,21 +96,21 @@ const resolveSource = async (snapshotPath) => {
 		throw new Error('The file is no longer in that snapshot.');
 	}
 
-	const [, snapshot, relPath] = SNAPSHOT_PATH_PATTERN.exec(file) ?? [];
-	if (!relPath || !stats.isFile() || !isRestorableFile(relPath)) {
+	const [, snapshot, relPath] = pattern.exec(file) ?? [];
+	if (!relPath || !stats.isFile() || !isRestorableFile(target, relPath)) {
 		throw new Error('Invalid file.');
 	}
 
 	return { file, snapshot, relPath, stats };
 };
 
-const findFolder = async (relPath) => {
+const findFolder = async (target, relPath) => {
 	let folder;
 	let root;
 	let stats;
 	try {
-		root = await realpath(MOUNTPOINT);
-		folder = await realpath(`${MOUNTPOINT}${relPath}`);
+		root = await realpath(target.mountpoint);
+		folder = await realpath(`${target.mountpoint}${relPath}`);
 		stats = await stat(folder);
 	} catch (error) {
 		if (error.code === 'ENOENT') {
@@ -96,18 +126,23 @@ const findFolder = async (relPath) => {
 	return { folder, stats };
 };
 
-const resolveDestination = async (relPath) => {
-	if (typeof relPath !== 'string' || relPath.includes('\0') || path.posix.normalize(relPath) !== relPath || relPath.endsWith('/') || !isRestoreDestination(relPath)) {
+const resolveDestination = async (target, relPath) => {
+	if (typeof relPath !== 'string' || relPath.includes('\0') || (relPath !== '' && (path.posix.normalize(relPath) !== relPath || relPath.endsWith('/'))) || !isRestoreDestination(target, relPath)) {
 		throw new Error('Invalid folder.');
 	}
 
 	const missing = [];
 	let current = relPath;
-	let existing = await findFolder(current);
+	let existing = await findFolder(target, current);
 	while (!existing) {
+		if (current === '') {
+			throw new Error('The folder no longer exists.');
+		}
+
 		const name = path.posix.basename(current);
-		current = path.posix.dirname(current);
-		if (!isRestoreDestination(current)) {
+		const parent = path.posix.dirname(current);
+		current = (!target.isNextcloud && parent === '/' ? '' : parent);
+		if (!isRestoreDestination(target, current)) {
 			throw new Error('The folder no longer exists.');
 		}
 		if (Buffer.byteLength(name) > MAX_NAME_BYTES) {
@@ -115,14 +150,14 @@ const resolveDestination = async (relPath) => {
 		}
 
 		missing.unshift(name);
-		existing = await findFolder(current);
+		existing = await findFolder(target, current);
 	}
 
 	return { ...existing, missing };
 };
 
-const resolveExistingDestination = async (relPath) => {
-	const destination = await resolveDestination(relPath);
+const resolveExistingDestination = async (target, relPath) => {
+	const destination = await resolveDestination(target, relPath);
 	if (destination.missing.length) {
 		throw new Error('The folder no longer exists.');
 	}
@@ -134,12 +169,14 @@ const setOwner = async (target) => {
 	await execa('chown', ['-h', '--', OWNER, target]);
 };
 
-const createFolder = async (parent, name, stats, created) => {
+const createFolder = async (target, parent, name, stats, created) => {
 	const folder = path.join(parent, name);
 	try {
 		await mkdir(folder, { mode: stats.mode & 0o7777 });
 		created.push(folder);
-		await setOwner(folder);
+		if (target.isNextcloud) {
+			await setOwner(folder);
+		}
 	} catch (error) {
 		if (error.code !== 'EEXIST') {
 			throw error;
@@ -180,15 +217,16 @@ const listRoots = async () => {
 		return [];
 	}
 
+	const target = resolveTarget();
 	const roots = [];
 	for (const entry of entries) {
 		const relPath = `${DATA_ROOT}/${entry.name}/${USER_FILES}`;
-		if (!entry.isDirectory() || !isRestoreDestination(relPath)) {
+		if (!entry.isDirectory() || !isRestoreDestination(target, relPath)) {
 			continue;
 		}
 
 		try {
-			await resolveExistingDestination(relPath);
+			await resolveExistingDestination(target, relPath);
 			roots.push({ name: entry.name, path: relPath });
 		} catch (error) {
 			continue;
@@ -198,23 +236,26 @@ const listRoots = async () => {
 };
 
 const listFolders = async (config = {}) => {
-	if (!config.path) {
+	const target = resolveTarget(config.dataset);
+	if (!config.path && target.isNextcloud) {
 		return { status: 'succeeded', folders: await listRoots() };
 	}
 
-	const { folder } = await resolveExistingDestination(config.path);
+	const relPath = config.path || '';
+	const { folder } = await resolveExistingDestination(target, relPath);
 	const entries = await readdir(folder, { withFileTypes: true });
 	const folders = entries
 		.filter((entry) => { return entry.isDirectory(); })
-		.map((entry) => { return { name: entry.name, path: `${config.path}/${entry.name}` }; })
+		.map((entry) => { return { name: entry.name, path: `${relPath}/${entry.name}` }; })
 		.sort(byName);
 	return { status: 'succeeded', folders };
 };
 
 const inspect = async (config = {}) => {
-	const source = await resolveSource(config.snapshotPath);
-	const destination = await resolveDestination(config.destination);
-	const name = restoredName(source.relPath);
+	const target = resolveTarget(config.dataset);
+	const source = await resolveSource(target, config.snapshotPath);
+	const destination = await resolveDestination(target, config.destination);
+	const name = restoredName(target, source.relPath);
 	const existing = (destination.missing.length ? null : await findExisting(destination.folder, name));
 	if (existing && !existing.isFile()) {
 		throw new Error(`${name} already exists in that folder and is not a file.`);
@@ -250,9 +291,10 @@ const escapeHtml = (text) => {
 
 const restoreFile = async (job, module) => {
 	const { config = {} } = job.data;
-	const source = await resolveSource(config.snapshotPath);
-	const destination = await resolveDestination(config.destination);
-	const name = restoredName(source.relPath);
+	const target = resolveTarget(config.dataset);
+	const source = await resolveSource(target, config.snapshotPath);
+	const destination = await resolveDestination(target, config.destination);
+	const name = restoredName(target, source.relPath);
 	const conflict = String(config.conflict ?? '').toLowerCase();
 	const existing = (destination.missing.length ? null : await findExisting(destination.folder, name));
 	if (existing && !existing.isFile()) {
@@ -269,7 +311,7 @@ const restoreFile = async (job, module) => {
 	try {
 		let folder = destination.folder;
 		for (const missing of destination.missing) {
-			folder = await createFolder(folder, missing, destination.stats, created);
+			folder = await createFolder(target, folder, missing, destination.stats, created);
 		}
 
 		partial = path.join(folder, `.restoring-${randomBytes(8).toString('hex')}`);
@@ -277,7 +319,9 @@ const restoreFile = async (job, module) => {
 		if (await realpath(partial) !== partial) {
 			throw new Error('The folder changed while restoring.');
 		}
-		await setOwner(partial);
+		if (target.isNextcloud) {
+			await setOwner(partial);
+		}
 		await lutimes(partial, source.stats.atime, source.stats.mtime);
 		await rename(partial, path.join(folder, targetName));
 	} catch (error) {
@@ -290,10 +334,14 @@ const restoreFile = async (job, module) => {
 		throw error;
 	}
 
-	return `${escapeHtml(targetName)} restored to ${escapeHtml(config.destination.slice(DATA_ROOT.length + 1))}.`;
+	return `${escapeHtml(targetName)} restored to ${escapeHtml(locationOf(target, config.destination))}.`;
 };
 
-const isSelectable = (relPath) => {
+const isSelectable = (target, relPath) => {
+	if (!target.isNextcloud) {
+		return true;
+	}
+
 	if (!relPath.startsWith(`${DATA_ROOT}/`)) {
 		return false;
 	}
@@ -310,26 +358,26 @@ const isInside = (child, folder) => {
 	return child.startsWith(`${folder}/`);
 };
 
-const resolveSnapshotRoot = async (snapshot) => {
+const resolveSnapshotRoot = async (target, snapshot) => {
 	if (typeof snapshot !== 'string' || !snapshot || snapshot.includes('/') || snapshot.includes('\0') || ['.', '..'].includes(snapshot)) {
 		throw new Error('Invalid snapshot.');
 	}
 
 	let root;
 	try {
-		root = await realpath(`${SNAPSHOTS_ROOT}/${snapshot}`);
+		root = await realpath(`${target.mountpoint}/.zfs/snapshot/${snapshot}`);
 	} catch (error) {
 		throw new Error('The snapshot no longer exists.');
 	}
 
-	if (root !== `${SNAPSHOTS_ROOT}/${snapshot}`) {
+	if (root !== `${target.mountpoint}/.zfs/snapshot/${snapshot}`) {
 		throw new Error('Invalid snapshot.');
 	}
 
 	return root;
 };
 
-const resolveSelection = async (root, config) => {
+const resolveSelection = async (target, root, config) => {
 	const paths = (Array.isArray(config.items) ? config.items : []);
 	const excluded = (Array.isArray(config.excluded) ? config.excluded : []);
 	if (!paths.length || paths.length + excluded.length > MAX_SELECTION_PATHS || !paths.every(isCleanPath) || !excluded.every(isCleanPath)) {
@@ -341,7 +389,7 @@ const resolveSelection = async (root, config) => {
 		if (items.some((item) => { return item.isDir && isInside(relPath, item.path); })) {
 			continue;
 		}
-		if (!isSelectable(relPath)) {
+		if (!isSelectable(target, relPath)) {
 			throw new Error('Invalid selection.');
 		}
 
@@ -365,7 +413,7 @@ const resolveSelection = async (root, config) => {
 	while (common !== '/' && !items.every((item) => { return isInside(item.path, common); })) {
 		common = path.posix.dirname(common);
 	}
-	return { items, excluded: new Set(excluded), common };
+	return { items, excluded: new Set(excluded), common: (common === '/' ? '' : common) };
 };
 
 const createRestoreFolder = async (parent, snapshot, stats) => {
@@ -452,22 +500,25 @@ const copySelection = async (job, module, root, selection, container, mode) => {
 
 const restoreItems = async (job, module) => {
 	const { config = {} } = job.data;
-	const root = await resolveSnapshotRoot(config.snapshot);
-	const selection = await resolveSelection(root, config);
-	const destination = await resolveDestination(config.destination);
+	const target = resolveTarget(config.dataset);
+	const root = await resolveSnapshotRoot(target, config.snapshot);
+	const selection = await resolveSelection(target, root, config);
+	const destination = await resolveDestination(target, config.destination);
 	await module.updateJobProgress(job, 'Restoring files...');
 	const created = [];
 	let container = null;
 	try {
 		let folder = destination.folder;
 		for (const missing of destination.missing) {
-			folder = await createFolder(folder, missing, destination.stats, created);
+			folder = await createFolder(target, folder, missing, destination.stats, created);
 		}
 
 		container = await createRestoreFolder(folder, config.snapshot, destination.stats);
 		const count = await copySelection(job, module, root, selection, container, destination.stats.mode & 0o7777);
-		await execa('chown', ['-R', '-h', '--', OWNER, container]);
-		const location = `${config.destination.slice(DATA_ROOT.length + 1)}/${path.basename(container)}`;
+		if (target.isNextcloud) {
+			await execa('chown', ['-R', '-h', '--', OWNER, container]);
+		}
+		const location = `${locationOf(target, config.destination)}/${path.basename(container)}`;
 		return `${count} ${count === 1 ? 'file' : 'files'} restored to ${escapeHtml(location)}.`;
 	} catch (error) {
 		if (container) {

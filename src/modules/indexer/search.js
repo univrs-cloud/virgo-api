@@ -2,6 +2,7 @@ import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 
 const DATASET = 'messier/apps/nextcloud';
+const FOLDER_DATASET_PATTERN = /^messier\/folders\/[^/\0]+$/;
 const TYPES = ['file', 'dir', 'link'];
 const STATES = ['live', 'modified', 'renamed', 'unchanged', 'deleted'];
 const DEFAULT_LIMIT = 100;
@@ -32,6 +33,11 @@ const isDate = (value) => {
 	return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 };
 
+const toFolderDataset = (dataset) => {
+	const name = String(dataset ?? '');
+	return (FOLDER_DATASET_PATTERN.test(name) && !['.', '..'].includes(name.split('/')[2]) ? name : null);
+};
+
 const search = async (config = {}) => {
 	const term = cleanText(config.term);
 	if (!term) {
@@ -48,7 +54,12 @@ const search = async (config = {}) => {
 		throw new Error('Invalid offset.');
 	}
 
-	const args = ['indexer', 'search', '--json', '--dataset', DATASET, '--limit', String(limit), '--offset', String(offset)];
+	const dataset = (isSet(config.dataset) ? toFolderDataset(config.dataset) : DATASET);
+	if (!dataset) {
+		throw new Error('Invalid folder.');
+	}
+
+	const args = ['indexer', 'search', '--json', '--dataset', dataset, '--limit', String(limit), '--offset', String(offset)];
 
 	const folder = cleanText(config.path);
 	if (folder) {

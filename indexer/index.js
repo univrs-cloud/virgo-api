@@ -4,7 +4,7 @@ import * as walker from './walker.js';
 import * as utils from './utils.js';
 import { execaSync } from 'execa';
 import { BATCH_SIZE } from './constants.js';
-import { INDEXED_APP, INDEXED_DATASET, isInScope, SCOPE_VERSION } from './scope.js';
+import { NEXTCLOUD_APP, NEXTCLOUD_DATASET, FOLDERS_DATASET, isInScope, SCOPE_VERSION } from './scope.js';
 import { makeSnapshotStatError, isSnapshotStatFailure, primeMountReadable } from './snapshot_util.js';
 import { flushIncrementalBatch, flushUnifiedBatch, flushChanges, reportSnapshotAnomalies, createSnapshotContext, finishSnapshot } from './flush.js';
 import { logBatchProgress, endProgressLine } from './progress.js';
@@ -244,7 +244,7 @@ function purgeOutOfScopeRows(db, stmt, filteredDatasets, datasetIds) {
 			batch = [];
 		};
 		for (const row of stmt.iterateFilePaths.iterate(dsId)) {
-			if (!isInScope(row.path, row.type === 'dir')) {
+			if (!isInScope(d.name, row.path, row.type === 'dir')) {
 				batch.push(row.id);
 				if (batch.length >= BATCH_SIZE) {
 					flush();
@@ -413,45 +413,14 @@ async function run(_opts = {}) {
 	// Loaded here, not at the top: importing it opens the node's own database on the pool, which
 	// nothing but an actual indexing run has any business doing.
 	const { default: DataService } = await import('../src/database/data_service.js');
-	const isInstalled = await DataService.hasApplication(INDEXED_APP);
+	const isInstalled = await DataService.hasApplication(NEXTCLOUD_APP);
 	if (isInstalled === null) {
 		console.error('Indexer: could not tell whether Nextcloud is installed; leaving the index as it is.');
 		process.exitCode = 1;
 		return;
 	}
 
-	const includeDatasets = (isInstalled ? [INDEXED_DATASET] : []);
-
-	if (!includeDatasets.length) {
-		console.log('Indexer: Nextcloud is not installed; clearing the index database.');
-		const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
-		try {
-			const db = database.open();
-			try {
-				const stmt = prepareDatasetPruneStatements(db);
-				pruneStaleIndexedDatasets(db, stmt, [], new Set());
-				database.disableBulkMode(db);
-				const lastRunAt = new Date().toISOString();
-				database.transaction(db, () => {
-					db.prepare(`
-						INSERT INTO meta(key, value) VALUES ('last_run_at', ?)
-						ON CONFLICT(key) DO UPDATE SET value = excluded.value
-					`).run(lastRunAt);
-				});
-				console.log('✅ Index database cleared (Nextcloud is not installed).');
-			} finally {
-				try {
-					db.exec('PRAGMA optimize');
-				} catch {
-					/* ignore */
-				}
-				db.close();
-			}
-		} finally {
-			utils.releaseLock(lockPath);
-		}
-		return;
-	}
+	const includeDatasets = [...(isInstalled ? [NEXTCLOUD_DATASET] : []), FOLDERS_DATASET];
 
 	const lockPath = utils.acquireLock(database.INDEX_DB_PATH);
 	try {
@@ -1117,7 +1086,7 @@ async function doCrawl(db, stmt, perf, snapId, datasetId, snapPath, fullName) {
 	let count = 0;
 	const t0 = Date.now();
 
-	const result = await walker.walkSnapshot(snapPath, (batch) => {
+	const result = await walker.walkSnapshot(fullName.split('@')[0], snapPath, (batch) => {
 		if (batch === null) {
 			return;
 		}
