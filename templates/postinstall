@@ -64,6 +64,18 @@ configure_nonlocal_bind() {
 	echo "Wrote $sysctl_file."
 }
 
+disable_mptcp() {
+	local sysctl_file="/etc/sysctl.d/90-disable-mptcp.conf"
+	local sysctl_setting="net.mptcp.enabled = 0"
+	if [ -f "$sysctl_file" ] && grep -Fxq "$sysctl_setting" "$sysctl_file"; then
+		return
+	fi
+
+	echo "$sysctl_setting" > "$sysctl_file"
+	sysctl -p "$sysctl_file" > /dev/null
+	echo "Wrote $sysctl_file."
+}
+
 install_avahi_interfaces() {
 	install -v -m 755 "$app_dir/systemd/avahi-allow-interfaces" /usr/local/sbin/avahi-allow-interfaces
 	install -v -m 644 "$app_dir/systemd/avahi-allow-interfaces.service" /lib/systemd/system/avahi-allow-interfaces.service
@@ -102,6 +114,7 @@ if ! ischroot; then
 	install_virtual_ip_unit
 	exclude_virtual_ip_from_mdns
 	configure_nonlocal_bind
+	disable_mptcp
 	install_avahi_interfaces
 	install_mdns_dispatcher
 	configure_gateway_wait
