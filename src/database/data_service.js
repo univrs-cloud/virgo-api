@@ -177,6 +177,36 @@ class DataService {
 		}
 	}
 	
+	static async getStoppedServices(name) {
+		if (!await database.ensureOpen()) {
+			return [];
+		}
+
+		try {
+			const application = await Application.findOne({ where: { name }, attributes: ['stoppedServices'], raw: true });
+			const services = JSON.parse(application?.stoppedServices || '[]');
+			return (Array.isArray(services) ? services : []);
+		} catch (error) {
+			console.error(`Error reading the stopped services of application '${name}' from database:`, error);
+			return [];
+		}
+	}
+
+	static async setStoppedServices(name, services) {
+		if (!await database.ensureOpen()) {
+			return false;
+		}
+
+		try {
+			const unique = [...new Set(services)].sort();
+			await Application.update({ stoppedServices: (unique.length > 0 ? JSON.stringify(unique) : null) }, { where: { name } });
+			return true;
+		} catch (error) {
+			console.error(`Error writing the stopped services of application '${name}' to database:`, error);
+			return false;
+		}
+	}
+
 	static async deleteApplication(name) {
 		if (!await database.ensureOpen()) {
 			return false;
