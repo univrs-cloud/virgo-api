@@ -115,9 +115,9 @@ async function workspace(t) {
 		let events = [];
 		if (previous) {
 			const raw = dataset ? parseZfsOutput(zfs('diff', '-FHt', `${dataset}@s${id - 1}`, `${dataset}@s${id}`), root) : modelEvents(previous, after);
-			events = raw.map((e) => scopeDiffEntry(e, null)).filter(Boolean);
+			events = raw.map((e) => scopeDiffEntry(e, null, DATASET)).filter(Boolean);
 		}
-		const result = { before: previous, after, events, snapPath, snap: { id, name: `s${id}`, created_at: id * 100 } };
+		const result = { before: previous, after, events, snapPath, snap: { id, name: `s${id}`, full_name: `${DATASET}@s${id}`, created_at: id * 100 } };
 		previous = after;
 		captures.set(id, after);
 		await setTimeout(10); // Separate ctime values on the host filesystem.
@@ -142,7 +142,7 @@ export function seed(db, before) {
 		(1,1,'s1','messier/apps/nextcloud@s1',100,1),(2,1,'s2','messier/apps/nextcloud@s2',200,NULL);`);
 	const stmt = prepareIndexerStatements(db);
 	for (const e of before.values()) {
-		if (!isInScope(e.path, e.type === 'dir')) continue;
+		if (!isInScope(DATASET, e.path, e.type === 'dir')) continue;
 		const id = stmt.upsertFile.get(1, e.path, Number(e.stat.ino), e.type, 1, 1).id;
 		stmt.insertVersion.run(id, 1, e.size, Number(e.stat.mtimeNs / 1000000000n), Number(e.stat.ctimeNs / 1000000000n), Number(e.stat.nlink), (Number(e.stat.mode) & 0o7777).toString(8));
 	}
