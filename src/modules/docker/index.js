@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import camelcaseKeys from 'camelcase-keys';
+import dockerCompose from 'docker-compose';
 import config from '../../../config.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
@@ -171,6 +172,53 @@ class DockerModule extends BaseModule {
 		const next = lines.join('\n');
 		if (next !== content) {
 			await fs.writeFile(envFile, next, 'utf-8');
+		}
+	}
+
+	/**
+	 * Bring an app's compose project up on its current files, keeping each service as it was: one that
+	 * was stopped is recreated but left stopped, a paused one is paused again, and one without a container
+	 * (new in the project, or an init job that removed itself) starts with the rest — unless no service
+	 * was up, in which case the whole app stays stopped.
+	 * @param {Array} containers - The app's containers as they were before the project was changed
+	 * @param {Object} options - docker-compose options (cwd, composeOptions, commandOptions, callback)
+	 */
+	async upKeepingServiceStates(containers, options) {
+		// A scaled service with one replica up counts as up.
+		const running = new Set();
+		const paused = new Set();
+		for (const container of containers) {
+			const service = container.labels?.comDockerComposeService;
+			const state = container.state?.toLowerCase();
+			if (['running', 'restarting'].includes(state)) {
+				running.add(service);
+			} else if (state === 'paused') {
+				paused.add(service);
+			}
+		}
+		for (const service of running) {
+			paused.delete(service);
+		}
+		const stopped = [...new Set(containers.map((container) => { return container.labels?.comDockerComposeService; }))].filter((service) => {
+			return service && !running.has(service) && !paused.has(service);
+		});
+		if (stopped.length === 0 && paused.size === 0) {
+			await dockerCompose.upAll(options);
+			return;
+		}
+
+		await dockerCompose.createAll(options);
+		if (running.size === 0 && paused.size === 0) {
+			return;
+		}
+
+		const projectOptions = { cwd: options.cwd, composeOptions: options.composeOptions };
+		const { data } = await dockerCompose.configServices(projectOptions);
+		const services = data.services.filter((service) => { return !stopped.includes(service); });
+		// --no-deps keeps a stopped dependency stopped; the services started still wait on each other.
+		await dockerCompose.upMany(services, { ...options, commandOptions: ['--no-deps'] });
+		for (const service of paused) {
+			await dockerCompose.pauseOne(service, projectOptions);
 		}
 	}
 

@@ -222,7 +222,7 @@ const rollbackApp = async (job, module) => {
 			}
 		});
 		await module.updateJobProgress(job, `Starting ${title}...`);
-		await dockerCompose.upAll({
+		await module.upKeepingServiceStates(containers, {
 			cwd: composeProjectDir,
 			composeOptions,
 			commandOptions: ['--force-recreate', '--remove-orphans'],
