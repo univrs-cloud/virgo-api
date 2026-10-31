@@ -4,7 +4,7 @@ import * as database from '../indexer/db.js';
 import { createSnapshotContext, finishSnapshot, flushIncrementalBatch, flushUnifiedBatch } from '../indexer/flush.js';
 import { diff, since } from '../indexer/query.js';
 import { isInScope } from '../indexer/scope.js';
-import { FILES, fixture, seed, performanceCounters, eventOrders } from './helpers/indexer-fixture.js';
+import { DATASET, FILES, fixture, seed, performanceCounters, eventOrders } from './helpers/indexer-fixture.js';
 
 const TRASH = '/data/user/files_trashbin/files';
 
@@ -237,7 +237,7 @@ function assertIndexMatchesFilesystem(db, f) {
 	const live = db.prepare(`SELECT f.id, f.path, f.type, f.inode,
 		(SELECT size FROM file_versions WHERE file_id=f.id ORDER BY snapshot_id DESC LIMIT 1) AS size
 		FROM files f WHERE deleted_at_snap_id IS NULL ORDER BY path`).all().map((r) => ({ ...r }));
-	const inScope = (entries) => { return [...entries.values()].filter((e) => isInScope(e.path, e.type === 'dir')); };
+	const inScope = (entries) => { return [...entries.values()].filter((e) => isInScope(DATASET, e.path, e.type === 'dir')); };
 	const expected = inScope(f.after)
 		.map((e) => ({ path: e.path, type: e.type, inode: Number(e.stat.ino), size: e.size }))
 		.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -258,13 +258,13 @@ function assertHistoriesFollowObjects(db, f) {
 	const liveAt = db.prepare(`SELECT id, type FROM files WHERE path = ? AND deleted_at_snap_id IS NULL`);
 
 	for (const entry of f.after.values()) {
-		if (!isInScope(entry.path, entry.type === 'dir')) {
+		if (!isInScope(DATASET, entry.path, entry.type === 'dir')) {
 			continue;
 		}
 		const row = liveAt.get(entry.path);
 		const origin = before.get(objectKey(entry));
 		const began = firstVersion.get(row.id)?.path ?? null;
-		if (origin && isInScope(origin.path, origin.type === 'dir')) {
+		if (origin && isInScope(DATASET, origin.path, origin.type === 'dir')) {
 			assert.equal(began, origin.path, `${entry.path} must carry the history of the object that was ${origin.path}`);
 		} else if (began !== null) {
 			assert.equal(began, entry.path, `${entry.path} is a new object and may only continue a history of its own name`);
@@ -273,12 +273,12 @@ function assertHistoriesFollowObjects(db, f) {
 	}
 
 	for (const entry of f.before.values()) {
-		if (!isInScope(entry.path, entry.type === 'dir')) {
+		if (!isInScope(DATASET, entry.path, entry.type === 'dir')) {
 			continue;
 		}
 		const survivor = after.get(objectKey(entry));
 		const replacement = f.after.get(entry.path);
-		if ((survivor && isInScope(survivor.path, survivor.type === 'dir')) || (replacement && replacement.type === entry.type && !before.has(objectKey(replacement)))) {
+		if ((survivor && isInScope(DATASET, survivor.path, survivor.type === 'dir')) || (replacement && replacement.type === entry.type && !before.has(objectKey(replacement)))) {
 			continue;
 		}
 		const gone = db.prepare(`SELECT COUNT(*) AS n FROM files f JOIN file_versions v ON v.file_id = f.id AND v.snapshot_id = 1
@@ -299,7 +299,7 @@ for (const scenario of scenarios) {
 						const db = database.open(':memory:');
 						try {
 							const stmt = seed(db, f.before), context = createSnapshotContext();
-							const snap = { id: 2, name: 's2', created_at: 200 };
+							const snap = { id: 2, name: 's2', full_name: `${DATASET}@s2`, created_at: 200 };
 							const perf = performanceCounters();
 							await database.atomic(db, async () => {
 								for (let i = 0; i < events.length; i += batchSize) await handler(db, stmt, perf, events.slice(i, i + batchSize), snap, 1, null, f.snapPath, context);

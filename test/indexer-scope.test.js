@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isInScope, isTrash } from '../indexer/scope.js';
+import { NEXTCLOUD_DATASET, isInScope, isTrash } from '../indexer/scope.js';
 import { parseDiffLine, scopeDiffEntry } from '../indexer/zfs.js';
 
 const MOUNT = '/messier/apps/nextcloud';
@@ -22,20 +22,20 @@ test('only users\' files, their trash and group folders are indexed', () => {
 		['/config/config.php', false, false],
 	];
 	for (const [path, isDir, expected] of cases) {
-		assert.equal(isInScope(path, isDir), expected, path);
+		assert.equal(isInScope(NEXTCLOUD_DATASET, path, isDir), expected, path);
 	}
 });
 
 test('a path is in the trash only inside a user\'s own trash folder', () => {
-	assert.equal(isTrash('/data/olivia/files_trashbin/files/report.pdf.d1776185835'), true);
-	assert.equal(isTrash('/data/olivia/files/files_trashbin/report.pdf'), false);
-	assert.equal(isTrash('/data/__groupfolders/files_trashbin/x'), false);
-	assert.equal(isTrash('/data/olivia/files/report.pdf'), false);
+	assert.equal(isTrash(NEXTCLOUD_DATASET, '/data/olivia/files_trashbin/files/report.pdf.d1776185835'), true);
+	assert.equal(isTrash(NEXTCLOUD_DATASET, '/data/olivia/files/files_trashbin/report.pdf'), false);
+	assert.equal(isTrash(NEXTCLOUD_DATASET, '/data/__groupfolders/files_trashbin/x'), false);
+	assert.equal(isTrash(NEXTCLOUD_DATASET, '/data/olivia/files/report.pdf'), false);
 });
 
 test('a rename across the edge of the indexed scope becomes an addition or a removal', () => {
 	const rename = (fileType, from, to) => {
-		const entry = scopeDiffEntry({ changeType: 'renamed', fileType, path: MOUNT + from, newPath: MOUNT + to, changedAt: 1 }, MOUNT);
+		const entry = scopeDiffEntry({ changeType: 'renamed', fileType, path: MOUNT + from, newPath: MOUNT + to, changedAt: 1 }, MOUNT, NEXTCLOUD_DATASET);
 		return entry && { changeType: entry.changeType, path: entry.path.slice(MOUNT.length), newPath: entry.newPath?.slice(MOUNT.length) ?? null, isSubtree: entry.isSubtree ?? false };
 	};
 	assert.deepEqual(rename('dir', '/data/olivia/cache/In', '/data/olivia/files/In'), { changeType: 'added', path: '/data/olivia/files/In', newPath: null, isSubtree: true });
@@ -48,7 +48,7 @@ test('a rename across the edge of the indexed scope becomes an addition or a rem
 });
 
 test('an event that is not a rename is kept only when its path is indexed', () => {
-	const event = (changeType, path) => scopeDiffEntry({ changeType, fileType: 'file', path: MOUNT + path, newPath: null, changedAt: 1 }, MOUNT);
+	const event = (changeType, path) => scopeDiffEntry({ changeType, fileType: 'file', path: MOUNT + path, newPath: null, changedAt: 1 }, MOUNT, NEXTCLOUD_DATASET);
 	assert.equal(event('modified', '/data/olivia/files/report.pdf')?.changeType, 'modified');
 	assert.equal(event('added', '/data/olivia/cache/thumb'), null);
 	assert.equal(event('removed', '/data/appdata_abc/preview/1.jpg'), null);
