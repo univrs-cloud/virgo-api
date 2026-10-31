@@ -32,6 +32,11 @@ const Application = sequelize.define('Application', {
 	canEmbed: {
 		type: DataTypes.BOOLEAN,
 		allowNull: true
+	},
+	// JSON list of the compose services the user stopped, kept stopped through an app update.
+	stoppedServices: {
+		type: DataTypes.TEXT,
+		allowNull: true
 	}
 });
 

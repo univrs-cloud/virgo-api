@@ -103,7 +103,7 @@ const updateApp = async (job, module) => {
 		}
 	});
 	await module.updateJobProgress(job, `Updating ${existingApp.title}...`);
-	await module.upKeepingServiceStates(containers, {
+	await module.upKeepingServiceStates(config.name, containers, {
 		cwd: composeProjectDir,
 		composeOptions: [['-p', composeProject]],
 		commandOptions: ['--remove-orphans'],
