@@ -9,6 +9,10 @@ import * as sanoid from '../../utils/sanoid.js';
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause', 'remove'];
 const allowedUnmanagedActions = ['start', 'stop', 'kill', 'restart'];
+// A container that exited on its own looks the same as one the user stopped, so what the user asked for is
+// recorded: an app update keeps these services stopped and starts everything else, crashed ones included.
+const stoppingActions = ['stop', 'kill'];
+const startingActions = ['start', 'restart', 'recreate'];
 
 /** Recreating is how a broken or outdated app is put back together, so it is built from the template
  * again rather than from whatever is on disk. The project's `.env` is left alone: that is the
@@ -77,6 +81,12 @@ const performAppAction = async (job, module) => {
 	await execa('docker', ['compose', '-p', composeProject, ...composeFiles.flatMap((file) => { return ['-f', file]; }), ...action], {
 		cwd: composeProjectDir
 	});
+	if (existingApp && stoppingActions.includes(config.action)) {
+		const services = containers.map((container) => { return container.labels?.comDockerComposeService; }).filter(Boolean);
+		await DataService.setStoppedServices(config.name, services);
+	} else if (existingApp && startingActions.includes(config.action)) {
+		await DataService.setStoppedServices(config.name, []);
+	}
 	if (config.action === 'uninstall') {
 		await DataService.deleteApplication(config.name);
 		try {
@@ -125,6 +135,14 @@ const performServiceAction = async (job, module) => {
 			await docker.getContainer(container.id).remove({ force: true });
 		} else {
 			await docker.getContainer(container.id)[config.action]();
+		}
+
+		const project = container.labels?.comDockerComposeProject;
+		const service = container.labels?.comDockerComposeService;
+		const changesIntent = stoppingActions.includes(config.action) || startingActions.includes(config.action);
+		if (project && service && changesIntent && await DataService.hasApplication(project)) {
+			const stopped = (await DataService.getStoppedServices(project)).filter((name) => { return name !== service; });
+			await DataService.setStoppedServices(project, (stoppingActions.includes(config.action) ? [...stopped, service] : stopped));
 		}
 	});
 	return `${serviceName} service ${actionVerbs.pastTense}.`;

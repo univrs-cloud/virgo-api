@@ -19,6 +19,9 @@
 		const { default: addSampleArc } = await import('./006_add_sample_arc.js');
 		await addSampleArc();
 
+		const { default: addApplicationStoppedServices } = await import('./007_add_application_stopped_services.js');
+		await addApplicationStoppedServices();
+
 		console.log(`Post install completed successfully!`);
 	} catch (error) {
 		console.error(`Post install failed:`, error);

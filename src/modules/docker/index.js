@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import camelcaseKeys from 'camelcase-keys';
+import dockerCompose from 'docker-compose';
 import config from '../../../config.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
@@ -174,6 +175,60 @@ class DockerModule extends BaseModule {
 		}
 	}
 
+	/**
+	 * Bring an app's compose project up on its current files and start every service, except the ones the
+	 * user stopped: those are recreated but left stopped, and a paused one is paused again. A service that
+	 * exited on its own was not stopped by the user, so it is started. A dependency of a service that is
+	 * started is started too, even if the user stopped it, since the service would not work without it.
+	 * When the user stopped every service, the app stays stopped.
+	 * @param {String} appName - The app whose stopped services are kept stopped
+	 * @param {Array} containers - The app's containers as they were before the project was changed
+	 * @param {Object} options - docker-compose options (cwd, composeOptions, commandOptions, callback)
+	 */
+	async upKeepingServiceStates(appName, containers, options) {
+		// A service whose replicas differ takes the most active state: running, then paused, then stopped.
+		const rank = { stopped: 0, paused: 1, running: 2 };
+		const states = new Map();
+		for (const container of containers) {
+			const service = container.labels?.comDockerComposeService;
+			if (!service) {
+				continue;
+			}
+
+			const state = String(container.state ?? '').toLowerCase();
+			const current = (['running', 'restarting'].includes(state) ? 'running' : (state === 'paused' ? 'paused' : 'stopped'));
+			if (!states.has(service) || rank[current] > rank[states.get(service)]) {
+				states.set(service, current);
+			}
+		}
+
+		// The user's word only counts while the service is still stopped: one started since then is started again.
+		const projectOptions = { cwd: options.cwd, composeOptions: options.composeOptions };
+		const { data } = await dockerCompose.configServices(projectOptions);
+		const services = data.services;
+		const stopped = (await DataService.getStoppedServices(appName)).filter((service) => {
+			return services.includes(service) && states.get(service) === 'stopped';
+		});
+		await DataService.setStoppedServices(appName, stopped);
+		const paused = services.filter((service) => { return states.get(service) === 'paused'; });
+		if (stopped.length === 0 && paused.length === 0) {
+			await dockerCompose.upAll(options);
+			return;
+		}
+
+		await dockerCompose.createAll(options);
+		const allStopped = [...states.keys()].every((service) => { return stopped.includes(service); });
+		const toStart = services.filter((service) => { return !stopped.includes(service); });
+		if (allStopped || toStart.length === 0) {
+			return;
+		}
+
+		await dockerCompose.upMany(toStart, options);
+		for (const service of paused) {
+			await dockerCompose.pauseOne(service, projectOptions);
+		}
+	}
+
 	async hasDatasetMounts(appName) {
 		const containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
 		const prefix = `${this.appsDir}/${appName}/`.toLowerCase();
@@ -262,6 +317,8 @@ class DockerModule extends BaseModule {
 		this.emitState('templates');
 	}
 }
+
+export { DockerModule };
 
 export default () => {
 	return new DockerModule();
