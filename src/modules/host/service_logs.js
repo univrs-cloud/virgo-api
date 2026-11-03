@@ -1,5 +1,8 @@
 import { execa } from 'execa';
 
+const OUTPUT_IDLE_MS = 10;
+const OUTPUT_MAX_WAIT_MS = 250;
+
 // Track active log sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
 
@@ -12,6 +15,7 @@ const cleanupSession = (socket) => {
 	socket.off('host:service:logs:disconnect', session.disconnectHandler);
 	socket.off('disconnect', session.socketDisconnectHandler);
 	session.process?.kill();
+	session.flushOutput();
 	activeSessions.delete(socket);
 };
 
@@ -30,10 +34,34 @@ const serviceLogsConnect = async (socket, serviceName) => {
 			cleanupSession(socket);
 		};
 
+		let pendingLines = [];
+		let idleTimer = null;
+		let maxWaitTimer = null;
+		const flushOutput = () => {
+			clearTimeout(idleTimer);
+			clearTimeout(maxWaitTimer);
+			idleTimer = null;
+			maxWaitTimer = null;
+			if (pendingLines.length === 0) {
+				return;
+			}
+
+			socket.emit('host:service:logs:output', pendingLines);
+			pendingLines = [];
+		};
+		const scheduleFlush = () => {
+			clearTimeout(idleTimer);
+			idleTimer = setTimeout(flushOutput, OUTPUT_IDLE_MS);
+			if (!maxWaitTimer) {
+				maxWaitTimer = setTimeout(flushOutput, OUTPUT_MAX_WAIT_MS);
+			}
+		};
+
 		activeSessions.set(socket, {
 			process: journalProcess,
 			disconnectHandler,
-			socketDisconnectHandler
+			socketDisconnectHandler,
+			flushOutput
 		});
 
 		let buffer = '';
@@ -41,9 +69,12 @@ const serviceLogsConnect = async (socket, serviceName) => {
 			buffer += chunk.toString('utf8');
 			const lines = buffer.split('\n');
 			buffer = lines.pop();
-			for (const line of lines) {
-				socket.emit('host:service:logs:output', line + '\n');
+			if (lines.length === 0) {
+				return;
 			}
+
+			pendingLines.push(...lines);
+			scheduleFlush();
 		};
 
 		journalProcess.stdout.on('data', emitLines);
