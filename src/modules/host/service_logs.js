@@ -17,6 +17,7 @@ const cleanupSession = (socket) => {
 	session.process?.kill();
 	session.flushOutput();
 	activeSessions.delete(socket);
+	socket.emit('host:service:logs:disconnected');
 };
 
 const serviceLogsConnect = async (socket, serviceName) => {
