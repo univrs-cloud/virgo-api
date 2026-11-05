@@ -42,45 +42,45 @@ const updateFolder = async (job, module) => {
 	return `Folder ${name} updated.`;
 };
 
-const updateTimeMachine = async (job, module) => {
+const updateBackupDisk = async (job, module) => {
 	const { config } = job.data;
 	const { name, validUsers = [], refquota: refquotaRaw } = config;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
 	let shares = {};
 	try {
-		shares = ini.parse(fs.readFileSync(module.timeMachinesConf, 'utf8'));
+		shares = ini.parse(fs.readFileSync(module.backupDisksConf, 'utf8'));
 	} catch (error) {
 		throw new Error(`Cannot read config: ${error.message}`);
 	}
 
 	const share = shares[name];
 	if (!share) {
-		throw new Error(`Time machine "${name}" not found in config.`);
+		throw new Error(`Backup disk "${name}" not found in config.`);
 	}
 
 	if (!share.path) {
-		throw new Error(`Time machine "${name}" has no path.`);
+		throw new Error(`Backup disk "${name}" has no path.`);
 	}
 
-	const path = (share.path.startsWith('/time_machines/') ? share.path : null);
+	const path = (share.path.startsWith('/time_capsule/') ? share.path : null);
 	const dataset = await module.pathToZfsDataset(path);
 	if (dataset === null) {
 		throw new Error(`No dataset found for mountpoint "${share.path}".`);
 	}
 
-	await module.updateJobProgress(job, `Updating time machine ${name}...`);
+	await module.updateJobProgress(job, `Updating backup disk ${name}...`);
 	await execa('zfs', ['set', `refquota=${refquota}`, dataset]);
 	share['valid users'] = validUsers.join(' ');
-	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
+	fs.writeFileSync(module.backupDisksConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Time machine ${name} updated.`;
+	return `Backup disk ${name} updated.`;
 };
 
 const updateShare = async (job, module) => {
 	const { config } = job.data;
 	const { type } = config;
-	const validTypes = ['folder', 'timeMachine'];
+	const validTypes = ['folder', 'backupDisk'];
 	if (!type || !validTypes.includes(type)) {
 		throw new Error(`Share type is required and must be one of: ${validTypes.join(', ')}.`);
 	}
@@ -89,8 +89,8 @@ const updateShare = async (job, module) => {
 		return updateFolder(job, module);
 	}
 
-	if (type === 'timeMachine') {
-		return updateTimeMachine(job, module);
+	if (type === 'backupDisk') {
+		return updateBackupDisk(job, module);
 	}
 
 	throw new Error(`Share type "${type}" is not yet implemented.`);

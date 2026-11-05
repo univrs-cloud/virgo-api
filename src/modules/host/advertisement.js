@@ -120,12 +120,12 @@ ${txt}
 `;
 };
 
-const buildClusterDocument = ({ name, hostName, model, timeMachines }) => {
+const buildClusterDocument = ({ name, hostName, model, backupDisks }) => {
 	const host = `\n    <host-name>${escapeXml(hostName)}</host-name>`;
-	const disks = timeMachines.map((share, index) => {
+	const disks = backupDisks.map((share, index) => {
 		return `\n    <txt-record>${escapeXml(`dk${index}=adVN=${share},adVF=0x82`)}</txt-record>`;
 	}).join('');
-	const adisk = (timeMachines.length > 0 ? `
+	const adisk = (backupDisks.length > 0 ? `
   <service>
     <type>_adisk._tcp</type>
     <port>0</port>${host}${disks}
@@ -238,11 +238,11 @@ const announceCluster = async () => {
 
 	const { stdout } = await execa('testparm', ['-s', '-l']);
 	const samba = ini.parse(stdout);
-	const timeMachines = Object.keys(samba).filter((share) => { return String(samba[share]['fruit:time machine'] || '').toLowerCase() === 'yes'; });
+	const backupDisks = Object.keys(samba).filter((share) => { return String(samba[share]['fruit:time machine'] || '').toLowerCase() === 'yes'; });
 	const model = (samba.global?.['fruit:model'] || 'MacSamba');
 
 	await writeFile(HOSTS_FILE, `${virtualIp.address} ${name}.local\n`);
-	await writeFile(CLUSTER_SERVICE_FILE, buildClusterDocument({ name, hostName: `${name}.local`, model, timeMachines }));
+	await writeFile(CLUSTER_SERVICE_FILE, buildClusterDocument({ name, hostName: `${name}.local`, model, backupDisks }));
 };
 
 /** Serialize advertisements so multiple events cannot race on the temporary file. */

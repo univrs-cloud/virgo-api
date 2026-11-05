@@ -4,7 +4,7 @@ import path from 'path';
 import { execa } from 'execa';
 import ini from 'ini';
 import BaseModule from '../base.js';
-import TimeMachine from '../../utils/time_machine.js';
+import BackupDisk from '../../utils/backup_disk.js';
 import * as sanoid from '../../utils/sanoid.js';
 
 class ShareModule extends BaseModule {
@@ -13,9 +13,9 @@ class ShareModule extends BaseModule {
 		'/messier/.shares'
 	];
 	#foldersConf = '/messier/.shares/folders.conf';
-	#timeMachinesConf = '/messier/.shares/time_machines.conf';
+	#backupDisksConf = '/messier/.shares/time_capsule.conf';
 	#foldersDataset = 'messier/folders';
-	#timeMachinesDataset = 'messier/time_machines';
+	#backupDisksDataset = 'messier/time_capsule';
 	constructor() {
 		super('share');
 
@@ -44,21 +44,21 @@ class ShareModule extends BaseModule {
 		return this.#foldersConf;
 	}
 
-	get timeMachinesConf() {
-		return this.#timeMachinesConf;
+	get backupDisksConf() {
+		return this.#backupDisksConf;
 	}
 
 	get foldersDataset() {
 		return this.#foldersDataset;
 	}
 
-	get timeMachinesDataset() {
-		return this.#timeMachinesDataset;
+	get backupDisksDataset() {
+		return this.#backupDisksDataset;
 	}
 
 	async findFolderShareConfigFile(name) {
 		const dir = path.dirname(this.foldersConf);
-		const timeMachinesConfName = path.basename(this.timeMachinesConf);
+		const backupDisksConfName = path.basename(this.backupDisksConf);
 		let entries;
 		try {
 			entries = await fs.readdir(dir, { withFileTypes: true });
@@ -69,7 +69,7 @@ class ShareModule extends BaseModule {
 			if (!entry.isFile() || !entry.name.endsWith('.conf')) {
 				continue;
 			}
-			if (entry.name === timeMachinesConfName) {
+			if (entry.name === backupDisksConfName) {
 				continue;
 			}
 			const filepath = path.join(dir, entry.name);
@@ -227,7 +227,7 @@ class ShareModule extends BaseModule {
 						savedbycompression: 0
 					},
 					isPrivate: (value['guest ok']?.toLowerCase() !== 'yes'),
-					isTimeMachine: (value['fruit:time machine'] === 'yes')
+					isBackupDisk: (value['fruit:time machine'] === 'yes')
 				};
 				try {
 					const dataset = datasetByMountpoint.get(value['path']);
@@ -257,12 +257,12 @@ class ShareModule extends BaseModule {
 				} catch (error) {
 					console.error(`Error checking disk space for ${name}:`, error);
 				}
-				if (share.isTimeMachine && share.path) {
+				if (share.isBackupDisk && share.path) {
 					try {
-						const tm = new TimeMachine(share.path);
-						share.timeMachine = await tm.getInfo();
+						const disk = new BackupDisk(share.path);
+						share.backups = await disk.getInfo();
 					} catch (error) {
-						share.timeMachine = null;
+						share.backups = null;
 					}
 				}
 				return share;

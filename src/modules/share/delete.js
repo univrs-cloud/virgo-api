@@ -47,44 +47,44 @@ const deleteFolder = async (job, module) => {
 	return `Folder ${share.comment} deleted.`;
 };
 
-const deleteTimeMachine = async (job, module) => {
+const deleteBackupDisk = async (job, module) => {
 	const { config } = job.data;
 	const { name } = config;
 	let shares = {};
 	try {
-		shares = ini.parse(fs.readFileSync(module.timeMachinesConf, 'utf8'));
+		shares = ini.parse(fs.readFileSync(module.backupDisksConf, 'utf8'));
 	} catch (error) {
 		throw new Error(`Cannot read config: ${error.message}`);
 	}
 	
 	const share = shares[name];
 	if (!share) {
-		throw new Error(`Time machine "${name}" not found in config.`);
+		throw new Error(`Backup disk "${name}" not found in config.`);
 	}
 
 	if (!share.path) {
-		throw new Error(`Time machine "${share.comment}" has no path.`);
+		throw new Error(`Backup disk "${share.comment}" has no path.`);
 	}
 
-	const path = (share.path.startsWith('/time_machines/') ? share.path : null);
+	const path = (share.path.startsWith('/time_capsule/') ? share.path : null);
 	const dataset = await module.pathToZfsDataset(path);
 	if (dataset === null) {
 		throw new Error(`Cannot derive dataset from path "${share.path}".`);
 	}
 
-	await module.updateJobProgress(job, `Deleting time machine ${share.comment}...`);
+	await module.updateJobProgress(job, `Deleting backup disk ${share.comment}...`);
 	await execa('zfs', ['destroy', '-r', dataset]);
 	delete shares[name];
-	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
+	fs.writeFileSync(module.backupDisksConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Time machine ${share.comment} deleted.`;
+	return `Backup disk ${share.comment} deleted.`;
 };
 
 const deleteShare = async (job, module) => {
 	const { config } = job.data;
 	const { type } = config;
-	const validTypes = ['folder', 'timeMachine'];
+	const validTypes = ['folder', 'backupDisk'];
 	if (!type || !validTypes.includes(type)) {
 		throw new Error(`Share type is required and must be one of: ${validTypes.join(', ')}.`);
 	}
@@ -93,8 +93,8 @@ const deleteShare = async (job, module) => {
 		return deleteFolder(job, module);
 	}
 
-	if (type === 'timeMachine') {
-		return deleteTimeMachine(job, module);
+	if (type === 'backupDisk') {
+		return deleteBackupDisk(job, module);
 	}
 
 	throw new Error(`Share type "${type}" is not yet implemented.`);

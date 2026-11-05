@@ -86,25 +86,25 @@ const createFolder = async (job, module) => {
 	}
 };
 
-const createTimeMachine = async (job, module) => {
+const createBackupDisk = async (job, module) => {
 	const { config } = job.data;
 	const { comment, validUsers = [], refquota: refquotaRaw } = config;
-	const dataset = `${module.timeMachinesDataset}/${slug(comment)}`;
+	const dataset = `${module.backupDisksDataset}/${slug(comment)}`;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
-	await module.updateJobProgress(job, `Creating time machine ${comment}...`);
+	await module.updateJobProgress(job, `Creating backup disk ${comment}...`);
 	const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
 	if (datasetExists !== 0) {
 		await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
 	}
 	let shares = {};
 	try {
-		const existingConf = fs.readFileSync(module.timeMachinesConf, 'utf8');
+		const existingConf = fs.readFileSync(module.backupDisksConf, 'utf8');
 		shares = ini.parse(existingConf);
 	} catch {
 		// missing or unreadable: treat as empty and write new file
 	}
-	shares[`time_machine_${slug(comment)}`] = {
-		path: `/time_machines/${slug(comment)}`,
+	shares[`backup_disk_${slug(comment)}`] = {
+		path: `/time_capsule/${slug(comment)}`,
 		comment,
 		'browseable': 'yes',
 		'writable': 'yes',
@@ -125,20 +125,20 @@ const createTimeMachine = async (job, module) => {
 		'fruit:delete_empty_adfiles': 'yes',
 		'fruit:wipe_intentionally_left_blank_rfork': 'yes'
 	};
-	const dir = path.dirname(module.timeMachinesConf);
+	const dir = path.dirname(module.backupDisksConf);
 	if (!fs.existsSync(dir)) {
 		fs.mkdirSync(dir, { recursive: true });
 	}
-	fs.writeFileSync(module.timeMachinesConf, ini.stringify(shares), 'utf8');
+	fs.writeFileSync(module.backupDisksConf, ini.stringify(shares), 'utf8');
 	await execa('smbcontrol', ['all', 'reload-config']);
 	module.eventEmitter.emit('shares:updated');
-	return `Time machine ${comment} created.`;
+	return `Backup disk ${comment} created.`;
 };
 
 const createShare = async (job, module) => {
 	const { config } = job.data;
 	const { type } = config;
-	const validTypes = ['folder', 'timeMachine'];
+	const validTypes = ['folder', 'backupDisk'];
 	if (!type || !validTypes.includes(type)) {
 		throw new Error(`Share type is required and must be one of: ${validTypes.join(', ')}.`);
 	}
@@ -147,8 +147,8 @@ const createShare = async (job, module) => {
 		return createFolder(job, module);
 	}
 
-	if (type === 'timeMachine') {
-		return createTimeMachine(job, module);
+	if (type === 'backupDisk') {
+		return createBackupDisk(job, module);
 	}
 
 	throw new Error(`Share type "${type}" is not yet implemented.`);

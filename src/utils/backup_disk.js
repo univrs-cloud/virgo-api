@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-class TimeMachine {
+class BackupDisk {
 	#backupPath;
 	#plistParserPromise;
 
@@ -45,7 +45,7 @@ class TimeMachine {
 	 */
 	async getInfo() {
 		try {
-			const machines = await TimeMachine.getMachines(this.#backupPath);
+			const machines = await BackupDisk.getMachines(this.#backupPath);
 			const info = await Promise.all(
 				machines.map(async (machine) => {
 					const snapshots = await this.#getSnapshots(machine.snapshotHistoryPath);
@@ -97,4 +97,4 @@ class TimeMachine {
 	}
 }
 
-export default TimeMachine;
+export default BackupDisk;

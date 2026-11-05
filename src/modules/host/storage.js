@@ -13,7 +13,7 @@ const DATASETS = [
 	{ name: `${POOL_NAME}/containerd`, options: ['-o', 'mountpoint=/var/lib/containerd'] },
 	{ name: `${POOL_NAME}/apps`, options: [] },
 	{ name: `${POOL_NAME}/folders`, options: [] },
-	{ name: `${POOL_NAME}/time_machines`, options: ['-o', 'mountpoint=/time_machines'] },
+	{ name: `${POOL_NAME}/time_capsule`, options: ['-o', 'mountpoint=/time_capsule'] },
 	{ name: `${POOL_NAME}/downloads`, options: [] }
 ];
 // Stop order; starting walks it backwards so containerd is up before docker wants it.
@@ -27,7 +27,7 @@ const DOCKER_NETWORK = ['--driver=bridge', '--subnet=172.30.0.0/16', '--ip-range
 const BY_ID_DIR = '/dev/disk/by-id';
 const SHARES_DIR = `/${POOL_NAME}/.shares`;
 const CONFIG_DIR = `/${POOL_NAME}/.config`;
-const SHARE_FILES = ['downloads.conf', 'folders.conf', 'time_machines.conf'];
+const SHARE_FILES = ['downloads.conf', 'folders.conf', 'time_capsule.conf'];
 const OWNER = 'voyager:users';
 
 let scanning = null;

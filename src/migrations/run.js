@@ -19,6 +19,9 @@
 		const { default: addSampleArc } = await import('./006_add_sample_arc.js');
 		await addSampleArc();
 
+		const { default: renameTimeMachinesToTimeCapsule } = await import('./007_rename_time_machines_to_time_capsule.js');
+		await renameTimeMachinesToTimeCapsule();
+
 		console.log(`Post install completed successfully!`);
 	} catch (error) {
 		console.error(`Post install failed:`, error);
