@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { setTimeout as sleep } from 'timers/promises';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
 
@@ -18,6 +19,10 @@ const NEW_SHARE_PREFIX = 'backup_disk_';
 const OLD_SHARE_SECTION = new RegExp(`^(\\s*\\[)${OLD_SHARE_PREFIX}`, 'gmi');
 const OLD_SHARE_PATH = new RegExp(`^(\\s*path\\s*=\\s*)${OLD_MOUNTPOINT}/`, 'gmi');
 const SAMBA_UNIT = 'smbd.service';
+const SAMBA_PROCESS = 'smbd';
+const STOP_ATTEMPTS = 30;
+const UNMOUNT_ATTEMPTS = 10;
+const RETRY_INTERVAL = 1000;
 
 const exists = async (target) => {
 	try {
@@ -31,6 +36,36 @@ const exists = async (target) => {
 const datasetExists = async (name) => {
 	const { exitCode } = await execa('zfs', ['list', '-H', '-o', 'name', name], { reject: false });
 	return exitCode === 0;
+};
+
+const stopSamba = async () => {
+	await execa('systemctl', ['stop', SAMBA_UNIT], { reject: false });
+	for (let attempt = 0; attempt < STOP_ATTEMPTS; attempt++) {
+		const { exitCode } = await execa('pgrep', [SAMBA_PROCESS], { reject: false });
+		if (exitCode !== 0) {
+			return;
+		}
+
+		await sleep(RETRY_INTERVAL);
+	}
+
+	console.log(`Samba is still running after ${STOP_ATTEMPTS} seconds.`);
+};
+
+const setMountpoint = async () => {
+	for (let attempt = 1; ; attempt++) {
+		const result = await execa('zfs', ['set', `mountpoint=${NEW_MOUNTPOINT}`, NEW_DATASET], { reject: false });
+		if (result.exitCode === 0) {
+			return;
+		}
+
+		if (attempt >= UNMOUNT_ATTEMPTS || !result.stderr.toLowerCase().includes('busy')) {
+			throw new Error(result.stderr || result.shortMessage);
+		}
+
+		console.log(`${OLD_MOUNTPOINT} is busy. Trying again in a second...`);
+		await sleep(RETRY_INTERVAL);
+	}
 };
 
 const renameDataset = async () => {
@@ -51,7 +86,7 @@ const renameDataset = async () => {
 
 	const { stdout: mountpoint } = await execa('zfs', ['get', '-H', '-o', 'value', 'mountpoint', NEW_DATASET]);
 	if (mountpoint.trim() !== NEW_MOUNTPOINT) {
-		await execa('zfs', ['set', `mountpoint=${NEW_MOUNTPOINT}`, NEW_DATASET]);
+		await setMountpoint();
 		await fs.rmdir(OLD_MOUNTPOINT).catch(() => {});
 		console.log(`Mounted ${NEW_DATASET} at ${NEW_MOUNTPOINT}.`);
 	}
@@ -114,7 +149,7 @@ const renameTimeMachinesToTimeCapsule = async () => {
 			return;
 		}
 
-		await execa('systemctl', ['stop', SAMBA_UNIT], { reject: false });
+		await stopSamba();
 		try {
 			if (await renameDataset() && await renameConfiguration()) {
 				await rewriteShares();
