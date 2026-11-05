@@ -68,16 +68,16 @@ const unmount = async (dataset) => {
 	}
 };
 
-const unmountTree = async (dataset) => {
-	const { stdout } = await execa('zfs', ['list', '-H', '-r', '-t', 'filesystem', '-o', 'name,mounted', dataset]);
-	const mounted = stdout.split('\n')
+const listTree = async (dataset) => {
+	const { stdout } = await execa('zfs', ['list', '-H', '-r', '-t', 'filesystem', '-o', 'name,mountpoint,mounted', dataset]);
+	return stdout.split('\n')
 		.map((line) => { return line.split('\t'); })
-		.filter(([name, isMounted]) => { return name && (isMounted || '').toLowerCase() === 'yes'; })
-		.map(([name]) => { return name; })
-		.reverse();
-	for (const name of mounted) {
-		await unmount(name);
-	}
+		.filter(([name]) => { return Boolean(name); })
+		.map(([name, mountpoint, mounted]) => { return { name, mountpoint, isMounted: (mounted || '').toLowerCase() === 'yes' }; });
+};
+
+const isOldMountpoint = (mountpoint) => {
+	return mountpoint === OLD_MOUNTPOINT || mountpoint.startsWith(`${OLD_MOUNTPOINT}/`);
 };
 
 const renameDataset = async () => {
@@ -88,31 +88,35 @@ const renameDataset = async () => {
 		return false;
 	}
 
-	if (!hasOld && !hasNew) {
-		console.log(`Neither ${OLD_DATASET} nor ${NEW_DATASET} exists. Skipping the dataset rename.`);
-		return false;
+	if (!hasOld) {
+		if (!hasNew) {
+			console.log(`Neither ${OLD_DATASET} nor ${NEW_DATASET} exists. Skipping the dataset rename.`);
+		}
+		return hasNew;
 	}
 
-	const dataset = (hasOld ? OLD_DATASET : NEW_DATASET);
-	const { stdout: mountpoint } = await execa('zfs', ['get', '-H', '-o', 'value', 'mountpoint', dataset]);
-	const isMoved = (mountpoint.trim() === NEW_MOUNTPOINT);
-	if (!hasOld && isMoved) {
-		return true;
+	const tree = await listTree(OLD_DATASET);
+	for (const { name } of [...tree].reverse().filter(({ isMounted }) => { return isMounted; })) {
+		await unmount(name);
 	}
 
-	await unmountTree(dataset);
-	if (hasOld) {
-		await execa('zfs', ['rename', '-u', OLD_DATASET, NEW_DATASET]);
-		console.log(`Renamed ${OLD_DATASET} to ${NEW_DATASET}.`);
-	}
-
-	if (!isMoved) {
-		await execa('zfs', ['set', `mountpoint=${NEW_MOUNTPOINT}`, NEW_DATASET]);
+	await execa('zfs', ['rename', '-u', OLD_DATASET, NEW_DATASET]);
+	console.log(`Renamed ${OLD_DATASET} to ${NEW_DATASET}.`);
+	await execa('zfs', ['set', `mountpoint=${NEW_MOUNTPOINT}`, NEW_DATASET]);
+	for (const { name, mountpoint } of tree) {
+		if (name !== OLD_DATASET && isOldMountpoint(mountpoint)) {
+			await execa('zfs', ['inherit', 'mountpoint', `${NEW_DATASET}${name.slice(OLD_DATASET.length)}`]);
+		}
 	}
 
 	await execa('zfs', ['mount', '-a']);
 	await fs.rmdir(OLD_MOUNTPOINT).catch(() => {});
-	console.log(`Mounted ${NEW_DATASET} at ${NEW_MOUNTPOINT}.`);
+	const misplaced = (await listTree(NEW_DATASET)).filter(({ mountpoint }) => { return !mountpoint.startsWith(NEW_MOUNTPOINT); });
+	if (misplaced.length > 0) {
+		throw new Error(`Still not under ${NEW_MOUNTPOINT}: ${misplaced.map(({ name, mountpoint }) => { return `${name} at ${mountpoint}`; }).join(', ')}.`);
+	}
+
+	console.log(`Mounted ${NEW_DATASET} and its backup disks under ${NEW_MOUNTPOINT}.`);
 	return true;
 };
 
