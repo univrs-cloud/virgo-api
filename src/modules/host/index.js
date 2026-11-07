@@ -12,7 +12,6 @@ const { version } = pkg;
 
 class HostModule extends BaseModule {
 	#etcHostsFile = '/etc/hosts';
-	#rebootRequiredFile = '/run/reboot-required';
 	#updateExitStatusFile = '/var/www/virgo-api/update_exit_code';
 	#updateProgressFile = '/var/www/virgo-api/update_progress';
 	#updateFile = '/var/www/virgo-api/update.log';
@@ -45,6 +44,7 @@ class HostModule extends BaseModule {
 			importable: { event: 'host:storage:importable' },
 			snapshots: { event: 'host:storage:snapshots', audience: 'admin' },
 			time: { event: 'host:time' },
+			rebootRequired: { event: 'host:rebootRequired', audience: 'admin' },
 			updates: {
 				event: 'host:updates',
 				gated: true,
@@ -76,6 +76,7 @@ class HostModule extends BaseModule {
 			}
 			this.emitState('system');
 		})();
+		this.#loadRebootRequired();
 		this.eventEmitter
 			.on('host:updates:updated', () => {
 				this.emitState('updates');
@@ -298,11 +299,7 @@ class HostModule extends BaseModule {
 			return;
 		}
 
-		let isRebootRequired = false;
-		try {
-			await fs.access(this.#rebootRequiredFile);
-			isRebootRequired = true;
-		} catch (error) {}
+		const isRebootRequired = (await this.#loadRebootRequired()).length > 0;
 
 		if (exitCode === null) {
 			console.error('Exit code file is empty or missing after update finished');
@@ -328,11 +325,7 @@ class HostModule extends BaseModule {
 			}
 		} catch (error) {}
 
-		let isRebootRequired = false;
-		try {
-			await fs.access(this.#rebootRequiredFile);
-			isRebootRequired = true;
-		} catch (error) {}
+		const isRebootRequired = (await this.#loadRebootRequired()).length > 0;
 
 		const state = (exitCode === 0 ? 'succeeded' : 'failed');
 		this.setState('update', { steps, isRebootRequired, state });
@@ -426,6 +419,45 @@ class HostModule extends BaseModule {
 	async #loadUpdate() {
 		await this.checkUpdate();
 		this.emitUpdateState();
+	}
+
+	async #loadRebootRequired() {
+		const reasons = [];
+		try {
+			const running = os.release();
+			const flavourOf = (release) => { return release.slice(release.search(/-[a-z]/) + 1); };
+			const flavour = flavourOf(running);
+			const releases = (await fs.readdir('/boot'))
+				.filter((file) => { return file.startsWith('vmlinuz-'); })
+				.map((file) => { return file.slice('vmlinuz-'.length); })
+				.filter((release) => { return flavourOf(release) === flavour; });
+			let installed = running;
+			for (const release of releases) {
+				const { exitCode } = await execa('dpkg', ['--compare-versions', release, 'gt', installed], { reject: false });
+				if (exitCode === 0) {
+					installed = release;
+				}
+			}
+			if (installed !== running) {
+				reasons.push({ reason: 'kernel', running, installed });
+			}
+		} catch (error) {
+			console.error(error);
+		}
+		try {
+			const { stdout } = await execa('zfs', ['version', '--json']);
+			const { userland, kernel } = JSON.parse(stdout).zfs_version;
+			const installed = userland.replace('zfs-', '');
+			const running = kernel.replace('zfs-kmod-', '');
+			if (installed !== running) {
+				reasons.push({ reason: 'zfs', running, installed });
+			}
+		} catch (error) {
+			console.error(error);
+		}
+		this.setState('rebootRequired', reasons);
+		this.emitState('rebootRequired');
+		return reasons;
 	}
 
 	async #loadNetworkIdentifier() {
