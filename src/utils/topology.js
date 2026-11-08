@@ -63,9 +63,7 @@ const getMediaTopologies = (media, poolDrives) => {
 	const drives = poolDrives.map((drive) => { return drive.id; });
 	const size = Math.min(...poolDrives.map(getSize));
 	const topologies = [];
-	if (count === MIRROR_WIDTH) {
-		topologies.push(createTopology({ media, drives, type: 'mirror', variant: null, width: MIRROR_WIDTH, parity: MIRROR_WIDTH - 1, unused: 0, count, size }));
-	}
+	topologies.push(createTopology({ media, drives, type: 'mirror', variant: null, width: MIRROR_WIDTH, parity: MIRROR_WIDTH - 1, unused: count % MIRROR_WIDTH, count, size }));
 	for (const [type, parity] of Object.entries(PARITY)) {
 		if (count < parity + 2) {
 			continue;
