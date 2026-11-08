@@ -105,7 +105,7 @@ const isSystemDevice = (device) => {
 
 const listBlockDevices = async () => {
 	try {
-		const { stdout } = await execa('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,RM,RO,MODEL,SERIAL,MOUNTPOINTS']);
+		const { stdout } = await execa('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,RM,RO,ROTA,MODEL,SERIAL,MOUNTPOINTS']);
 		return JSON.parse(stdout || '{}').blockdevices || [];
 	} catch (error) {
 		console.error('listBlockDevices:', error);
@@ -216,6 +216,14 @@ const getDriveHealth = (smart) => {
 	return { status: (!readable && failed ? 'unsupported' : 'unknown'), problems: [], message: null };
 };
 
+const getDriveType = (device) => {
+	if (device.name.startsWith('nvme')) {
+		return 'nvme';
+	}
+
+	return (device.rota ? 'hdd' : 'ssd');
+};
+
 const isSystemDisk = (device) => {
 	return device.type === 'disk' && !VOLATILE_DEVICE.test(device.name) && isSystemDevice(device);
 };
@@ -232,6 +240,7 @@ const readSystemDrive = async (device) => {
 		return {
 			name: device.name,
 			path: device.path,
+			type: getDriveType(device),
 			system: true,
 			model: (smart?.model_name || device.model || null),
 			serialNumber: (smart?.serial_number || device.serial || null),
@@ -266,6 +275,7 @@ const getDrives = async (module) => {
 			return {
 				name: device.name,
 				path: device.path,
+				type: getDriveType(device),
 				id: getPreferredId(aliases, device.path),
 				ids: aliases,
 				model: (drive?.model_name || device.model || null),

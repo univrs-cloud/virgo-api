@@ -356,12 +356,12 @@ const createPool = async (job, module) => {
 
 	const available = (module.getState('drives') || []).filter((drive) => { return !drive.system; });
 	const selected = available.filter((drive) => { return (config?.drives || []).includes(drive.id); });
-	const topology = getTopology(selected, config?.type);
+	const topology = getTopology(selected, config?.media, config?.type, config?.width);
 	if (!topology) {
 		throw new Error(`${config?.type || 'No'} redundancy is not supported by ${selected.length} drives of this size.`);
 	}
 
-	const drives = await resolveDrives(config.drives, available);
+	const drives = await resolveDrives(topology.drives, available);
 	await module.updateJobProgress(job, 'Stopping Docker...');
 	await stopDocker();
 	await backupDockerData();
