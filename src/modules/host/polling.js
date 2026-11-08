@@ -424,7 +424,7 @@ const getCertificate = async (module) => {
 	const state = await certificate.read();
 	module.setState('certificate', state);
 	module.emitChanged('host:certificate', state);
-	if (state.hasCertificate || setup.isCompleted()) {
+	if (state.status.toLowerCase() === 'issued' || setup.isCompleted()) {
 		certificatePoll?.stop();
 	}
 };
