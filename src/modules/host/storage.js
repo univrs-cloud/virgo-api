@@ -373,6 +373,33 @@ const createPool = async (job, module) => {
 	return `Pool ${POOL_NAME} created.`;
 };
 
+const expandPool = async (job, module) => {
+	const { config } = job.data;
+	await module.getPlugin('polling')?.refreshStorage(module);
+	const pool = (module.getState('storage') || []).find((entry) => { return entry.name?.toLowerCase() === config?.name?.toLowerCase(); });
+	const groups = (pool?.expansion?.groups || []);
+	if (groups.length === 0) {
+		throw new Error(`Pool ${config?.name} can't be expanded.`);
+	}
+
+	const ids = groups.flatMap((group) => { return group.drives; });
+	if (ids.join('\n').toLowerCase() !== (config?.drives || []).join('\n').toLowerCase()) {
+		throw new Error('The unused drives changed. Open Expand pool again to review them.');
+	}
+
+	const drives = (module.getState('drives') || []);
+	const keyword = (pool.expansion.type === 'stripe' ? [] : [pool.expansion.type]);
+	const vdevs = [];
+	for (const group of groups) {
+		vdevs.push(...keyword, ...await resolveDrives(group.drives, drives));
+	}
+
+	await module.updateJobProgress(job, `Expanding pool ${pool.name}...`);
+	await execa('zpool', ['add', '-f', pool.name, ...vdevs]);
+	module.eventEmitter.emit('host:storage:fetch');
+	return `Pool ${pool.name} expanded.`;
+};
+
 const register = (module) => {
 	scanImportablePools(module);
 };
@@ -385,10 +412,12 @@ export default {
 		// on request rather than trusting the one from startup.
 		'host:storage:importable:fetch': { handler: (config, socket, module) => { scanImportablePools(module); } },
 		'host:storage:pool:import': { job: 'host:storage:pool:import' },
-		'host:storage:pool:create': { job: 'host:storage:pool:create' }
+		'host:storage:pool:create': { job: 'host:storage:pool:create' },
+		'host:storage:pool:expand': { job: 'host:storage:pool:expand' }
 	},
 	jobs: {
 		'host:storage:pool:import': importPool,
-		'host:storage:pool:create': createPool
+		'host:storage:pool:create': createPool,
+		'host:storage:pool:expand': expandPool
 	}
 };

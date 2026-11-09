@@ -43,6 +43,8 @@ const WEAR_WARNING_PERCENT = 80;
 const WEAR_CRITICAL_PERCENT = 90;
 const HEALTH_CRITICAL = 'critical';
 const HEALTH_WARNING = 'warning';
+const POOL_SECTIONS = ['vdevs', 'dedup', 'special', 'logs', 'l2cache', 'spares'];
+const RAIDZ_NAME = /^raidz(\d)-/;
 let certificatePoll = null;
 
 const parseJson = (stdout) => {
@@ -255,6 +257,108 @@ const readSystemDrive = async (device) => {
 	}
 };
 
+const getDiskNames = (vdevs) => {
+	return Object.values(vdevs || {}).flatMap((vdev) => {
+		return (vdev?.vdevType === 'disk' ? [vdev.name] : getDiskNames(vdev?.vdevs));
+	}).filter(Boolean).map((name) => { return name.toLowerCase(); });
+};
+
+const getPoolDiskNames = (pool) => {
+	return POOL_SECTIONS.flatMap((section) => { return getDiskNames(pool?.[section]); });
+};
+
+const getDriveNames = (drive) => {
+	return [drive.id, drive.path, drive.name, ...(drive.ids || [])].filter(Boolean).map((name) => { return name.toLowerCase(); });
+};
+
+const getVdevLayout = (vdev) => {
+	const width = Object.keys(vdev?.vdevs || {}).length;
+	if (vdev?.vdevType === 'disk') {
+		return { type: 'stripe', width: 1, parity: 0 };
+	}
+
+	if (vdev?.vdevType === 'mirror') {
+		return { type: 'mirror', width, parity: width - 1 };
+	}
+
+	const raidz = RAIDZ_NAME.exec(vdev?.name || '');
+	if (vdev?.vdevType === 'raidz' && raidz) {
+		return { type: `raidz${raidz[1]}`, width, parity: Number(raidz[1]) };
+	}
+
+	return null;
+};
+
+const getExpansion = (pool, drives, usedNames) => {
+	if (pool.properties?.health?.value?.toLowerCase() !== 'online') {
+		return { reason: 'health' };
+	}
+
+	const vdevs = Object.values(pool.vdevs?.[pool.name]?.vdevs || {});
+	const layouts = vdevs.map(getVdevLayout);
+	const layout = layouts[0];
+	if (!layout || layouts.some((entry) => { return !entry || entry.type !== layout.type || entry.width !== layout.width; })) {
+		return { reason: 'layout' };
+	}
+
+	const findDrive = (name) => {
+		return drives.find((drive) => { return getDriveNames(drive).includes(name); });
+	};
+	const members = getDiskNames(pool.vdevs).map(findDrive);
+	if (members.length === 0 || members.some((drive) => { return !drive?.size; })) {
+		return { ...layout, reason: 'members' };
+	}
+
+	const media = [...new Set(members.map((drive) => { return drive.type; }))];
+	if (media.length !== 1) {
+		return { ...layout, reason: 'media' };
+	}
+
+	const minSize = Math.min(...members.map((drive) => { return drive.size; }));
+	const getGroupBytes = (groupDrives) => {
+		return (layout.type === 'mirror' ? 1 : layout.width) * Math.min(...groupDrives.map((drive) => { return drive.size; }));
+	};
+	const rawBytes = vdevs.reduce((sum, vdev) => { return sum + getGroupBytes(getDiskNames({ [vdev.name]: vdev }).map(findDrive)); }, 0);
+	const sizeRatio = Math.min((pool.properties?.size?.value || rawBytes) / rawBytes, 1);
+	const candidates = drives
+		.filter((drive) => {
+			return !drive.system && drive.type === media[0] && drive.size >= minSize && !getDriveNames(drive).some((name) => { return usedNames.has(name); });
+		})
+		.sort((a, b) => { return (a.size - b.size) || a.name.localeCompare(b.name); });
+	const groupCount = Math.floor(candidates.length / layout.width);
+	const groups = Array.from({ length: groupCount }, (value, index) => {
+		const groupDrives = candidates.slice(index * layout.width, (index + 1) * layout.width);
+		return {
+			drives: groupDrives.map((drive) => { return drive.id; }),
+			capacityBytes: Math.floor(getGroupBytes(groupDrives) * sizeRatio)
+		};
+	});
+	return {
+		...layout,
+		media: media[0],
+		minSize,
+		available: candidates.length,
+		groups,
+		unused: candidates.slice(groupCount * layout.width).map((drive) => { return drive.id; }),
+		reason: (groupCount > 0 ? null : 'drives')
+	};
+};
+
+const addExpansions = (module) => {
+	const storage = module.getState('storage');
+	const drives = module.getState('drives');
+	if (!Array.isArray(storage) || !Array.isArray(drives)) {
+		return false;
+	}
+
+	const importable = module.getState('importable');
+	const usedNames = new Set([...storage, ...(Array.isArray(importable) ? importable : [])].flatMap(getPoolDiskNames));
+	module.setState('storage', storage.map((pool) => {
+		return (pool.vdevs ? { ...pool, expansion: getExpansion(pool, drives, usedNames) } : pool);
+	}));
+	return true;
+};
+
 const getDrives = async (module) => {
 	try {
 		const driveIds = await getDriveIds();
@@ -298,6 +402,9 @@ const getDrives = async (module) => {
 	module.setState('topologies', getTopologies(module.getState('drives') || []));
 	module.emitChanged('host:drives', module.getState('drives'));
 	module.emitChanged('host:storage:topologies', module.getState('topologies'));
+	if (addExpansions(module)) {
+		module.emitChanged('host:storage', module.getState('storage'));
+	}
 };
 
 ;
@@ -401,6 +508,7 @@ const getStorage = async (module) => {
 		}
 		storage = camelcaseKeys(storage, { deep: true });
 		module.setState('storage', storage);
+		addExpansions(module);
 	} catch (error) {
 		console.error('getStorage:', error);
 		module.setState('storage', false);
@@ -424,7 +532,7 @@ const getCertificate = async (module) => {
 	const state = await certificate.read();
 	module.setState('certificate', state);
 	module.emitChanged('host:certificate', state);
-	if (state.status.toLowerCase() === 'issued' || setup.isCompleted()) {
+	if (state?.status?.toLowerCase() === 'issued' || setup.isCompleted()) {
 		certificatePoll?.stop();
 	}
 };
