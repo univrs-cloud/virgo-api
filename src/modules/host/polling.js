@@ -517,6 +517,15 @@ const getStorage = async (module) => {
 	module.eventEmitter.emit('host:storage:updated', module.getState('storage'));
 };
 
+const broadcastStorage = async (module) => {
+	await Promise.all([
+		getDrives(module),
+		getStorage(module)
+	]);
+	module.emitState('drives');
+	module.emitState('storage');
+};
+
 const getTime = (module) => {
 	try {
 		const time = si.time();
@@ -576,6 +585,9 @@ const register = (module) => {
 export default {
 	name: 'polling',
 	register,
+	commands: {
+		'host:storage:fetch': { handler: (config, socket, module) => { return broadcastStorage(module); } }
+	},
 	refreshStorage: getStorage,
 	pollers: [
 		{ run: getDrives, interval: 60000 },
