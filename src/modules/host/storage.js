@@ -24,7 +24,6 @@ const DOCKER_DATA = [
 	{ path: '/var/lib/containerd', backup: '/var/lib/containerd.orig', dataset: `${POOL_NAME}/containerd` }
 ];
 const DOCKER_NETWORK = ['--driver=bridge', '--subnet=172.30.0.0/16', '--ip-range=172.30.10.0/24', '--gateway=172.30.0.1', 'virgo'];
-const BY_ID_DIR = '/dev/disk/by-id';
 const SHARES_DIR = `/${POOL_NAME}/.shares`;
 const CONFIG_DIR = `/${POOL_NAME}/.config`;
 const SHARE_FILES = ['downloads.conf', 'folders.conf', 'time_capsule.conf'];
@@ -314,22 +313,18 @@ const prepare = async (job, module) => {
  * drive has one, and its device path where it does not. Both are taken as given, so both are checked
  * against the drive list rather than trusted from the browser. */
 const resolveDrives = async (ids, drives) => {
-	const paths = [];
 	for (const id of ids) {
 		const drive = drives.find((entry) => { return entry.id === id; });
 		if (!drive) {
 			throw new Error(`${id} is not an available drive.`);
 		}
 
-		const drivePath = (drive.id === drive.path ? drive.path : `${BY_ID_DIR}/${drive.id}`);
-		if (!await exists(drivePath)) {
+		if (!await exists(drive.path)) {
 			throw new Error(`Drive ${id} is no longer attached.`);
 		}
-
-		paths.push(drivePath);
 	}
 
-	return paths;
+	return ids;
 };
 
 const importPool = async (job, module) => {
