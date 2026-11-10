@@ -6,7 +6,7 @@ import { getTopology, getVdevArguments } from '../../utils/topology.js';
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
-const POOL_OPTIONS = ['-o', 'ashift=13', '-o', 'autotrim=on', '-O', 'compression=lz4', '-O', 'atime=off'];
+const POOL_OPTIONS = ['-o', 'ashift=13', '-o', 'autotrim=on', '-o', 'autoexpand=on', '-O', 'compression=lz4', '-O', 'atime=off'];
 // Parents before children: a dataset cannot be created under one that does not exist yet.
 const DATASETS = [
 	{ name: `${POOL_NAME}/docker`, options: ['-o', 'mountpoint=/var/lib/docker'] },
@@ -395,6 +395,29 @@ const expandPool = async (job, module) => {
 	return `Pool ${pool.name} expanded.`;
 };
 
+const replaceDrive = async (job, module) => {
+	const { config } = job.data;
+	await module.getPlugin('polling')?.refreshStorage(module);
+	const pool = (module.getState('storage') || []).find((entry) => { return entry.name?.toLowerCase() === config?.name?.toLowerCase(); });
+	const replacement = (pool?.replacements || []).find((entry) => { return entry.name?.toLowerCase() === config?.old?.toLowerCase(); });
+	const drives = (module.getState('drives') || []);
+	const label = (id) => { return (drives.find((drive) => { return [drive.id, ...(drive.ids || [])].some((name) => { return name?.toLowerCase() === id?.toLowerCase(); }); })?.name || id); };
+	if (!replacement || replacement.reason) {
+		throw new Error(`${label(config?.old)} can't be replaced right now.`);
+	}
+
+	if (!replacement.candidates.some((id) => { return id.toLowerCase() === config?.new?.toLowerCase(); })) {
+		throw new Error(`${label(config?.new)} is no longer available.`);
+	}
+
+	const [newId] = await resolveDrives([config.new], drives);
+	await module.updateJobProgress(job, `Replacing ${label(replacement.name)} with ${label(newId)}...`);
+	await execa('zpool', ['set', 'autoexpand=on', pool.name]);
+	await execa('zpool', ['replace', '-f', pool.name, replacement.name, newId]);
+	module.eventEmitter.emit('host:storage:fetch');
+	return `Replacing ${label(replacement.name)} with ${label(newId)}. The pool is copying its data onto the new drive.`;
+};
+
 const register = (module) => {
 	scanImportablePools(module);
 };
@@ -408,11 +431,13 @@ export default {
 		'host:storage:importable:fetch': { handler: (config, socket, module) => { scanImportablePools(module); } },
 		'host:storage:pool:import': { job: 'host:storage:pool:import' },
 		'host:storage:pool:create': { job: 'host:storage:pool:create' },
-		'host:storage:pool:expand': { job: 'host:storage:pool:expand' }
+		'host:storage:pool:expand': { job: 'host:storage:pool:expand' },
+		'host:storage:pool:replace': { job: 'host:storage:pool:replace' }
 	},
 	jobs: {
 		'host:storage:pool:import': importPool,
 		'host:storage:pool:create': createPool,
-		'host:storage:pool:expand': expandPool
+		'host:storage:pool:expand': expandPool,
+		'host:storage:pool:replace': replaceDrive
 	}
 };

@@ -45,6 +45,10 @@ const HEALTH_CRITICAL = 'critical';
 const HEALTH_WARNING = 'warning';
 const POOL_SECTIONS = ['vdevs', 'dedup', 'special', 'logs', 'l2cache', 'spares'];
 const RAIDZ_NAME = /^raidz(\d)-/;
+const SALVAGEABLE_POOL_STATES = ['online', 'degraded'];
+const FAILED_DRIVE_STATES = ['faulted', 'unavail', 'removed', 'offline'];
+const FAILING_DRIVE_HEALTH = [HEALTH_CRITICAL, HEALTH_WARNING];
+const REPLACING_VDEV_TYPES = ['replacing', 'spare'];
 let certificatePoll = null;
 
 const parseJson = (stdout) => {
@@ -344,7 +348,81 @@ const getExpansion = (pool, drives, usedNames) => {
 	};
 };
 
-const addExpansions = (module) => {
+const getDataLeaves = (vdevs, parent = null) => {
+	return Object.values(vdevs || {}).flatMap((vdev) => {
+		return (vdev?.vdevType === 'disk' ? [{ vdev, parent }] : getDataLeaves(vdev?.vdevs, vdev));
+	});
+};
+
+const hasVdevType = (vdevs, types) => {
+	return Object.values(vdevs || {}).some((vdev) => { return types.includes(vdev?.vdevType) || hasVdevType(vdev?.vdevs, types); });
+};
+
+const getHealthyReason = (pool, isReplacing, hasUnhealthy) => {
+	if (pool.properties?.health?.value?.toLowerCase() !== 'online') {
+		return 'degraded';
+	}
+
+	if (hasUnhealthy) {
+		return 'unhealthy';
+	}
+
+	if (isReplacing) {
+		return 'replacing-other';
+	}
+
+	if (pool.scanStats?.state?.toLowerCase() === 'scanning') {
+		return (pool.scanStats?.function?.toLowerCase() === 'resilver' ? 'resilvering' : 'scrubbing');
+	}
+
+	return null;
+};
+
+const getReplacements = (pool, drives, usedNames) => {
+	const dataVdevs = pool.vdevs?.[pool.name]?.vdevs;
+	const isSalvageable = SALVAGEABLE_POOL_STATES.includes(pool.properties?.health?.value?.toLowerCase());
+	const findDrive = (name) => {
+		return drives.find((drive) => { return getDriveNames(drive).includes(name.toLowerCase()); });
+	};
+	const isUnhealthy = ({ vdev }) => {
+		return FAILED_DRIVE_STATES.includes(vdev.state?.toLowerCase()) || FAILING_DRIVE_HEALTH.includes(findDrive(vdev.name)?.health?.status?.toLowerCase());
+	};
+	const leaves = getDataLeaves(dataVdevs);
+	const healthyReason = getHealthyReason(pool, hasVdevType(dataVdevs, REPLACING_VDEV_TYPES), leaves.some(isUnhealthy));
+	const poolMedia = [...new Set(getDiskNames(dataVdevs).map(findDrive).filter(Boolean).map((drive) => { return drive.type; }))];
+	const freeDrives = drives
+		.filter((drive) => { return !drive.system && !getDriveNames(drive).some((name) => { return usedNames.has(name); }); })
+		.sort((a, b) => { return (a.size - b.size) || a.name.localeCompare(b.name); });
+	return leaves.map(({ vdev, parent }) => {
+		const drive = findDrive(vdev.name);
+		const isFailed = FAILED_DRIVE_STATES.includes(vdev.state?.toLowerCase());
+		const isFailing = FAILING_DRIVE_HEALTH.includes(drive?.health?.status?.toLowerCase());
+		const kind = (isFailed ? 'failed' : (isFailing ? 'failing' : 'healthy'));
+		const size = (drive?.size || vdev.physSpace || vdev.repDevSize || null);
+		const media = (drive?.type || (poolMedia.length === 1 ? poolMedia[0] : null));
+		const replacement = { name: vdev.name, kind, size, media, candidates: [], reason: null };
+		if (!isSalvageable) {
+			return { ...replacement, reason: 'health' };
+		}
+
+		if (REPLACING_VDEV_TYPES.includes(parent?.vdevType)) {
+			return { ...replacement, reason: 'replacing' };
+		}
+
+		if (kind === 'healthy' && healthyReason) {
+			return { ...replacement, reason: healthyReason };
+		}
+
+		if (!size || !media) {
+			return { ...replacement, reason: 'members' };
+		}
+
+		const candidates = freeDrives.filter((candidate) => { return candidate.type === media && candidate.size >= size; });
+		return { ...replacement, candidates: candidates.map((candidate) => { return candidate.id; }), reason: (candidates.length > 0 ? null : 'drives') };
+	});
+};
+
+const addPoolActions = (module) => {
 	const storage = module.getState('storage');
 	const drives = module.getState('drives');
 	if (!Array.isArray(storage) || !Array.isArray(drives)) {
@@ -354,7 +432,7 @@ const addExpansions = (module) => {
 	const importable = module.getState('importable');
 	const usedNames = new Set([...storage, ...(Array.isArray(importable) ? importable : [])].flatMap(getPoolDiskNames));
 	module.setState('storage', storage.map((pool) => {
-		return (pool.vdevs ? { ...pool, expansion: getExpansion(pool, drives, usedNames) } : pool);
+		return (pool.vdevs ? { ...pool, expansion: getExpansion(pool, drives, usedNames), replacements: getReplacements(pool, drives, usedNames) } : pool);
 	}));
 	return true;
 };
@@ -402,7 +480,7 @@ const getDrives = async (module) => {
 	module.setState('topologies', getTopologies(module.getState('drives') || []));
 	module.emitChanged('host:drives', module.getState('drives'));
 	module.emitChanged('host:storage:topologies', module.getState('topologies'));
-	if (addExpansions(module)) {
+	if (addPoolActions(module)) {
 		module.emitChanged('host:storage', module.getState('storage'));
 	}
 };
@@ -508,7 +586,7 @@ const getStorage = async (module) => {
 		}
 		storage = camelcaseKeys(storage, { deep: true });
 		module.setState('storage', storage);
-		addExpansions(module);
+		addPoolActions(module);
 	} catch (error) {
 		console.error('getStorage:', error);
 		module.setState('storage', false);
