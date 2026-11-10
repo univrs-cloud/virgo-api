@@ -6,7 +6,8 @@
 	"license": "UNLICENSED",
 	"main": "index.js",
 	"scripts": {
-		"deb": "node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy ${DEB_ARCH:+--architecture $DEB_ARCH} -- index.js config.js cli/ cert/ src/ indexer/ systemd/",
+		"changelog": "bash scripts/changelog.sh",
+		"deb": "npm run changelog && node-deb --no-default-package-dependencies --no-rebuild --install-strategy copy ${DEB_ARCH:+--architecture $DEB_ARCH} -- index.js config.js cli/ cert/ src/ indexer/ systemd/",
 		"sync": "sh -c 'host=${1:?usage: npm run sync -- <host>}; paths=\"index.js config.js cli cert src indexer systemd\"; files=$({ git diff --name-only --diff-filter=d HEAD -- $paths; git ls-files --others --exclude-standard -- $paths; } | sort -u); if [ -z \"$files\" ]; then echo \"No changed files\"; exit 0; fi; printf \"%s\\n\" \"$files\"; printf \"%s\\n\" \"$files\" | rsync -rltp --files-from=- --rsync-path=\"sudo rsync\" ./ \"voyager@$host:/var/www/virgo-api/app/\" && ssh \"voyager@$host\" sudo systemctl restart virgo-api' sync",
 		"test": "node --test test/*.test.js",
 		"test:indexer": "node --test test/indexer-*.test.js"
@@ -18,6 +19,7 @@
 		"executable_name": "virgo",
 		"init": "systemd",
 		"install_dir": "/var/www",
+		"extra_files": "deb-extra",
 		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,network-manager,avahi-daemon,avahi-utils,zip",
 		"user": "root",
 		"templates": {
