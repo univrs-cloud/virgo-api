@@ -18,6 +18,7 @@ class HostModule extends BaseModule {
 	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updatePid = null;
 	#changelogs = new Map();
+	#sourceChangelogs = new Map();
 	#updateCompletionPromise = null;
 	#updateCompletionGeneration = 0;
 	#readyPromise;
@@ -241,9 +242,13 @@ class HostModule extends BaseModule {
 		}
 
 		try {
-			const response = await execa('apt-get', ['changelog', '-qq', `${packageName}=${updatableToVersion}`], { env: { PAGER: 'cat' } });
+			const text = await this.#fetchAptChangelog(packageName, updatableToVersion) ?? await this.#fetchSourceChangelog(packageName, updatableToVersion);
+			if (text === null) {
+				return null;
+			}
+
 			const entries = [];
-			for (const entry of response.stdout.split(/\n(?=\S+ \([^)]+\) )/)) {
+			for (const entry of text.split(/\n(?=\S+ \([^)]+\) )/)) {
 				const entryVersion = entry.match(/^\S+ \(([^)]+)\) /)?.[1];
 				if (!entryVersion) {
 					continue;
@@ -254,7 +259,12 @@ class HostModule extends BaseModule {
 					break;
 				}
 
-				entries.push(entry.trim());
+				const date = entry.match(/^ -- .*?>  (.+)$/m)?.[1];
+				const lines = entry.replace(/^ -- .*$/m, '').trim().split('\n');
+				if (date) {
+					lines[0] = `${lines[0]}; ${date.trim()}`;
+				}
+				entries.push(lines.join('\n').trim());
 			}
 			const changelog = (entries.length > 0 ? entries.join('\n\n') : null);
 			this.#changelogs.set(key, changelog);
@@ -262,6 +272,41 @@ class HostModule extends BaseModule {
 		} catch (error) {
 			return null;
 		}
+	}
+
+	async #fetchAptChangelog(packageName, version) {
+		const response = await execa('apt-get', ['changelog', '-qq', `${packageName}=${version}`], { env: { PAGER: 'cat' }, reject: false });
+		return (response.exitCode === 0 ? response.stdout : null);
+	}
+
+	async #fetchSourceChangelog(packageName, version) {
+		const uris = await execa('apt-get', ['download', '--print-uris', '-qq', `${packageName}=${version}`]);
+		const packageUrl = uris.stdout.match(/^'([^']+)'/m)?.[1];
+		if (!packageUrl) {
+			return null;
+		}
+
+		const details = await execa('apt-cache', ['show', `${packageName}=${version}`]);
+		const source = details.stdout.match(/^Source: (\S+)(?: \((\S+)\))?$/m);
+		const sourceName = source?.[1] ?? packageName;
+		const sourceVersion = (source?.[2] ?? version).replace(/^\d+:/, '');
+		const url = `${packageUrl.slice(0, packageUrl.lastIndexOf('/'))}/${sourceName}_${sourceVersion}.debian.tar.xz`;
+		if (!this.#sourceChangelogs.has(url)) {
+			this.#sourceChangelogs.set(url, (async () => {
+				const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+				if (!response.ok) {
+					return null;
+				}
+
+				const archive = Buffer.from(await response.arrayBuffer());
+				const { stdout } = await execa('tar', ['-xJO', 'debian/changelog'], { input: archive });
+				return stdout;
+			})().catch(() => {
+				this.#sourceChangelogs.delete(url);
+				return null;
+			}));
+		}
+		return this.#sourceChangelogs.get(url);
 	}
 
 	async isUpdateInProgress() {
