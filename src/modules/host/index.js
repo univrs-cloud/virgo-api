@@ -17,6 +17,7 @@ class HostModule extends BaseModule {
 	#updateFile = '/var/www/virgo-api/update.log';
 	#updatePidFile = '/var/www/virgo-api/update.pid';
 	#updatePid = null;
+	#changelogs = new Map();
 	#updateCompletionPromise = null;
 	#updateCompletionGeneration = 0;
 	#readyPromise;
@@ -210,20 +211,20 @@ class HostModule extends BaseModule {
 			const response = await execa('apt-show-versions', ['-u']);
 			const updates = response.stdout.trim();
 			if (updates !== '') {
-				this.setState('updates', updates.split('\n').map((line) => {
-					const parts = line.split(' ').filter((part) => { return part.length > 0; });
-					if (parts.length < 5) {
-						return null;
-					}
-					
+				const lines = updates.split('\n').map((line) => {
+					return line.split(' ').filter((part) => { return part.length > 0; });
+				}).filter((parts) => { return parts.length >= 5; });
+				this.setState('updates', await Promise.all(lines.map(async (parts) => {
+					const packageName = parts[0].split(':')[0];
 					return {
-						package: parts[0].split(':')[0],
+						package: packageName,
 						version: {
 							installed: parts[1].split('~')[0],
 							updatableTo: parts[4].split('~')[0]
-						}
+						},
+						changelog: await this.#loadChangelog(packageName, parts[1], parts[4])
 					};
-				})?.filter(Boolean));
+				})));
 			} else {
 				this.setState('updates', []);
 			}
@@ -231,6 +232,36 @@ class HostModule extends BaseModule {
 			this.setState('updates', false);
 		}
 		this.eventEmitter.emit('host:updates:updated', this.getState('updates'));
+	}
+
+	async #loadChangelog(packageName, installedVersion, updatableToVersion) {
+		const key = `${packageName} ${installedVersion} ${updatableToVersion}`;
+		if (this.#changelogs.has(key)) {
+			return this.#changelogs.get(key);
+		}
+
+		try {
+			const response = await execa('apt-get', ['changelog', '-qq', `${packageName}=${updatableToVersion}`], { env: { PAGER: 'cat' } });
+			const entries = [];
+			for (const entry of response.stdout.split(/\n(?=\S+ \([^)]+\) )/)) {
+				const entryVersion = entry.match(/^\S+ \(([^)]+)\) /)?.[1];
+				if (!entryVersion) {
+					continue;
+				}
+
+				const { exitCode } = await execa('dpkg', ['--compare-versions', entryVersion, 'gt', installedVersion], { reject: false });
+				if (exitCode !== 0) {
+					break;
+				}
+
+				entries.push(entry.trim());
+			}
+			const changelog = (entries.length > 0 ? entries.join('\n\n') : null);
+			this.#changelogs.set(key, changelog);
+			return changelog;
+		} catch (error) {
+			return null;
+		}
 	}
 
 	async isUpdateInProgress() {
