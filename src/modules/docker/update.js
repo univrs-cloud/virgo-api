@@ -32,6 +32,15 @@ const getServiceImageDigests = async (containers) => {
 	return result;
 };
 
+const templateDetails = (template, name) => {
+	const details = { title: (template.multiple === true ? `${template.title} (${name.slice(template.name.length + 1)})` : template.title) };
+	const [category] = (Array.isArray(template.categories) ? template.categories : []);
+	if (category) {
+		details.category = category;
+	}
+	return details;
+};
+
 const takeSnapshot = async (job, module, name, title, containers) => {
 	const dataset = `${module.appsDataset}/${name}`;
 	const snapshotName = generateSnapshotName();
@@ -69,8 +78,12 @@ const updateApp = async (job, module) => {
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
 	await takeSnapshot(job, module, config.name, existingApp.title, containers);
-	const template = module.findTemplateByAppName(await module.getTemplates(), config.name);
+	const template = module.findTemplateByAppName(await module.refreshTemplates(), config.name);
 	if (template) {
+		const changes = templateDetails(template, config.name);
+		if (typeof template.embed === 'boolean') {
+			changes.canEmbed = template.embed;
+		}
 		try {
 			const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
 			if (response.ok) {
@@ -81,12 +94,12 @@ const updateApp = async (job, module) => {
 				const responseIcon = await fetch(template.logo);
 				if (responseIcon.ok) {
 					await streamPipeline(responseIcon.body, createWriteStream(path.join(module.appIconsDir, icon)));
-					const updatedApp = { ...existingApp, icon: icon, canEmbed: (typeof template.embed === 'boolean' ? template.embed : existingApp.canEmbed) };
-					await DataService.setApplication(updatedApp);
-					module.eventEmitter.emit('configured:updated');
+					changes.icon = icon;
 				}
 			}
 		} catch (error) {}
+		await DataService.updateApplication(config.name, changes);
+		module.eventEmitter.emit('configured:updated');
 	}
 
 	await module.ensureAppDirEnv(composeProjectDir);

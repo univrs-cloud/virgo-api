@@ -126,6 +126,12 @@ class DockerModule extends BaseModule {
 		return this.toArray(this.getState('templates'));
 	}
 
+	async refreshTemplates() {
+		const isLoaded = await this.#loadTemplates();
+		this.#emitTemplates();
+		return (isLoaded ? this.toArray(this.getState('templates')) : []);
+	}
+
 	findTemplateByAppName(templates, appName) {
 		const name = String(appName ?? '').toLowerCase();
 		const exact = templates.find((template) => { return template.name.toLowerCase() === name; });
@@ -243,14 +249,22 @@ class DockerModule extends BaseModule {
 	async #loadTemplates() {
 		try {
 			const response = await fetch(config.apps.templatesUrl);
+			if (!response.ok) {
+				throw new Error(`${response.status} ${response.statusText}`);
+			}
+
 			const data = await response.json();
 			const templates = this.toArray(data.templates).filter((template) => {
 				return this.toArray(template.platforms).some((platform) => { return String(platform).toLowerCase() === this.#platform; });
 			});
 			this.setState('templates', templates);
+			return true;
 		} catch (error) {
-			this.setState('templates', false);
+			if (!this.getState('templates')) {
+				this.setState('templates', false);
+			}
 			console.error(`Error loading templates:`, error);
+			return false;
 		}
 	}
 

@@ -177,6 +177,32 @@ class DataService {
 		}
 	}
 	
+	static async updateApplication(name, changes) {
+		if (!await database.ensureOpen()) {
+			return false;
+		}
+
+		try {
+			const application = await Application.findOne({
+				where: { name }
+			});
+			if (!application) {
+				return false;
+			}
+
+			const isNewCategory = (changes.category !== undefined && String(changes.category).toLowerCase() !== String(application.category ?? '').toLowerCase());
+			await application.update(changes);
+			if (isNewCategory) {
+				const order = await DataService.getNextOrderForCategory(changes.category);
+				await DataService.setItemOrder(application.id, 'app', order);
+			}
+			return true;
+		} catch (error) {
+			console.error(`Error updating application '${name}' in database:`, error);
+			return false;
+		}
+	}
+
 	static async deleteApplication(name) {
 		if (!await database.ensureOpen()) {
 			return false;

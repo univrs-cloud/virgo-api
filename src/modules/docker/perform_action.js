@@ -15,8 +15,7 @@ const allowedUnmanagedActions = ['start', 'stop', 'kill', 'restart'];
  * configuration this node was given, not something the catalogue decides. A template that cannot be
  * reached leaves the existing file in place — recreating from it still fixes a container, and losing
  * that on a node with no internet would be worse than being a version behind. */
-const downloadComposeFile = async (job, module, name, composeProjectDir) => {
-	const template = module.findTemplateByAppName(await module.getTemplates(), name);
+const downloadComposeFile = async (job, module, template, name, composeProjectDir) => {
 	if (!template) {
 		return;
 	}
@@ -33,6 +32,15 @@ const downloadComposeFile = async (job, module, name, composeProjectDir) => {
 		console.error(`Could not download the ${name} project template: ${error.message}`);
 		await module.updateJobProgress(job, `Could not download ${template.title}'s project template, recreating from cache...`);
 	}
+};
+
+const templateDetails = (template, name) => {
+	const details = { title: (template.multiple === true ? `${template.title} (${name.slice(template.name.length + 1)})` : template.title) };
+	const [category] = (Array.isArray(template.categories) ? template.categories : []);
+	if (category) {
+		details.category = category;
+	}
+	return details;
 };
 
 const performAppAction = async (job, module) => {
@@ -69,8 +77,13 @@ const performAppAction = async (job, module) => {
 	}
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
 	if (config.action === 'recreate') {
-		await downloadComposeFile(job, module, config.name, composeProjectDir);
+		const template = module.findTemplateByAppName(await module.refreshTemplates(), config.name);
+		await downloadComposeFile(job, module, template, config.name, composeProjectDir);
 		await module.ensureAppDirEnv(composeProjectDir);
+		if (template) {
+			await DataService.updateApplication(config.name, templateDetails(template, config.name));
+			module.eventEmitter.emit('configured:updated');
+		}
 	}
 	
 	const composeFiles = (existingApp ? [] : (container.labels?.comDockerComposeProjectConfigFiles || '').split(',').filter(Boolean));
