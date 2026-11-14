@@ -9,7 +9,6 @@ class DataChannelSendQueue {
 	#queuedBytes = 0;
 	#closed = false;
 	#draining = false;
-	#retryTimer = null;
 	#drainWaiters = [];
 	#highWaterMark;
 	#lowWaterMark;
@@ -113,13 +112,9 @@ class DataChannelSendQueue {
 		this.#draining = true;
 		try {
 			while (this.#queue.length && this.#bufferedAmount() < this.#highWaterMark) {
-				const entry = this.#queue[0];
-				if (!this.#channel.sendMessageBinary(entry.buffer)) {
-					this.#scheduleRetry();
-					break;
-				}
-				this.#queue.shift();
+				const entry = this.#queue.shift();
 				this.#queuedBytes -= entry.length;
+				this.#channel.sendMessageBinary(entry.buffer);
 			}
 		} catch (error) {
 			this.#fail(error);
@@ -127,21 +122,6 @@ class DataChannelSendQueue {
 			this.#draining = false;
 		}
 		this.#settleDrainWaiters();
-	}
-
-	#scheduleRetry() {
-		if (this.#retryTimer || this.#closed) {
-			return;
-		}
-		this.#retryTimer = setTimeout(() => {
-			this.#retryTimer = null;
-			if (!this.#isOpen()) {
-				this.#fail(new Error('WebRTC data channel closed while sending'));
-				return;
-			}
-			this.#drain();
-		}, 10);
-		this.#retryTimer.unref?.();
 	}
 
 	#fail(error) {
@@ -154,10 +134,6 @@ class DataChannelSendQueue {
 
 	close() {
 		this.#closed = true;
-		if (this.#retryTimer) {
-			clearTimeout(this.#retryTimer);
-			this.#retryTimer = null;
-		}
 		this.#queue = [];
 		this.#queuedBytes = 0;
 		const waiters = this.#drainWaiters;
