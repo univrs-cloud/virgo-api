@@ -7,12 +7,40 @@ const CONTAINERS_DEBOUNCE_MS = 250;
 
 let containersSnapshot = {};
 let containersTimer = null;
+let startedAtEpoch = 0;
+const startedAtCache = new Map();
 let appsStorageRetry = null;
 
 const getContainers = async (module) => {
 	try {
+		const epoch = startedAtEpoch;
 		let containers = await docker.listContainers({ all: true });
 		containers = camelcaseKeys(containers, { deep: true });
+		const runningIds = new Set(containers.filter((container) => { return container.state === 'running'; }).map((container) => { return container.id; }));
+		for (const id of startedAtCache.keys()) {
+			if (!runningIds.has(id)) {
+				startedAtCache.delete(id);
+			}
+		}
+		containers = await Promise.all(containers.map(async (container) => {
+			if (container.state !== 'running') {
+				return container;
+			}
+
+			if (startedAtCache.has(container.id)) {
+				return { ...container, startedAt: startedAtCache.get(container.id) };
+			}
+
+			try {
+				const { State: { StartedAt: startedAt } } = await docker.getContainer(container.id).inspect();
+				if (epoch === startedAtEpoch) {
+					startedAtCache.set(container.id, startedAt);
+				}
+				return { ...container, startedAt };
+			} catch (error) {
+				return container;
+			}
+		}));
 		module.setState('containers', containers);
 	} catch (error) {
 		module.setState('containers', false);
@@ -50,7 +78,12 @@ const watchContainerEvents = async (module) => {
 			for (const line of lines.filter(Boolean)) {
 				try {
 					const event = JSON.parse(line);
-					if (!(event.Action ?? event.status ?? '').toLowerCase().startsWith('exec_')) {
+					const action = (event.Action ?? event.status ?? '').toLowerCase();
+					if (action === 'start') {
+						startedAtEpoch += 1;
+						startedAtCache.delete(event.Actor?.ID ?? event.id);
+					}
+					if (!action.startsWith('exec_')) {
 						scheduleContainers(module);
 					}
 				} catch (error) {
@@ -60,6 +93,8 @@ const watchContainerEvents = async (module) => {
 		});
 		stream.on('end', reconnect);
 		stream.on('error', reconnect);
+		startedAtEpoch += 1;
+		startedAtCache.clear();
 		getContainers(module);
 	} catch (error) {
 		console.error('watchContainerEvents:', error);
