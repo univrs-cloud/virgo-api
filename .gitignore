@@ -5,3 +5,4 @@ dist
 *.deb
 deb-extra
 release-notes.md
+indexer/spellfix.so

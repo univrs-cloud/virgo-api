@@ -370,6 +370,29 @@ function recordFailedSession(session, restartCount) {
 	}
 }
 
+function refreshFuzzyWords(db) {
+	if (!db.prepare(`SELECT 1 FROM pragma_module_list WHERE name = 'spellfix1'`).get()) {
+		return;
+	}
+	try {
+		db.exec(`
+			CREATE VIRTUAL TABLE IF NOT EXISTS fuzzy_words USING spellfix1;
+			CREATE VIRTUAL TABLE IF NOT EXISTS temp.fts_words USING fts5vocab(main, fts_paths, row);
+		`);
+		database.transaction(db, () => {
+			db.exec(`
+				INSERT INTO fuzzy_words(word)
+				SELECT term FROM temp.fts_words WHERE term NOT IN (SELECT word FROM fuzzy_words_vocab);
+				DELETE FROM fuzzy_words WHERE rowid IN (
+					SELECT id FROM fuzzy_words_vocab WHERE word NOT IN (SELECT term FROM temp.fts_words)
+				);
+			`);
+		});
+	} catch (e) {
+		console.warn(`  ⚠  Fuzzy search words not refreshed: ${e.message}`);
+	}
+}
+
 function finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, message) {
 	persistLastRunMeta(db, stmt, perf, restartCount);
 	console.log(message);
@@ -1000,6 +1023,7 @@ async function runIndexerPass(includeDatasets, sessionWallT0 = null, restartCoun
 			inBulkMode = false;
 		}
 
+		refreshFuzzyWords(db);
 		finishIndexerRun(db, stmt, perf, sessionWallT0, restartCount, '\n✅ Indexing complete.');
 	} finally {
 		process.removeListener('SIGTERM', onSignal);

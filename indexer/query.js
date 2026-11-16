@@ -46,6 +46,41 @@ function sqlDatasetScope(scopes, tableAlias = 'd') {
 
 // ─── Search ─────────────────────────────────────────────────────────────────
 
+const FUZZY_MIN_LENGTH = 4;
+const FUZZY_DISTANCE_PER_CHAR = 25;
+const FUZZY_CANDIDATES = 5;
+
+function fuzzyFtsQuery(db, pattern) {
+	const tokens = pattern
+		.toLowerCase()
+		.normalize('NFD')
+		.replace(/\p{M}/gu, '')
+		.split(/[^\p{L}\p{N}]+/u)
+		.filter(Boolean);
+	try {
+		const known = db.prepare('SELECT 1 FROM fts_paths WHERE fts_paths MATCH ? LIMIT 1');
+		const lookup = db.prepare(`SELECT word, distance FROM fuzzy_words WHERE word MATCH ? AND top = ${FUZZY_CANDIDATES}`);
+		let corrected = false;
+		const groups = tokens.map((token) => {
+			const exact = `"${token}"*`;
+			if (token.length < FUZZY_MIN_LENGTH || /\p{N}/u.test(token) || known.get(exact)) {
+				return exact;
+			}
+			const words = lookup.all(token)
+				.filter((row) => { return row.distance <= token.length * FUZZY_DISTANCE_PER_CHAR; })
+				.map((row) => { return `"${row.word}"*`; });
+			if (!words.length) {
+				return exact;
+			}
+			corrected = true;
+			return `(${[exact, ...words].join(' OR ')})`;
+		});
+		return (corrected ? groups.join(' AND ') : null);
+	} catch {
+		return null;
+	}
+}
+
 function search(db, pattern, opts = {}) {
 	if (!pattern) {
 		console.error('Usage: virgo indexer search <term> [--dataset <names>] [--path <pattern>] [--type file|dir]');
@@ -133,7 +168,8 @@ function search(db, pattern, opts = {}) {
 		// They are combined before ordering and paging: answering one page from
 		// the first and the next from the second repeated some files and never
 		// showed others.
-		const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"*';
+		const fuzzy = fuzzyFtsQuery(db, pattern);
+		const ftsQuery = '"' + pattern.replace(/"/g, '""') + '"*' + (fuzzy ? ` OR (${fuzzy})` : '');
 		const substring = '%' + pattern + '%';
 		try {
 			fileIds = db.prepare(`

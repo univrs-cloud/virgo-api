@@ -33,6 +33,8 @@ jobs:
 
       - run: npm ci
 
+      - run: bash scripts/spellfix.sh
+
       - run: npm run deb
         env:
           DEB_ARCH: ${{ matrix.architecture }}

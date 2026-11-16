@@ -1,8 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
-import { statSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
+const SPELLFIX_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'spellfix.so');
 const INDEX_DB_DIR = '/messier/.config';
 const INDEX_DB_NAME = 'index.db';
 const INDEX_DB_PATH = path.join(INDEX_DB_DIR, INDEX_DB_NAME);
@@ -137,7 +139,15 @@ function open(dbPath = null) {
 		dbPath = INDEX_DB_PATH;
 	}
 
-	const db = new DatabaseSync(dbPath);
+	const db = new DatabaseSync(dbPath, { allowExtension: true });
+	if (existsSync(SPELLFIX_PATH)) {
+		try {
+			db.loadExtension(SPELLFIX_PATH);
+		} catch (e) {
+			console.warn(`  ⚠  Fuzzy search unavailable: ${e.message}`);
+		}
+	}
+	db.enableLoadExtension(false);
 
 	db.exec(`
 		PRAGMA journal_mode = WAL;
