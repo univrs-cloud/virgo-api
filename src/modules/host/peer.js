@@ -22,6 +22,7 @@ const ADOPTION_GRACE_MS = 60000;
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_CHECK_TIMEOUT_MS = 5000;
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
+const NONCE_PATTERN = /^[0-9a-f]{32}$/;
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const PEER_ROUTE_PREFIX = 'peer.';
@@ -35,8 +36,37 @@ const reconciled = new Set();
 const pairing = new Map();
 const pairingKeys = new Map();
 
-const sign = (key, nonce) => {
-	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(String(nonce)).digest('hex');
+const signCall = (key, nonce, event, body) => {
+	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(JSON.stringify(['call', nonce, event, body])).digest('hex');
+};
+
+const signReply = (key, nonce, event, body) => {
+	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(JSON.stringify(['reply', nonce, event, body])).digest('hex');
+};
+
+const readCall = (key, nonce, event, request) => {
+	if (typeof request?.payload !== 'string' || !matches(request.token, signCall(key, nonce, event, request.payload))) {
+		return null;
+	}
+
+	try {
+		const payload = JSON.parse(request.payload);
+		return (NONCE_PATTERN.test(String(payload?.replyNonce || '')) ? payload : null);
+	} catch (error) {
+		return null;
+	}
+};
+
+const readReply = (key, nonce, event, response) => {
+	if (typeof response?.payload !== 'string' || !matches(response.signature, signReply(key, nonce, event, response.payload))) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(response.payload);
+	} catch (error) {
+		return null;
+	}
 };
 
 const isSameVersion = (version) => {
@@ -402,7 +432,7 @@ const attachNamespace = () => {
 				}
 
 				if (!isSameVersion(request.version)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs virgo-api ${request.version || 'unknown'}, ${self.name || self.address} runs ${self.version}.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs ${(request.version ? `virgo-api ${request.version}` : 'an older virgo-api version')}, ${self.name || self.address} runs ${self.version}.` });
 					return;
 				}
 
@@ -445,108 +475,75 @@ const attachNamespace = () => {
 		// A recognised id is not proof. Every call carries a token over this connection's nonce, so the
 		// key authorises the action rather than merely knowing whose id to claim.
 		const nonce = crypto.randomBytes(16).toString('hex');
-		const verify = async (payload) => {
-			if (!matches(payload?.token, sign(connection.identity.peer.key, nonce))) {
-				return false;
-			}
+		const handle = (event, handler) => {
+			connection.on(event, async (request, acknowledge) => {
+				const payload = readCall(connection.identity.peer.key, nonce, event, request);
+				if (!payload) {
+					acknowledge({ status: 'failed', message: 'Not authorised.' });
+					return;
+				}
 
-			await observeClock(payload.clock);
-			return true;
+				await observeClock(payload.clock);
+				await handler(payload, (body) => {
+					const signed = JSON.stringify(body);
+					acknowledge({ payload: signed, signature: signReply(connection.identity.peer.key, payload.replyNonce, event, signed) });
+				});
+			});
 		};
-		connection.on('peer:remove', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('peer:remove', async (payload, respond) => {
 			await forgetPeer(connection.identity.peer.id);
-			acknowledge({ status: 'ok' });
+			respond({ status: 'ok' });
 		});
-		connection.on('peer:introduce', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('peer:introduce', async (payload, respond) => {
 			if (!payload?.node?.id || !payload?.node?.address) {
-				acknowledge({ status: 'failed', message: 'Nothing to introduce.' });
+				respond({ status: 'failed', message: 'Nothing to introduce.' });
 				return;
 			}
 
 			const joined = await joinIntroduced(payload.node);
-			acknowledge(joined ? { status: 'ok', clock: await loadClock() } : { status: 'failed', message: `Could not pair with ${payload.node.name || payload.node.address}.` });
+			respond(joined ? { status: 'ok', clock: await loadClock() } : { status: 'failed', message: `Could not pair with ${payload.node.name || payload.node.address}.` });
 		});
-		connection.on('peer:forget', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('peer:forget', async (payload, respond) => {
 			const self = await describeSelf();
 			if (payload?.id && payload.id !== self.id && payload.id !== connection.identity.peer.id) {
 				await removePeer(payload.id, payload.removedClock, [connection.identity.peer.id, ...(Array.isArray(payload.confirmedBy) ? payload.confirmedBy : [])]);
 			}
 
-			acknowledge({ status: 'ok', clock: await loadClock() });
+			respond({ status: 'ok', clock: await loadClock() });
 		});
-		connection.on('peer:list', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('peer:list', async (payload, respond) => {
 			const peers = (await readConfiguration()).map((peer) => {
 				return { id: peer.id, name: peer.name, address: peer.address, pairedClock: (Number(peer.pairedClock) || 0) };
 			});
 			const removed = (await readRemoved()).map((entry) => { return { id: entry.id, clock: (Number(entry.clock) || 0) }; });
-			acknowledge({ status: 'ok', peers, removed, clock: await loadClock() });
+			respond({ status: 'ok', peers, removed, clock: await loadClock() });
 		});
-		connection.on('virtualIp:configure', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('virtualIp:configure', async (payload, respond) => {
 			// Whether this is allowed is decided where the address lives, not here: a node holding it
 			// refuses to be rewritten.
 			hostModule?.eventEmitter.emit('host:peer:virtualIp:configure', payload.virtualIp);
-			acknowledge({ status: 'ok' });
+			respond({ status: 'ok' });
 		});
-		connection.on('virtualIp:current', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
-			acknowledge({ status: 'ok', virtualIp: await virtualIpConfiguration() });
+		handle('virtualIp:current', async (payload, respond) => {
+			respond({ status: 'ok', virtualIp: await virtualIpConfiguration() });
 		});
-		connection.on('virtualIp:promote', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('virtualIp:promote', async (payload, respond) => {
 			try {
 				await hostModule.addJob('host:network:virtualIp:promote', { username: connection.identity.peer.name || 'peer' });
-				acknowledge({ status: 'ok' });
+				respond({ status: 'ok' });
 			} catch (error) {
-				acknowledge({ status: 'failed', message: 'Could not take the virtual IP over.' });
+				respond({ status: 'failed', message: 'Could not take the virtual IP over.' });
 			}
 		});
-		connection.on('virtualIp:release', async (payload, acknowledge) => {
-			if (!await verify(payload)) {
-				acknowledge({ status: 'failed', message: 'Not authorised.' });
-				return;
-			}
-
+		handle('virtualIp:release', async (payload, respond) => {
 			// The only thing a peer may ask for, and only ever to let go — never to take. Recorded under
 			// the asking node's name so the job history shows which node the migration came from; the
 			// admin who started it is on that node.
 			try {
 				await hostModule.addJob('host:network:virtualIp:release', { username: connection.identity.peer.name || 'peer' });
-				acknowledge({ status: 'ok' });
+				respond({ status: 'ok' });
 			} catch (error) {
-				acknowledge({ status: 'failed', message: 'Could not release the virtual IP.' });
+				respond({ status: 'failed', message: 'Could not release the virtual IP.' });
 			}
 		});
 		connection.emit('challenge', nonce);
@@ -578,14 +575,22 @@ const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) =
 
 	const connection = connectToPeer(address, { mode: 'call', nodeId: self.id });
 	const sent = await loadClock();
+	const replyNonce = crypto.randomBytes(16).toString('hex');
 	try {
 		const answer = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, timeout);
 			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${peer.name || peer.address}.`)); });
 			connection.on('challenge', (nonce) => {
-				connection.emit(event, { ...payload, token: sign(peer.key, nonce), clock: sent }, (response) => {
+				const body = JSON.stringify({ ...payload, clock: sent, replyNonce });
+				connection.emit(event, { payload: body, token: signCall(peer.key, nonce, event, body) }, (response) => {
 					clearTimeout(timer);
-					(response?.status === 'ok' ? resolve(response) : reject(new Error(response?.message || `${peer.name || peer.address} refused.`)));
+					const verified = readReply(peer.key, replyNonce, event, response);
+					if (!verified) {
+						reject(new Error(`${peer.name || peer.address} sent an answer that could not be verified.`));
+						return;
+					}
+
+					(verified.status === 'ok' ? resolve(verified) : reject(new Error(verified.message || `${peer.name || peer.address} refused.`)));
 				});
 			});
 		});
@@ -632,7 +637,7 @@ const pairWith = async (nodeId, address, adopting = false) => {
 		}
 
 		if (!isSameVersion(response.node?.version)) {
-			throw new Error(`${response.node?.name || address} runs virgo-api ${response.node?.version || 'unknown'}, this node runs ${self.version}.`);
+			throw new Error(`${response.node?.name || address} runs ${(response.node?.version ? `virgo-api ${response.node.version}` : 'an older virgo-api version')}, this node runs ${self.version}.`);
 		}
 
 		const key = (response.key || offered);
@@ -706,7 +711,7 @@ const adopt = async (job, module) => {
 	}
 
 	if (!isSameVersion(peer.version)) {
-		throw new Error(`${peer.name || peer.address} runs virgo-api ${peer.version || 'unknown'}, this node runs ${pkg.version}. Update both to the same version first.`);
+		throw new Error(`${peer.name || peer.address} runs ${(peer.version ? `virgo-api ${peer.version}` : 'an older virgo-api version')}, this node runs ${pkg.version}. Update both to the same version first.`);
 	}
 
 	const configured = await virtualIpConfiguration();
