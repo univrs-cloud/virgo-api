@@ -20,7 +20,7 @@
 		"init": "systemd",
 		"install_dir": "/var/www",
 		"extra_files": "deb-extra",
-		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,network-manager,avahi-daemon,avahi-utils,zip",
+		"dependencies": "apt-show-versions,smartmontools,nvme-cli,jq,msmtp-mta,bsd-mailx,redis-server,iputils-arping,network-manager,avahi-daemon,avahi-utils,zip,mbuffer,pv",
 		"user": "root",
 		"templates": {
 			"preinst": "templates/preinstall",
