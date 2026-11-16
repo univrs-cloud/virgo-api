@@ -4,6 +4,7 @@ import https from 'https';
 import path from 'path';
 import { io as ioClient } from 'socket.io-client';
 import si from 'systeminformation';
+import pkg from '../../../package.json' with { type: 'json' };
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as database from '../../database/index.js';
@@ -36,6 +37,10 @@ const pairingKeys = new Map();
 
 const sign = (key, nonce) => {
 	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(String(nonce)).digest('hex');
+};
+
+const isSameVersion = (version) => {
+	return String(version || '').toLowerCase() === String(pkg.version).toLowerCase();
 };
 
 const matches = (first, second) => {
@@ -163,7 +168,8 @@ const describeSelf = async () => {
 		id: await advertisement.getNodeId(),
 		name: (hostModule?.getState('system')?.osInfo?.hostname || ''),
 		address: await getOwnAddress(virtualIp?.address),
-		cluster: await getClusterDomain()
+		cluster: await getClusterDomain(),
+		version: pkg.version
 	};
 };
 
@@ -395,6 +401,11 @@ const attachNamespace = () => {
 					return;
 				}
 
+				if (!isSameVersion(request.version)) {
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs virgo-api ${request.version || 'unknown'}, ${self.name || self.address} runs ${self.version}.` });
+					return;
+				}
+
 				if (request.adopt) {
 					await dropStalePeers();
 				}
@@ -620,6 +631,10 @@ const pairWith = async (nodeId, address, adopting = false) => {
 			throw new Error('A different node answered.');
 		}
 
+		if (!isSameVersion(response.node?.version)) {
+			throw new Error(`${response.node?.name || address} runs virgo-api ${response.node?.version || 'unknown'}, this node runs ${self.version}.`);
+		}
+
 		const key = (response.key || offered);
 		if (!KEY_PATTERN.test(String(key || ''))) {
 			throw new Error('Pairing was refused.');
@@ -688,6 +703,10 @@ const adopt = async (job, module) => {
 
 	if (!peer.setupCompleted) {
 		throw new Error(`${peer.name || peer.address} has not finished its own setup yet.`);
+	}
+
+	if (!isSameVersion(peer.version)) {
+		throw new Error(`${peer.name || peer.address} runs virgo-api ${peer.version || 'unknown'}, this node runs ${pkg.version}. Update both to the same version first.`);
 	}
 
 	const configured = await virtualIpConfiguration();

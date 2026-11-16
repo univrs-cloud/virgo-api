@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import si from 'systeminformation';
 import { execa } from 'execa';
 import ini from 'ini';
+import pkg from '../../../package.json' with { type: 'json' };
 import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
@@ -77,7 +78,8 @@ const buildRecords = async () => {
 	const records = {
 		id: await getNodeId(),
 		name: os.hostname(),
-		setup: (setup.isCompleted() ? 'complete' : 'incomplete')
+		setup: (setup.isCompleted() ? 'complete' : 'incomplete'),
+		version: pkg.version
 	};
 
 	const { virtualIp } = await DataService.getConfiguration();
