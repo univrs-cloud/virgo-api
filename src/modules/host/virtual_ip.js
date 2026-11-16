@@ -10,6 +10,7 @@ const ENVIRONMENT_FILE = '/etc/default/virgo-virtual-ip';
 const UNIT = 'virgo-virtual-ip.service';
 const HANDOVER_TIMEOUT_MS = 15000;
 const HANDOVER_INTERVAL_MS = 500;
+const RETRY_INTERVAL_MS = 30000;
 
 const toInteger = (address) => {
 	return address.split('.').reduce((total, octet) => { return ((total << 8) >>> 0) + Number(octet); }, 0) >>> 0;
@@ -376,8 +377,31 @@ const announce = async () => {
 	}
 };
 
+const retryClaim = async (module) => {
+	const { stdout } = await execa('systemctl', ['is-active', UNIT], { reject: false });
+	if (stdout.trim().toLowerCase() !== 'failed' || !await isEnabled()) {
+		return;
+	}
+
+	const configuration = await readConfiguration();
+	if (!configuration?.address) {
+		return;
+	}
+
+	const { exitCode } = await execa('systemctl', ['start', UNIT], { reject: false });
+	if (exitCode === 0 && await holdsAddress(configuration.address)) {
+		console.log(`Claimed ${configuration.address} after the check at boot could not.`);
+		module.eventEmitter.emit('host:network:virtualIp:updated');
+	}
+};
+
 const register = (module) => {
 	announce();
+	setInterval(() => {
+		retryClaim(module).catch((error) => {
+			console.warn(`Could not retry claiming the virtual IP: ${error.shortMessage || error.message}`);
+		});
+	}, RETRY_INTERVAL_MS);
 	module.eventEmitter.on('host:peer:virtualIp:received', (received) => {
 		adoptConfiguration(received, module);
 	});
