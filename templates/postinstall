@@ -106,6 +106,16 @@ run_migrations() {
 	/usr/local/bin/node run.js
 }
 
+restrict_config_dir() {
+	local config_dir="/messier/.config"
+	if [ ! -d "$config_dir" ] || [ "$(stat -c %a "$config_dir")" = "700" ]; then
+		return
+	fi
+
+	chmod 700 "$config_dir"
+	echo "Restricted $config_dir to its owner."
+}
+
 configure_mail
 configure_services
 
@@ -119,5 +129,6 @@ if ! ischroot; then
 	install_mdns_dispatcher
 	configure_gateway_wait
 	run_migrations
+	restrict_config_dir
 	systemctl start virgo-api.service
 fi

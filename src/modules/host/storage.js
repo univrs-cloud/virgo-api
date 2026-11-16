@@ -275,6 +275,8 @@ const createDirectories = async () => {
 	for (const directory of [`/${POOL_NAME}/apps`, SHARES_DIR, CONFIG_DIR]) {
 		await execa('chown', ['-R', OWNER, directory], { reject: false });
 	}
+
+	await fs.chmod(CONFIG_DIR, 0o700);
 };
 
 /** Everything the pool needs before anything can be installed on it. Each part checks its own work
