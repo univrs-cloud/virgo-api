@@ -17,6 +17,10 @@ configure_mail() {
 	fi
 }
 
+install_snapshot_schedule() {
+	install -v -m 755 "$app_dir/systemd/virgo-snapshot-schedule" /usr/local/bin/virgo-snapshot-schedule
+}
+
 install_virtual_ip_unit() {
 	install -v -m 755 "$app_dir/systemd/virgo-virtual-ip-guard" /usr/local/bin/virgo-virtual-ip-guard
 	install -v -m 644 "$app_dir/systemd/virgo-virtual-ip.service" /lib/systemd/system/virgo-virtual-ip.service
@@ -118,6 +122,7 @@ restrict_config_dir() {
 
 configure_mail
 configure_services
+install_snapshot_schedule
 
 if ! ischroot; then
 	generate_certificate

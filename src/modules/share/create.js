@@ -10,7 +10,7 @@ const slug = (comment) => {
 
 const createFolder = async (job, module) => {
 	const { config } = job.data;
-	const { comment, validUsers = [], refquota: refquotaRaw, path: customPath, snapshots } = config;
+	const { comment, validUsers = [], refquota: refquotaRaw, path: customPath, snapshots, snapshotRule } = config;
 	await module.updateJobProgress(job, `Creating folder ${comment}...`);
 
 	let sharePath;
@@ -32,7 +32,13 @@ const createFolder = async (job, module) => {
 			try {
 				await sanoid.setMode(dataset, 'disabled');
 			} catch (error) {
-				snapshotsError = error;
+				snapshotsError = `its snapshots could not be disabled: ${error.message}`;
+			}
+		} else if (snapshotRule) {
+			try {
+				await sanoid.setRule(dataset, snapshotRule);
+			} catch (error) {
+				snapshotsError = `its snapshot rule could not be set: ${error.message}`;
 			}
 		}
 	}
@@ -75,7 +81,7 @@ const createFolder = async (job, module) => {
 	}
 	module.eventEmitter.emit('shares:updated');
 	if (snapshotsError) {
-		throw new Error(`Folder ${comment} created, but its snapshots could not be disabled: ${snapshotsError.message}`);
+		throw new Error(`Folder ${comment} created, but ${snapshotsError}`);
 	}
 
 	return `Folder ${comment} created.`;

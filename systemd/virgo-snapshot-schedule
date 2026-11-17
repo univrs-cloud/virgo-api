@@ -1,0 +1,47 @@
+#!/bin/bash
+
+days=(monday tuesday wednesday thursday friday saturday sunday)
+today=${days[$(($(date +%u) - 1))]}
+hour=$((10#$(date +%H)))
+
+is_day_allowed=1
+is_hour_allowed=1
+for argument in "$@"; do
+	key=${argument%%=*}
+	IFS=, read -ra values <<< "${argument#*=}"
+	if [ "$key" = "days" ]; then
+		is_day_allowed=0
+		for day in "${values[@]}"; do
+			if [ "$day" = "$today" ]; then
+				is_day_allowed=1
+			fi
+		done
+	fi
+	if [ "$key" = "hours" ]; then
+		is_hour_allowed=0
+		for range in "${values[@]}"; do
+			start=${range%-*}
+			end=${range#*-}
+			if [ "$hour" -ge "$start" ] && [ "$hour" -le "$end" ]; then
+				is_hour_allowed=1
+			fi
+		done
+	fi
+done
+
+IFS=, read -ra types <<< "$SANOID_TYPES"
+for type in "${types[@]}"; do
+	case "$type" in
+		weekly|monthly|yearly)
+			exit 0
+			;;
+		daily)
+			[ "$is_day_allowed" -eq 1 ] && exit 0
+			;;
+		hourly|frequently)
+			[ "$is_day_allowed" -eq 1 ] && [ "$is_hour_allowed" -eq 1 ] && exit 0
+			;;
+	esac
+done
+
+exit 1

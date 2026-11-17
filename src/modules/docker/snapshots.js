@@ -4,8 +4,9 @@ import * as sanoid from '../../utils/sanoid.js';
 
 const updateSnapshots = async (job, module) => {
 	const { config } = job.data;
+	const rule = config?.rule;
 	const mode = String(config?.mode ?? '').toLowerCase();
-	if (!sanoid.MODES.includes(mode)) {
+	if ((mode || !rule) && !sanoid.MODES.includes(mode)) {
 		throw new Error(`Snapshots mode must be one of: ${sanoid.MODES.join(', ')}.`);
 	}
 
@@ -23,8 +24,17 @@ const updateSnapshots = async (job, module) => {
 	}
 
 	await module.updateJobProgress(job, `Updating ${app.title} snapshots...`);
-	await sanoid.setMode(`${module.appsDataset}/${app.name}`, mode);
+	if (mode) {
+		await sanoid.setMode(`${module.appsDataset}/${app.name}`, mode);
+	}
+	if (rule) {
+		await sanoid.setRule(`${module.appsDataset}/${app.name}`, rule);
+	}
 	module.eventEmitter.emit('configured:updated');
+	if (rule) {
+		return `${app.title} snapshots ${(mode ? `${mode}, ` : '')}following the rule ${rule}.`;
+	}
+
 	return `${app.title} snapshots ${mode}.`;
 };
 

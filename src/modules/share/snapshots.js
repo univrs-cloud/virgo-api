@@ -4,9 +4,9 @@ import * as sanoid from '../../utils/sanoid.js';
 
 const updateSnapshots = async (job, module) => {
 	const { config } = job.data;
-	const { name } = config;
+	const { name, rule } = config;
 	const mode = String(config?.mode ?? '').toLowerCase();
-	if (!sanoid.MODES.includes(mode)) {
+	if ((mode || !rule) && !sanoid.MODES.includes(mode)) {
 		throw new Error(`Snapshots mode must be one of: ${sanoid.MODES.join(', ')}.`);
 	}
 
@@ -32,8 +32,17 @@ const updateSnapshots = async (job, module) => {
 	}
 
 	await module.updateJobProgress(job, `Updating folder ${share.comment} snapshots...`);
-	await sanoid.setMode(dataset, mode);
+	if (mode) {
+		await sanoid.setMode(dataset, mode);
+	}
+	if (rule) {
+		await sanoid.setRule(dataset, rule);
+	}
 	module.eventEmitter.emit('shares:updated');
+	if (rule) {
+		return `Folder ${share.comment} snapshots ${(mode ? `${mode}, ` : '')}following the rule ${rule}.`;
+	}
+
 	return `Folder ${share.comment} snapshots ${mode}.`;
 };
 

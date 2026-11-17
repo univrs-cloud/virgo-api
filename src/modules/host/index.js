@@ -45,6 +45,7 @@ class HostModule extends BaseModule {
 			storage: { event: 'host:storage' },
 			importable: { event: 'host:storage:importable' },
 			snapshots: { event: 'host:storage:snapshots', audience: 'admin' },
+			snapshotRules: { event: 'host:snapshotRules', audience: 'admin' },
 			time: { event: 'host:time' },
 			rebootRequired: { event: 'host:rebootRequired', audience: 'admin' },
 			updates: {
