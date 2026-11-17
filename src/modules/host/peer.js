@@ -432,7 +432,7 @@ const attachNamespace = () => {
 				}
 
 				if (!isSameVersion(request.version)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs ${(request.version ? `virgo-api ${request.version}` : 'an older virgo-api version')}, ${self.name || self.address} runs ${self.version}.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs ${(request.version ? `version ${request.version}` : 'an older version')}, ${self.name || self.address} runs version ${self.version}.` });
 					return;
 				}
 
@@ -637,7 +637,7 @@ const pairWith = async (nodeId, address, adopting = false) => {
 		}
 
 		if (!isSameVersion(response.node?.version)) {
-			throw new Error(`${response.node?.name || address} runs ${(response.node?.version ? `virgo-api ${response.node.version}` : 'an older virgo-api version')}, this node runs ${self.version}.`);
+			throw new Error(`${response.node?.name || address} runs ${(response.node?.version ? `version ${response.node.version}` : 'an older version')}, this node runs version ${self.version}.`);
 		}
 
 		const key = (response.key || offered);
@@ -711,7 +711,7 @@ const adopt = async (job, module) => {
 	}
 
 	if (!isSameVersion(peer.version)) {
-		throw new Error(`${peer.name || peer.address} runs ${(peer.version ? `virgo-api ${peer.version}` : 'an older virgo-api version')}, this node runs ${pkg.version}. Update both to the same version first.`);
+		throw new Error(`${peer.name || peer.address} runs ${(peer.version ? `version ${peer.version}` : 'an older version')}, this node runs version ${pkg.version}. Update both to the same version first.`);
 	}
 
 	const configured = await virtualIpConfiguration();
