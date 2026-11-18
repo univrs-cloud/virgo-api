@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import { Server } from 'socket.io';
+import { folderPath } from './controllers/static.js';
 import * as readiness from './utils/readiness.js';
 import * as trustedProxy from './utils/trusted_proxy.js';
 import { isLoopbackAddress } from './utils/private_address.js';
@@ -24,12 +27,20 @@ const isSameOrigin = (request) => {
 	}
 };
 
+const isAsset = (request) => {
+	return (request.method === 'GET' && String(request.url || '').startsWith('/assets/'));
+};
+
+const isPage = (request) => {
+	return (request.method === 'GET' && Boolean(request.headers.accept?.includes('text/html')));
+};
+
 const gateStarting = (server) => {
 	const wrap = (event, deny) => {
 		const listeners = server.listeners(event).slice();
 		server.removeAllListeners(event);
 		server.on(event, async (request, ...rest) => {
-			if (!isLoopbackAddress(request.socket?.remoteAddress) && await readiness.isStarting()) {
+			if (!isLoopbackAddress(request.socket?.remoteAddress) && !isAsset(request) && await readiness.isStarting()) {
 				deny(request, ...rest);
 				return;
 			}
@@ -38,8 +49,17 @@ const gateStarting = (server) => {
 		});
 	};
 
-	wrap('request', (request, response) => {
-		response.writeHead(503, { 'retry-after': '5', 'content-type': 'application/json' });
+	wrap('request', async (request, response) => {
+		if (isPage(request)) {
+			try {
+				const html = await fs.promises.readFile(path.join(folderPath, 'index.html'), 'utf8');
+				response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+				response.end(html);
+				return;
+			} catch (error) {}
+		}
+
+		response.writeHead(503, { 'content-type': 'application/json' });
 		response.end(JSON.stringify({ message: 'Starting' }));
 	});
 	wrap('upgrade', (request, socket) => {
