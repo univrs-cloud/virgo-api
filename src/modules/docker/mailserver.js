@@ -345,18 +345,18 @@ const addDomain = async (job, module) => {
 	});
 };
 
-const removeDomain = async (job, module) => {
+const deleteDomain = async (job, module) => {
 	return await run(job, module, async (config) => {
 		const domain = normalizeDomain(config.domain);
 		await loadState(module);
 		const entry = module.toArray(module.getState('mailserver')?.domains).find((item) => { return item.name === domain; });
 		if (entry && (entry.accounts > 0 || entry.aliases > 0)) {
-			throw new Error(`Remove the accounts and aliases of ${domain} first.`);
+			throw new Error(`Delete the accounts and remove the aliases of ${domain} first.`);
 		}
 
-		await module.updateJobProgress(job, `Removing ${domain}...`);
+		await module.updateJobProgress(job, `Deleting ${domain}...`);
 		await removeDkimKey(module, domain);
-		return `${domain} removed.`;
+		return `${domain} deleted.`;
 	});
 };
 
@@ -393,13 +393,13 @@ const addAccount = async (job, module) => {
 	});
 };
 
-const removeAccount = async (job, module) => {
+const deleteAccount = async (job, module) => {
 	return await run(job, module, async (config) => {
 		const email = normalizeEmail(config.email);
 		const container = requireMailContainer(module);
-		await module.updateJobProgress(job, `Removing ${email}...`);
-		await setup(container, ['email', 'del', '-y', email], undefined, `Could not remove ${email}. Try again later.`);
-		return `${email} removed.`;
+		await module.updateJobProgress(job, `Deleting ${email}...`);
+		await setup(container, ['email', 'del', '-y', email], undefined, `Could not delete ${email}. Try again later.`);
+		return `${email} deleted.`;
 	});
 };
 
@@ -499,10 +499,10 @@ export default {
 			}
 		},
 		'app:mailserver:domain:add': { job: 'app:mailserver:domain:add' },
-		'app:mailserver:domain:remove': { job: 'app:mailserver:domain:remove' },
+		'app:mailserver:domain:delete': { job: 'app:mailserver:domain:delete' },
 		'app:mailserver:dkim:regenerate': { job: 'app:mailserver:dkim:regenerate' },
 		'app:mailserver:account:add': { job: 'app:mailserver:account:add' },
-		'app:mailserver:account:remove': { job: 'app:mailserver:account:remove' },
+		'app:mailserver:account:delete': { job: 'app:mailserver:account:delete' },
 		'app:mailserver:account:password': { job: 'app:mailserver:account:password' },
 		'app:mailserver:account:quota': { job: 'app:mailserver:account:quota' },
 		'app:mailserver:alias:add': { job: 'app:mailserver:alias:add' },
@@ -512,10 +512,10 @@ export default {
 	},
 	jobs: {
 		'app:mailserver:domain:add': addDomain,
-		'app:mailserver:domain:remove': removeDomain,
+		'app:mailserver:domain:delete': deleteDomain,
 		'app:mailserver:dkim:regenerate': regenerateDkim,
 		'app:mailserver:account:add': addAccount,
-		'app:mailserver:account:remove': removeAccount,
+		'app:mailserver:account:delete': deleteAccount,
 		'app:mailserver:account:password': changePassword,
 		'app:mailserver:account:quota': setQuota,
 		'app:mailserver:alias:add': addAlias,
