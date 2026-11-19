@@ -308,10 +308,6 @@ const toQuotaArgument = (quota) => {
 		return null;
 	}
 
-	if (quota === 'unlimited') {
-		return '0';
-	}
-
 	if (!Number.isInteger(quota) || quota < 1) {
 		throw new Error('Enter a storage limit of at least 1 GiB.');
 	}
