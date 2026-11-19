@@ -274,6 +274,34 @@ const editUser = async (job, module) => {
 	});
 };
 
+const changeUserPassword = async (job, module) => {
+	return await module.withAppLock(APP_NAME, async () => {
+		const password = String(job.data?.config?.password ?? '');
+		if (password.length < 8 || /[\r\n]/.test(password)) {
+			throw new Error('Use a password of at least 8 characters, on one line.');
+		}
+
+		const container = findNextcloudContainer(module);
+		if (!container) {
+			throw new Error('Nextcloud is not running. Start it and try again.');
+		}
+
+		await loadAccounts(module);
+		const user = module.toArray(module.getState('nextcloudAccounts')?.users).find((item) => { return item.id === job.data?.config?.user; });
+		if (!user) {
+			throw new Error('This account no longer exists. Open the list again.');
+		}
+
+		await module.updateJobProgress(job, `Changing the password of ${user.displayName}...`);
+		const { exitCode } = await occ(container, ['user:resetpassword', '--password-from-env', user.id], password);
+		if (exitCode !== 0) {
+			throw new Error(`Could not change the password of ${user.displayName}. Try again later.`);
+		}
+
+		return `Password of ${user.displayName} changed.`;
+	});
+};
+
 const setUserEnabled = async (job, module, isEnabling) => {
 	return await module.withAppLock(APP_NAME, async () => {
 		try {
@@ -294,13 +322,13 @@ const setUserEnabled = async (job, module, isEnabling) => {
 				throw new Error('Nextcloud needs at least one administrator. Make another account an administrator first.');
 			}
 
-			await module.updateJobProgress(job, `${(isEnabling ? 'Enabling' : 'Disabling')} ${user.displayName}...`);
+			await module.updateJobProgress(job, `${(isEnabling ? 'Unlocking' : 'Locking')} ${user.displayName}...`);
 			const { exitCode } = await occ(container, [(isEnabling ? 'user:enable' : 'user:disable'), user.id]);
 			if (exitCode !== 0) {
-				throw new Error(`Could not ${(isEnabling ? 'enable' : 'disable')} ${user.displayName}. Try again later.`);
+				throw new Error(`Could not ${(isEnabling ? 'unlock' : 'lock')} ${user.displayName}. Try again later.`);
 			}
 
-			return `${user.displayName} ${(isEnabling ? 'enabled' : 'disabled')}.`;
+			return `${user.displayName} ${(isEnabling ? 'unlocked' : 'locked')}.`;
 		} finally {
 			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
 		}
@@ -584,6 +612,7 @@ export default {
 		'app:nextcloud:update': { job: 'app:nextcloud:update' },
 		'app:nextcloud:user:add': { job: 'app:nextcloud:user:add' },
 		'app:nextcloud:user:edit': { job: 'app:nextcloud:user:edit' },
+		'app:nextcloud:user:password': { job: 'app:nextcloud:user:password' },
 		'app:nextcloud:user:enable': { job: 'app:nextcloud:user:enable' },
 		'app:nextcloud:user:disable': { job: 'app:nextcloud:user:disable' },
 		'app:nextcloud:user:delete': { job: 'app:nextcloud:user:delete' },
@@ -604,6 +633,9 @@ export default {
 		},
 		'app:nextcloud:user:add': (job, module) => {
 			return addUser(job, module);
+		},
+		'app:nextcloud:user:password': (job, module) => {
+			return changeUserPassword(job, module);
 		},
 		'app:nextcloud:user:edit': (job, module) => {
 			return editUser(job, module);
