@@ -191,7 +191,7 @@ class DockerModule extends BaseModule {
 	}
 
 	/** The available app updates grouped per app for remote consumers (the fleet), which only ever see
-	 * this node through what it reports: `[{ name, title, services }]`, or false while unknown. The
+	 * this node through what it reports: `[{ name, title, services, nextcloudApps }]`, or false while unknown. The
 	 * local `updates` state stays a flat container list, since that is what this node's own pages
 	 * match against. */
 	getAppUpdatesSummary() {
@@ -221,6 +221,15 @@ class DockerModule extends BaseModule {
 			if (service && !services.includes(service)) {
 				services.push(service);
 			}
+		}
+
+		const nextcloudAppUpdates = this.toArray(this.getState('nextcloudAppUpdates'));
+		const nextcloud = configured.find((entry) => { return entry.type === 'app' && String(entry.name).toLowerCase() === 'nextcloud'; });
+		if (nextcloud && nextcloudAppUpdates.length > 0) {
+			if (!apps.has(nextcloud.name)) {
+				apps.set(nextcloud.name, { name: nextcloud.name, title: nextcloud.title || nextcloud.name, services: [] });
+			}
+			apps.get(nextcloud.name).nextcloudApps = nextcloudAppUpdates.map((update) => { return update.id; });
 		}
 
 		return [...apps.values()]

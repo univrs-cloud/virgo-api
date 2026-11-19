@@ -15,7 +15,7 @@ const listPendingJobs = async (module) => {
 };
 
 const isAppUpdateJob = (job) => {
-	return job?.name === 'app:update' && !!job.data?.config?.name;
+	return ['app:update', 'app:nextcloud:update'].includes(job?.name) && !!job.data?.config?.name;
 };
 
 const register = (module) => {
