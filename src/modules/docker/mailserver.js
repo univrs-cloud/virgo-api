@@ -5,7 +5,7 @@ import { execa } from 'execa';
 
 const APP_NAME = 'mailserver';
 const DEFAULT_SELECTOR = 'dms';
-const KNOWN_SELECTORS = [DEFAULT_SELECTOR, 'mail'];
+const UNMAPPED_SELECTOR = 'mail';
 const DKIM_RECORD_SUFFIX = '.public.dns.txt';
 const DKIM_KEY_SUFFIXES = ['.private', '.public.txt', DKIM_RECORD_SUFFIX];
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -112,71 +112,28 @@ const readSelectors = async (module) => {
 	return selectors;
 };
 
-const CONTAINER_CONFIG_DIR = '/tmp/docker-mailserver';
-
-const readSigningDomains = async (module) => {
-	let content;
-	try {
-		content = await fs.readFile(path.join(configDir(module), 'rspamd', 'override.d', 'dkim_signing.conf'), 'utf-8');
-	} catch (error) {
-		return {};
-	}
-
-	const text = content.split('\n').map((line) => { return line.replace(/#.*$/, ''); }).join('\n');
-	const start = /\bdomain\s*\{/.exec(text);
-	if (!start) {
-		return {};
-	}
-
-	const domains = {};
-	for (const [, name, body] of text.slice(start.index + start[0].length).matchAll(/([a-z0-9.-]+)\s*\{([^{}]*)\}/gi)) {
-		const keyPath = /\bpath\s*=\s*"([^"]+)"/.exec(body)?.[1];
-		const selector = /\bselector\s*=\s*"([^"]+)"/.exec(body)?.[1];
-		if (keyPath && selector && keyPath.startsWith(`${CONTAINER_CONFIG_DIR}/`)) {
-			domains[name.toLowerCase()] = { selector, recordFile: path.join(configDir(module), keyPath.slice(CONTAINER_CONFIG_DIR.length + 1).replace(/\.private(\.txt)?$/, DKIM_RECORD_SUFFIX)) };
-		}
-	}
-	return domains;
-};
-
 const readDkim = async (module) => {
-	const keys = {};
-	for (const [domain, { selector, recordFile }] of Object.entries(await readSigningDomains(module))) {
-		try {
-			keys[domain] = { selector, record: (await fs.readFile(recordFile, 'utf-8')).trim() };
-		} catch (error) {
-			continue;
-		}
-	}
-
 	const dkimDir = path.join(configDir(module), 'rspamd', 'dkim');
-	const readRecord = async (domain, selector) => {
-		try {
-			keys[domain] = { selector, record: (await fs.readFile(path.join(dkimDir, `${domain}-${selector}${DKIM_RECORD_SUFFIX}`), 'utf-8')).trim() };
-		} catch (error) {
-			return;
-		}
-	};
-
-	for (const [domain, selector] of Object.entries(await readSelectors(module))) {
-		if (!keys[domain]) {
-			await readRecord(domain, selector);
-		}
-	}
-
+	const selectors = await readSelectors(module);
 	let files = [];
 	try {
 		files = await fs.readdir(dkimDir);
 	} catch (error) {
-		return keys;
+		return {};
 	}
 
-	for (const file of files.filter((name) => { return name.toLowerCase().endsWith(DKIM_RECORD_SUFFIX); })) {
-		const base = file.slice(0, -DKIM_RECORD_SUFFIX.length).toLowerCase();
-		const selector = KNOWN_SELECTORS.find((known) => { return base.endsWith(`-${known}`); });
-		const domain = (selector ? base.slice(0, -(selector.length + 1)) : null);
-		if (domain && !keys[domain]) {
-			await readRecord(domain, selector);
+	const unmappedSuffix = `-${UNMAPPED_SELECTOR}${DKIM_RECORD_SUFFIX}`;
+	const domains = new Set([
+		...Object.keys(selectors),
+		...files.filter((file) => { return file.toLowerCase().endsWith(unmappedSuffix); }).map((file) => { return file.slice(0, -unmappedSuffix.length).toLowerCase(); })
+	]);
+	const keys = {};
+	for (const domain of domains) {
+		const selector = (selectors[domain] ?? UNMAPPED_SELECTOR);
+		try {
+			keys[domain] = { selector, record: (await fs.readFile(path.join(dkimDir, `${domain}-${selector}${DKIM_RECORD_SUFFIX}`), 'utf-8')).trim() };
+		} catch (error) {
+			continue;
 		}
 	}
 	return keys;
@@ -325,13 +282,12 @@ const removeKeyFiles = async (module, domain, selectors) => {
 
 const createDkimKey = async (module, container, domain, isReplacing) => {
 	await setup(container, ['config', 'dkim', 'domain', domain, 'selector', DEFAULT_SELECTOR, ...(isReplacing ? ['--force'] : [])], undefined, `Could not create ${(isReplacing ? 'a new' : 'the')} DKIM key for ${domain}. Try again later.`);
-	await removeKeyFiles(module, domain, KNOWN_SELECTORS.filter((selector) => { return selector !== DEFAULT_SELECTOR; }));
 };
 
 const removeDkimKey = async (module, domain) => {
 	const rspamdDir = path.join(configDir(module), 'rspamd');
 	const mapped = (await readSelectors(module))[domain];
-	await removeKeyFiles(module, domain, [...new Set([...(mapped ? [mapped] : []), ...KNOWN_SELECTORS])]);
+	await removeKeyFiles(module, domain, [mapped ?? UNMAPPED_SELECTOR]);
 
 	const mapFile = path.join(rspamdDir, 'dkim_selectors.map');
 	let stats;
