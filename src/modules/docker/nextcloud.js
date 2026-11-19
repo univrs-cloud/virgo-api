@@ -1,3 +1,5 @@
+import { promises as fs } from 'fs';
+import path from 'path';
 import { execa } from 'execa';
 
 const APP_NAME = 'nextcloud';
@@ -33,6 +35,45 @@ const getInstalledVersions = async (container) => {
 	}
 };
 
+const getChangelogs = async (module) => {
+	const dataDir = path.join(module.appsDir, APP_NAME, 'data');
+	let catalogues = [];
+	try {
+		const entries = await fs.readdir(dataDir);
+		catalogues = await Promise.all(entries.filter((entry) => { return entry.toLowerCase().startsWith('appdata_'); }).map(async (entry) => {
+			const file = path.join(dataDir, entry, 'appstore', 'apps.json');
+			try {
+				return { file, modifiedAt: (await fs.stat(file)).mtimeMs };
+			} catch (error) {
+				return null;
+			}
+		}));
+	} catch (error) {
+		return {};
+	}
+
+	const [latest] = catalogues.filter(Boolean).sort((first, second) => { return second.modifiedAt - first.modifiedAt; });
+	if (!latest) {
+		return {};
+	}
+
+	try {
+		const { data } = JSON.parse(await fs.readFile(latest.file, 'utf-8'));
+		const changelogs = {};
+		for (const app of module.toArray(data)) {
+			for (const release of module.toArray(app?.releases)) {
+				const changelog = release?.translations?.en?.changelog;
+				if (typeof changelog === 'string' && changelog.trim() !== '') {
+					changelogs[`${app.id}@${release.version}`] = changelog.trim();
+				}
+			}
+		}
+		return changelogs;
+	} catch (error) {
+		return {};
+	}
+};
+
 const checkForUpdates = async (module, container) => {
 	if (!pendingCheck) {
 		pendingCheck = (async () => {
@@ -46,8 +87,9 @@ const checkForUpdates = async (module, container) => {
 
 			const updates = toLines(stdout).map((line) => { return UPDATE_LINE_PATTERN.exec(line); }).filter(Boolean);
 			const installedVersions = (updates.length > 0 ? await getInstalledVersions(container) : {});
+			const changelogs = (updates.length > 0 ? await getChangelogs(module) : {});
 			module.setState('nextcloudAppUpdates', updates.map(([, id, version]) => {
-				return { id, version, currentVersion: (typeof installedVersions[id] === 'string' ? installedVersions[id] : null) };
+				return { id, version, currentVersion: (typeof installedVersions[id] === 'string' ? installedVersions[id] : null), changelog: (changelogs[`${id}@${version}`] ?? null) };
 			}).sort((first, second) => { return first.id.localeCompare(second.id); }));
 			module.emitState('nextcloudAppUpdates');
 			module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
