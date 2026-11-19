@@ -12,9 +12,8 @@ const NEW_APPS_ICONS = path.join(NEW_ICONS_BASE, 'apps');
 const NEW_SHORTCUTS_ICONS = path.join(NEW_ICONS_BASE, 'shortcuts');
 
 const copyIconsToConfig = async () => {
-	try {
-		await execa('zpool', ['list', 'messier']);
-	} catch (error) {
+	const { exitCode: poolExists } = await execa('zpool', ['list', '-j', '-o', 'name', 'messier'], { reject: false });
+	if (poolExists !== 0) {
 		console.log(`ZFS pool 'messier' does not exist. Skipping icons copy.`);
 		return;
 	}

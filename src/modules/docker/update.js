@@ -51,9 +51,9 @@ const takeSnapshot = async (job, module, name, title, containers) => {
 		throw new Error(`Could not take ${title} snapshot.`);
 	}
 
-	const { stdout } = await execa('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', '-d', '1', dataset]);
-	const previousSnapshots = stdout.split('\n').filter((line) => {
-		const [, current] = line.split('@');
+	const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-j', '-o', 'name', '-d', '1', dataset]);
+	const previousSnapshots = Object.keys(JSON.parse(zfsList || '{}')?.datasets || {}).filter((name) => {
+		const [, current] = name.split('@');
 		return current?.startsWith(SNAPSHOT_PREFIX) && current !== snapshotName;
 	});
 	for (const previousSnapshot of previousSnapshots) {

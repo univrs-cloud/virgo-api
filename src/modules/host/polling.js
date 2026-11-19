@@ -519,8 +519,8 @@ const getScrubProperties = async (names) => {
 		return {};
 	}
 
-	const { stdout: zfsGet } = await execa('zfs', ['get', '-H', '-o', 'name,value', SCRUB_PROPERTY, ...names], { reject: false });
-	return Object.fromEntries(zfsGet.split('\n').filter(Boolean).map((line) => { return line.split('\t'); }));
+	const { stdout: zfsGet } = await execa('zfs', ['get', '-j', SCRUB_PROPERTY, ...names], { reject: false });
+	return Object.fromEntries(Object.values(JSON.parse(zfsGet || '{}')?.datasets || {}).map((dataset) => { return [dataset.name, dataset.properties?.[SCRUB_PROPERTY]?.value]; }));
 };
 
 const getStorage = async (module) => {

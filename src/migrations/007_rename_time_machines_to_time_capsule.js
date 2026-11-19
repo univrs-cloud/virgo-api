@@ -34,8 +34,8 @@ const exists = async (target) => {
 };
 
 const datasetExists = async (name) => {
-	const { exitCode } = await execa('zfs', ['list', '-H', '-o', 'name', name], { reject: false });
-	return exitCode === 0;
+	const { exitCode: datasetExists } = await execa('zfs', ['list', '-j', '-o', 'name', name], { reject: false });
+	return datasetExists === 0;
 };
 
 const stopSamba = async () => {
@@ -69,11 +69,10 @@ const unmount = async (dataset) => {
 };
 
 const listTree = async (dataset) => {
-	const { stdout } = await execa('zfs', ['list', '-H', '-r', '-t', 'filesystem', '-o', 'name,mountpoint,mounted', dataset]);
-	return stdout.split('\n')
-		.map((line) => { return line.split('\t'); })
-		.filter(([name]) => { return Boolean(name); })
-		.map(([name, mountpoint, mounted]) => { return { name, mountpoint, isMounted: (mounted || '').toLowerCase() === 'yes' }; });
+	const { stdout: zfsList } = await execa('zfs', ['list', '-j', '-r', '-t', 'filesystem', '-o', 'name,mountpoint,mounted', dataset]);
+	return Object.values(JSON.parse(zfsList || '{}')?.datasets || {}).map((entry) => {
+		return { name: entry.name, mountpoint: (entry.properties?.mountpoint?.value || ''), isMounted: (entry.properties?.mounted?.value || '').toLowerCase() === 'yes' };
+	});
 };
 
 const isOldMountpoint = (mountpoint) => {

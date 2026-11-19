@@ -364,15 +364,8 @@ async function* diffSnapshots(snapA, snapB, mountpoint = null) {
  * what most `zfs diff` ENOENT failures actually are.
  */
 function snapshotExists(fullName) {
-	try {
-		execaSync('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', fullName]);
-		return true;
-	} catch (e) {
-		// Only a clean "does not exist" answers the question. If zfs could not run
-		// at all, assume the snapshot is still there — reporting it as vanished
-		// would make us drop a snapshot that may be perfectly healthy.
-		return e?.exitCode === undefined;
-	}
+	const { exitCode: snapshotExists } = execaSync('zfs', ['list', '-j', '-o', 'name', '-t', 'snapshot', fullName], { reject: false });
+	return (snapshotExists === 0 || snapshotExists === undefined);
 }
 
 function isZfsDiffFailure(err) {

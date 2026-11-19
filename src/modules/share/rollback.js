@@ -32,8 +32,8 @@ const rollbackFolder = async (job, module) => {
 	}
 
 	const snapshot = `${dataset}@${snapshotName}`;
-	const { exitCode } = await execa('zfs', ['list', '-H', '-o', 'name', '-t', 'snapshot', snapshot], { reject: false });
-	if (exitCode !== 0) {
+	const { exitCode: snapshotExists } = await execa('zfs', ['list', '-j', '-o', 'name', '-t', 'snapshot', snapshot], { reject: false });
+	if (snapshotExists !== 0) {
 		throw new Error(`Folder ${share.comment} snapshot not found.`);
 	}
 

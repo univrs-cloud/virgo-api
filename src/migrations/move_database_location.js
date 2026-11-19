@@ -27,13 +27,12 @@ const moveDatabaseLocation = async () => {
 		return;
 	}
 	// Check if messier ZFS pool exists
-	try {
-		await execa('zpool', ['list', 'messier']);
-		console.log(`ZFS pool 'messier' exists`);
-	} catch (error) {
+	const { exitCode: poolExists } = await execa('zpool', ['list', '-j', '-o', 'name', 'messier'], { reject: false });
+	if (poolExists !== 0) {
 		console.log(`ZFS pool 'messier' does not exist. Skipping database file movement.`);
 		return;
 	}
+	console.log(`ZFS pool 'messier' exists`);
 	// Ensure the new config directory exists
 	try {
 		await fs.access(configDir);

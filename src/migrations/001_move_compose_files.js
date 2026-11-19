@@ -9,8 +9,8 @@ const COMPOSE_DIR = '.docker';
 const COMPOSE_FILES = ['docker-compose.yml', '.env'];
 
 const moveComposeFiles = async () => {
-	const { exitCode } = await execa('zfs', ['list', COMPOSE_DATASET], { reject: false });
-	if (exitCode !== 0) {
+	const { exitCode: datasetExists } = await execa('zfs', ['list', '-j', '-o', 'name', COMPOSE_DATASET], { reject: false });
+	if (datasetExists !== 0) {
 		console.log(`Dataset ${COMPOSE_DATASET} does not exist. Skipping compose files move.`);
 		return;
 	}

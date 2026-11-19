@@ -23,7 +23,7 @@ const createFolder = async (job, module) => {
 	} else {
 		const dataset = `${module.foldersDataset}/${slug(comment)}`;
 		const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
-		const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
+		const { exitCode: datasetExists } = await execa('zfs', ['list', '-j', '-o', 'name', dataset], { reject: false });
 		if (datasetExists !== 0) {
 			await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
 		}
@@ -98,7 +98,7 @@ const createBackupDisk = async (job, module) => {
 	const dataset = `${module.backupDisksDataset}/${slug(comment)}`;
 	const refquota = (Number.isInteger(refquotaRaw) ? module.refquotaToZfsString(refquotaRaw) : 'none');
 	await module.updateJobProgress(job, `Creating backup disk ${comment}...`);
-	const { exitCode: datasetExists } = await execa('zfs', ['list', dataset], { reject: false });
+	const { exitCode: datasetExists } = await execa('zfs', ['list', '-j', '-o', 'name', dataset], { reject: false });
 	if (datasetExists !== 0) {
 		await execa('zfs', ['create', '-o', `refquota=${refquota}`, dataset]);
 	}

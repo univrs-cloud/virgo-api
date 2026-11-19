@@ -70,9 +70,9 @@ class HostModule extends BaseModule {
 			const [system, cpu] = await Promise.all([si.system(), si.cpu()]);
 			this.mergeState('system', { ...system, cpu });
 			try {
-				const { stdout: zfsVesion } = await execa('zfs', ['version', '--json']);
+				const { stdout: zfsVersion } = await execa('zfs', ['version', '-j']);
 				this.mergeState('system', {
-					zfs: { version: JSON.parse(zfsVesion).zfs_version.kernel.replace('zfs-kmod-', '') }
+					zfs: { version: JSON.parse(zfsVersion).zfs_version.kernel.replace('zfs-kmod-', '') }
 				});
 			} catch (error) {
 				console.error(error);
@@ -522,8 +522,8 @@ class HostModule extends BaseModule {
 			console.error(error);
 		}
 		try {
-			const { stdout } = await execa('zfs', ['version', '--json']);
-			const { userland, kernel } = JSON.parse(stdout).zfs_version;
+			const { stdout: zfsVersion } = await execa('zfs', ['version', '-j']);
+			const { userland, kernel } = JSON.parse(zfsVersion).zfs_version;
 			const installed = userland.replace('zfs-', '');
 			const running = kernel.replace('zfs-kmod-', '');
 			if (installed !== running) {

@@ -17,14 +17,15 @@ const MANIFEST_ACCEPT = [
 ].join(',');
 
 const getServiceImageDigests = async (dataset, snapshotName, title) => {
-	const { stdout, exitCode } = await execa('zfs', ['get', '-H', '-o', 'value', IMAGES_PROPERTY, `${dataset}@${snapshotName}`], { reject: false });
-	if (exitCode !== 0) {
+	const snapshot = `${dataset}@${snapshotName}`;
+	const { stdout: zfsGet, exitCode: snapshotExists } = await execa('zfs', ['get', '-j', IMAGES_PROPERTY, snapshot], { reject: false });
+	if (snapshotExists !== 0) {
 		throw new Error(`${title} snapshot not found.`);
 	}
 
 	let serviceImageDigests;
 	try {
-		serviceImageDigests = JSON.parse(stdout.trim());
+		serviceImageDigests = JSON.parse(JSON.parse(zfsGet || '{}')?.datasets?.[snapshot]?.properties?.[IMAGES_PROPERTY]?.value);
 	} catch (error) {
 		throw new Error(`${title} was not rolled back: the snapshot has no record of the image versions the app ran then.`);
 	}
@@ -150,8 +151,8 @@ const stopContainers = async (containers) => {
 };
 
 const rollbackDataset = async (dataset, snapshotName) => {
-	const { stdout } = await execa('zfs', ['list', '-t', 'snapshot', '-H', '-o', 'name', '-r', dataset]);
-	const snapshots = stdout.split('\n').filter((line) => { return line.endsWith(`@${snapshotName}`); });
+	const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-j', '-o', 'name', '-r', dataset]);
+	const snapshots = Object.keys(JSON.parse(zfsList || '{}')?.datasets || {}).filter((name) => { return name.endsWith(`@${snapshotName}`); });
 	for (const snapshot of snapshots) {
 		await execa('zfs', ['rollback', '-r', snapshot]);
 	}
