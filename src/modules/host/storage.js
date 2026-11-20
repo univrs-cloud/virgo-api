@@ -306,6 +306,7 @@ const prepare = async (job, module) => {
 	module.eventEmitter.emit('configured:updated');
 	module.eventEmitter.emit('users:updated');
 	module.eventEmitter.emit('host:network:virtualIp:updated');
+	module.eventEmitter.emit('host:storage:prepared');
 	await execa('smbcontrol', ['all', 'reload-config'], { reject: false });
 	module.eventEmitter.emit('shares:updated');
 	await scanImportablePools(module);

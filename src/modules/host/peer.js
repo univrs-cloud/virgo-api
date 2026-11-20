@@ -422,7 +422,7 @@ const attachNamespace = () => {
 				const source = clientAddress(connection);
 				const advertised = discovery.discover().find((node) => { return node.id === request.id; });
 				if (!advertised || ![advertised.address, (advertised.holdsVirtualIp ? advertised.virtualIp : null)].filter(Boolean).includes(source)) {
-					acknowledge({ status: 'failed', message: 'Pairing was refused: that node is not on the network at this address.' });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is not on the network at ${source}.` });
 					return;
 				}
 
@@ -441,7 +441,7 @@ const attachNamespace = () => {
 				}
 
 				if (await findPeer(request.id)) {
-					acknowledge({ status: 'failed', message: 'Pairing was refused: that node is already adopted. Remove it first to pair again.' });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is already adopted by ${self.name || self.address}. Remove it first to pair again.` });
 					return;
 				}
 
@@ -518,6 +518,10 @@ const attachNamespace = () => {
 			const removed = (await readRemoved()).map((entry) => { return { id: entry.id, clock: (Number(entry.clock) || 0) }; });
 			respond({ status: 'ok', peers, removed, clock: await loadClock() });
 		});
+		handle('replication:exchange', async (payload, respond) => {
+			const identity = await hostModule?.getPlugin('replication')?.exchange(connection.identity.peer.id, payload);
+			respond(identity ? { status: 'ok', ...identity, clock: await loadClock() } : { status: 'failed', message: 'Could not prepare replication.' });
+		});
 		handle('virtualIp:configure', async (payload, respond) => {
 			// Whether this is allowed is decided where the address lives, not here: a node holding it
 			// refuses to be rewritten.
@@ -564,7 +568,8 @@ const findHolder = async (address) => {
 const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) => {
 	const peer = await findPeer(peerId);
 	if (!peer) {
-		throw new Error(`That node is not adopted.`);
+		const seen = (hostModule?.getState('discovery') || []).find((node) => { return node.id === peerId; });
+		throw new Error(`${seen?.name || seen?.address || peerId} is not adopted.`);
 	}
 
 	const self = await describeSelf();
@@ -620,11 +625,12 @@ const pairWith = async (nodeId, address, adopting = false) => {
 	// Sent as well as read back: the node holding the address is the one that adopts, so the config
 	// usually travels outward. Both directions are carried so it works whichever side initiates.
 	const configured = await virtualIpConfiguration();
+	const seen = (hostModule?.getState('discovery') || []).find((node) => { return node.id === nodeId; });
 	const connection = connectToPeer(address, { mode: 'pair' });
 	try {
 		const response = await new Promise((resolve, reject) => {
-			const timer = setTimeout(() => { reject(new Error('That node did not answer.')); }, (adopting ? REQUEST_TIMEOUT_MS + STALE_CHECK_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
-			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error('Could not reach that node.')); });
+			const timer = setTimeout(() => { reject(new Error(`${seen?.name || address} did not answer.`)); }, (adopting ? REQUEST_TIMEOUT_MS + STALE_CHECK_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
+			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${seen?.name || address}.`)); });
 			connection.on('connect', async () => {
 				connection.emit('pair:request', { ...self, key: offered, virtualIp: configured, adopt: adopting, clock: await loadClock() }, (answer) => {
 					clearTimeout(timer);
@@ -697,13 +703,14 @@ const introduce = async (nodeId) => {
 
 const adopt = async (job, module) => {
 	const { config } = job.data;
-	if (await findPeer(config.peerId)) {
-		throw new Error(`That node is already adopted.`);
+	const adopted = await findPeer(config.peerId);
+	if (adopted) {
+		throw new Error(`${adopted.name || adopted.address} is already adopted.`);
 	}
 
 	const peer = discovery.discover().find((candidate) => { return candidate.id === config.peerId; });
 	if (!peer) {
-		throw new Error('That node is no longer on the network.');
+		throw new Error(`${config.peerId} is no longer on the network.`);
 	}
 
 	if (!peer.setupCompleted) {
@@ -915,7 +922,8 @@ const remove = async (job, module) => {
 	const { config } = job.data;
 	const peer = await findPeer(config.peerId);
 	if (!peer) {
-		throw new Error(`That node is not adopted.`);
+		const seen = (hostModule?.getState('discovery') || []).find((node) => { return node.id === config.peerId; });
+		throw new Error(`${seen?.name || seen?.address || config.peerId} is not adopted.`);
 	}
 
 	await module.updateJobProgress(job, `Removing ${peer.name || peer.address}...`);
