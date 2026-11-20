@@ -200,7 +200,7 @@ const addUser = async (job, module) => {
 			}
 
 			const name = displayName;
-			await module.updateJobProgress(job, `Adding ${name}...`);
+			await module.updateJobProgress(job, `Creating account ${name}...`);
 			const { exitCode } = await occ(container, [
 				'user:add',
 				'--password-from-env',
@@ -210,17 +210,17 @@ const addUser = async (job, module) => {
 				id
 			], password);
 			if (exitCode !== 0) {
-				throw new Error(`Could not add ${name}. Try again later.`);
+				throw new Error(`Could not create account ${name}. Try again later.`);
 			}
 
 			if (config.quota !== 'default') {
 				const quota = await occ(container, ['user:setting', id, 'files', 'quota', `${config.quota} GB`]);
 				if (quota.exitCode !== 0) {
-					throw new Error(`${name} was added, but its storage limit could not be set.`);
+					throw new Error(`Account ${name} was created, but its storage limit could not be set.`);
 				}
 			}
 
-			return `${name} added.`;
+			return `Account ${name} created.`;
 		} finally {
 			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
 		}
@@ -254,7 +254,7 @@ const editUser = async (job, module) => {
 				throw new Error('This account no longer exists. Open the list again.');
 			}
 
-			await module.updateJobProgress(job, `Saving ${displayName}...`);
+			await module.updateJobProgress(job, `Updating account ${displayName}...`);
 			const changes = [
 				...(displayName !== user.displayName ? [['settings', 'display_name', displayName]] : []),
 				...(email.toLowerCase() !== String(user.email ?? '').toLowerCase() ? [['settings', 'email', email]] : []),
@@ -263,11 +263,11 @@ const editUser = async (job, module) => {
 			for (const [app, key, value] of changes) {
 				const { exitCode } = await occ(container, ['user:setting', user.id, app, key, value]);
 				if (exitCode !== 0) {
-					throw new Error(`Could not save all changes to ${displayName}. Try again later.`);
+					throw new Error(`Account ${displayName} was not fully updated. Try again later.`);
 				}
 			}
 
-			return `${displayName} saved.`;
+			return `Account ${displayName} updated.`;
 		} finally {
 			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
 		}
@@ -373,13 +373,13 @@ const deleteUser = async (job, module) => {
 				}
 			}
 
-			await module.updateJobProgress(job, `Deleting ${user.displayName}...`);
+			await module.updateJobProgress(job, `Deleting account ${user.displayName}...`);
 			const { exitCode } = await occ(container, ['user:delete', user.id]);
 			if (exitCode !== 0) {
-				throw new Error(`Could not delete ${user.displayName}. Try again later.`);
+				throw new Error(`Could not delete account ${user.displayName}. Try again later.`);
 			}
 
-			return `${user.displayName} deleted.`;
+			return `Account ${user.displayName} deleted.`;
 		} finally {
 			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
 		}
@@ -404,13 +404,13 @@ const addGroup = async (job, module) => {
 				throw new Error(`A group named ${name} already exists.`);
 			}
 
-			await module.updateJobProgress(job, `Adding the group ${name}...`);
+			await module.updateJobProgress(job, `Creating group ${name}...`);
 			const { exitCode } = await occ(container, ['group:add', name, `--display-name=${name}`]);
 			if (exitCode !== 0) {
-				throw new Error(`Could not add the group ${name}. Try again later.`);
+				throw new Error(`Could not create group ${name}. Try again later.`);
 			}
 
-			return `Group ${name} added.`;
+			return `Group ${name} created.`;
 		} finally {
 			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
 		}
@@ -435,10 +435,10 @@ const deleteGroup = async (job, module) => {
 				throw new Error('The admin group cannot be deleted.');
 			}
 
-			await module.updateJobProgress(job, `Deleting the group ${group.displayName}...`);
+			await module.updateJobProgress(job, `Deleting group ${group.displayName}...`);
 			const { exitCode } = await occ(container, ['group:delete', group.id]);
 			if (exitCode !== 0) {
-				throw new Error(`Could not delete the group ${group.displayName}. Try again later.`);
+				throw new Error(`Could not delete group ${group.displayName}. Try again later.`);
 			}
 
 			return `Group ${group.displayName} deleted.`;

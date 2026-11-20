@@ -18,7 +18,7 @@ const createUser = async (job, module) => {
 
 	const user = module.toArray(module.getState('users')).find((user) => { return user.username === config.username; });
 	if (user) {
-		throw new Error(`User already exists.`);
+		throw new Error(`User ${config.username} already exists.`);
 	}
 
 	const authenticatedUser = module.toArray(module.getState('users')).find((user) => { return user.username === job.data.username; });

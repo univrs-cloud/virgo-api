@@ -337,11 +337,11 @@ const addDomain = async (job, module) => {
 	return await run(job, module, async (config) => {
 		const domain = normalizeDomain(config.domain);
 		const container = requireMailContainer(module);
-		await module.updateJobProgress(job, `Adding ${domain}...`);
+		await module.updateJobProgress(job, `Adding domain ${domain}...`);
 		if (!(await readDkim(module))[domain]) {
 			await createDkimKey(module, container, domain, false);
 		}
-		return `${domain} added.`;
+		return `Domain ${domain} added.`;
 	});
 };
 
@@ -354,9 +354,9 @@ const deleteDomain = async (job, module) => {
 			throw new Error(`Delete the accounts and remove the aliases of ${domain} first.`);
 		}
 
-		await module.updateJobProgress(job, `Deleting ${domain}...`);
+		await module.updateJobProgress(job, `Deleting domain ${domain}...`);
 		await removeDkimKey(module, domain);
-		return `${domain} deleted.`;
+		return `Domain ${domain} deleted.`;
 	});
 };
 
@@ -384,12 +384,12 @@ const addAccount = async (job, module) => {
 		if (module.toArray(state?.aliases).some((alias) => { return alias.address === email; })) {
 			throw new Error(`${email} is already an alias. Remove the alias first.`);
 		}
-		await module.updateJobProgress(job, `Adding ${email}...`);
-		await setup(container, ['email', 'add', email], `${password}\n${password}\n`, `Could not add ${email}. Make sure it does not exist yet.`);
+		await module.updateJobProgress(job, `Creating account ${email}...`);
+		await setup(container, ['email', 'add', email], `${password}\n${password}\n`, `Could not create account ${email}. Make sure it does not exist yet.`);
 		if (quota) {
-			await setup(container, ['quota', 'set', email, quota], undefined, `${email} was added, but its storage limit could not be set.`);
+			await setup(container, ['quota', 'set', email, quota], undefined, `Account ${email} was created, but its storage limit could not be set.`);
 		}
-		return `${email} added.`;
+		return `Account ${email} created.`;
 	});
 };
 
@@ -397,9 +397,9 @@ const deleteAccount = async (job, module) => {
 	return await run(job, module, async (config) => {
 		const email = normalizeEmail(config.email);
 		const container = requireMailContainer(module);
-		await module.updateJobProgress(job, `Deleting ${email}...`);
-		await setup(container, ['email', 'del', '-y', email], undefined, `Could not delete ${email}. Try again later.`);
-		return `${email} deleted.`;
+		await module.updateJobProgress(job, `Deleting account ${email}...`);
+		await setup(container, ['email', 'del', '-y', email], undefined, `Could not delete account ${email}. Try again later.`);
+		return `Account ${email} deleted.`;
 	});
 };
 
@@ -445,8 +445,8 @@ const addAlias = async (job, module) => {
 		if (!module.toArray(state?.accounts).some((account) => { return account.email === recipient; })) {
 			throw new Error(`${recipient} is not an account on this mail server.`);
 		}
-		await module.updateJobProgress(job, `Adding ${address}...`);
-		await setup(container, ['alias', 'add', address, recipient], undefined, `Could not add ${address}. Try again later.`);
+		await module.updateJobProgress(job, `Adding alias ${address}...`);
+		await setup(container, ['alias', 'add', address, recipient], undefined, `Could not add alias ${address}. Try again later.`);
 		return `${address} now forwards to ${recipient}.`;
 	});
 };
@@ -456,8 +456,8 @@ const removeAlias = async (job, module) => {
 		const address = normalizeEmail(config.address);
 		const recipient = normalizeEmail(config.recipient);
 		const container = requireMailContainer(module);
-		await module.updateJobProgress(job, `Removing ${address}...`);
-		await setup(container, ['alias', 'del', address, recipient], undefined, `Could not remove ${address}. Try again later.`);
+		await module.updateJobProgress(job, `Removing alias ${address}...`);
+		await setup(container, ['alias', 'del', address, recipient], undefined, `Could not remove alias ${address}. Try again later.`);
 		return `${address} no longer forwards to ${recipient}.`;
 	});
 };

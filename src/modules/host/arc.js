@@ -48,7 +48,7 @@ const updateArc = async (job, module) => {
 		throw new Error('ZFS ARC maximum is out of range.');
 	}
 
-	await module.updateJobProgress(job, 'ZFS ARC maximum is updating...');
+	await module.updateJobProgress(job, 'Updating ZFS ARC...');
 	await fs.writeFile(ARC_MAX_FILE, String(max), 'utf8');
 	await persistArcMax(max);
 	await loadArc(module);

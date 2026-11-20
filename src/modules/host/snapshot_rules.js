@@ -17,7 +17,7 @@ const announceChange = (module) => {
 
 const createRule = async (job, module) => {
 	const { rule } = job.data.config;
-	await module.updateJobProgress(job, `Creating the snapshot rule ${rule?.name}...`);
+	await module.updateJobProgress(job, `Creating snapshot rule ${rule?.name}...`);
 	await sanoid.saveRule(null, rule);
 	announceChange(module);
 	return `Snapshot rule ${rule.name} created.`;
@@ -25,15 +25,15 @@ const createRule = async (job, module) => {
 
 const updateRule = async (job, module) => {
 	const { name, rule } = job.data.config;
-	await module.updateJobProgress(job, `Saving the snapshot rule ${name}...`);
+	await module.updateJobProgress(job, `Updating snapshot rule ${name}...`);
 	await sanoid.saveRule(name, rule);
 	announceChange(module);
-	return `Snapshot rule ${rule.name} saved.`;
+	return `Snapshot rule ${rule.name} updated.`;
 };
 
 const deleteRule = async (job, module) => {
 	const { name } = job.data.config;
-	await module.updateJobProgress(job, `Deleting the snapshot rule ${name}...`);
+	await module.updateJobProgress(job, `Deleting snapshot rule ${name}...`);
 	await sanoid.deleteRule(name);
 	announceChange(module);
 	return `Snapshot rule ${name} deleted.`;
