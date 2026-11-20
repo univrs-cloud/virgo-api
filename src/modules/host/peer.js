@@ -11,12 +11,11 @@ import * as database from '../../database/index.js';
 import * as socket from '../../socket.js';
 import * as advertisement from './advertisement.js';
 import * as discovery from './discovery.js';
-import { getOwnAddress } from '../../utils/network.js';
+import { getOwnAddress, holdsAddress } from '../../utils/network.js';
 
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
 const REQUEST_TIMEOUT_MS = 15000;
-const INTRODUCE_TIMEOUT_MS = REQUEST_TIMEOUT_MS * 2;
 const PAIRING_KEY_TTL_MS = REQUEST_TIMEOUT_MS * 2;
 const ADOPTION_GRACE_MS = 60000;
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
@@ -419,6 +418,16 @@ const attachNamespace = () => {
 					return;
 				}
 
+				if (await holdsVirtualIp()) {
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${self.name || self.address} holds the virtual IP, so it adopts other nodes and is never adopted by them.` });
+					return;
+				}
+
+				if (!request.adopt) {
+					acknowledge({ status: 'failed', message: 'Pairing was refused: only the node holding the virtual IP can pair nodes.' });
+					return;
+				}
+
 				const source = clientAddress(connection);
 				const advertised = discovery.discover().find((node) => { return node.id === request.id; });
 				if (!advertised || ![advertised.address, (advertised.holdsVirtualIp ? advertised.virtualIp : null)].filter(Boolean).includes(source)) {
@@ -494,14 +503,15 @@ const attachNamespace = () => {
 			await forgetPeer(connection.identity.peer.id);
 			respond({ status: 'ok' });
 		});
-		handle('peer:introduce', async (payload, respond) => {
-			if (!payload?.node?.id || !payload?.node?.address) {
-				respond({ status: 'failed', message: 'Nothing to introduce.' });
+		handle('peer:link', async (payload, respond) => {
+			const self = await describeSelf();
+			if (!payload?.node?.id || !payload?.node?.address || payload.node.id === self.id || !KEY_PATTERN.test(String(payload.key || ''))) {
+				respond({ status: 'failed', message: 'Nothing to pair with.' });
 				return;
 			}
 
-			const joined = await joinIntroduced(payload.node);
-			respond(joined ? { status: 'ok', clock: await loadClock() } : { status: 'failed', message: `Could not pair with ${payload.node.name || payload.node.address}.` });
+			await savePeer({ id: payload.node.id, name: payload.node.name, address: payload.node.address, key: payload.key }, payload.clock);
+			respond({ status: 'ok', clock: await loadClock() });
 		});
 		handle('peer:forget', async (payload, respond) => {
 			const self = await describeSelf();
@@ -670,27 +680,21 @@ const pairOnce = (nodeId, address, adopting = false) => {
 	return pairing.get(nodeId);
 };
 
-const joinIntroduced = async (node) => {
-	const self = await describeSelf();
-	if (node.id === self.id) {
-		return true;
-	}
+const holdsVirtualIp = async () => {
+	const virtualIp = await virtualIpConfiguration();
+	return Boolean(virtualIp?.address && await holdsAddress(virtualIp.address));
+};
 
-	const address = (discovery.discover().find((candidate) => { return candidate.id === node.id; })?.address || node.address);
-	try {
-		await pairOnce(node.id, address);
-		return true;
-	} catch (error) {
-		console.warn(`Could not pair with ${node.name || address}: ${error.message}`);
-		return false;
-	}
+const link = async (first, second) => {
+	const key = crypto.randomBytes(KEY_BYTES).toString('hex');
+	await call(first.id, 'peer:link', { node: { id: second.id, name: second.name, address: second.address }, key });
+	await call(second.id, 'peer:link', { node: { id: first.id, name: first.name, address: first.address }, key });
 };
 
 const introduce = async (nodeId) => {
 	const newcomer = await findPeer(nodeId);
 	const others = (await readConfiguration()).filter((peer) => { return peer.id !== nodeId; });
-	const node = { id: newcomer.id, name: newcomer.name, address: newcomer.address };
-	const results = await Promise.allSettled(others.map((peer) => { return call(peer.id, 'peer:introduce', { node }, INTRODUCE_TIMEOUT_MS); }));
+	const results = await Promise.allSettled(others.map((peer) => { return link(peer, newcomer); }));
 	return others.filter((peer, index) => {
 		if (results[index].status === 'fulfilled') {
 			return false;
@@ -706,6 +710,10 @@ const adopt = async (job, module) => {
 	const adopted = await findPeer(config.peerId);
 	if (adopted) {
 		throw new Error(`${adopted.name || adopted.address} is already adopted.`);
+	}
+
+	if (!await holdsVirtualIp()) {
+		throw new Error('Only the node holding the virtual IP can adopt other nodes.');
 	}
 
 	const peer = discovery.discover().find((candidate) => { return candidate.id === config.peerId; });
@@ -806,7 +814,7 @@ const reconcileVirtualIp = async (peer, node) => {
 	}
 };
 
-const reconcilePeers = async (peer, self) => {
+const reconcilePeers = async (peer) => {
 	let answer = null;
 	try {
 		answer = await call(peer.id, 'peer:list');
@@ -826,24 +834,22 @@ const reconcilePeers = async (peer, self) => {
 	const listed = (answer.peers || []).map((entry) => { return entry.id; });
 	await confirmRemovals(peer.id, (await readRemoved()).map((entry) => { return entry.id; }).filter((id) => { return !listed.includes(id); }));
 
-	const removed = await readRemoved();
+	if (!await holdsVirtualIp()) {
+		return;
+	}
+
 	const visible = discovery.discover();
-	for (const candidate of (answer.peers || [])) {
-		const tombstone = removed.find((entry) => { return entry.id === candidate.id; });
-		const node = visible.find((entry) => { return entry.id === candidate.id; });
-		if (candidate.id === self.id || await findPeer(candidate.id)) {
+	for (const other of await readConfiguration()) {
+		const node = visible.find((entry) => { return entry.id === other.id; });
+		if (other.id === peer.id || listed.includes(other.id) || !node?.address || !node.setupCompleted) {
 			continue;
 		}
 
-		if ((tombstone && (Number(tombstone.clock) || 0) > (Number(candidate.pairedClock) || 0)) || !node?.address || !node.setupCompleted) {
-			continue;
-		}
-
-		console.log(`${candidate.name || node.address} was adopted while this node was away; pairing with it.`);
+		console.log(`${other.name || node.address} was adopted while ${peer.name || peer.address} was away; pairing them.`);
 		try {
-			await pairOnce(candidate.id, node.address);
+			await link(peer, other);
 		} catch (error) {
-			console.warn(`Could not pair with ${candidate.name || node.address}: ${error.message}`);
+			console.warn(`Could not pair ${peer.name || peer.address} with ${other.name || node.address}: ${error.message}`);
 		}
 	}
 };
@@ -890,7 +896,7 @@ const reconcileVisible = async (nodes) => {
 		reconciled.add(peer.id);
 		if (await reconcile(peer, node.address, self.id)) {
 			await reconcileVirtualIp(peer, node);
-			await reconcilePeers(peer, self);
+			await reconcilePeers(peer);
 		}
 	}
 };
