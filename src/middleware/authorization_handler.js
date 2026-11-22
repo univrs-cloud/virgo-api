@@ -38,8 +38,13 @@ const cookieDomain = (req) => {
 /** A readable copy of who Authelia says is here, for the shell to build itself from before it has
  * spoken to anything. Removed rather than emptied when nobody is, and at every reach: the session it
  * copies may have been established when the node answered to another name. */
+const isClusterAddress = (req) => {
+	const clusterDomain = (setup.isCompleted() ? traefikConfig.getClusterDomain() : null);
+	return Boolean(clusterDomain) && String(req.hostname || '').toLowerCase() === clusterDomain.toLowerCase();
+};
+
 const cookieName = (req) => {
-	const host = ((setup.isCompleted() && traefikConfig.getDomain()) || req.hostname);
+	const host = ((!isClusterAddress(req) && setup.isCompleted() && traefikConfig.getDomain()) || req.hostname);
 	return `account_${host.toLowerCase().split('.')[0]}`;
 };
 
@@ -55,11 +60,12 @@ const reaches = (hostname) => {
 const writeAccount = async (req, res, identity) => {
 	const name = cookieName(req);
 	if (!identity) {
+		res.clearCookie(name, { path: '/' });
 		reaches(req.hostname).forEach((domain) => { res.clearCookie(name, { domain, path: '/' }); });
 		return;
 	}
 
-	const domain = cookieDomain(req);
+	const domain = (isClusterAddress(req) ? undefined : cookieDomain(req));
 	const account = { name: identity.name, user: identity.username, email: identity.email, groups: identity.groups };
 	res.cookie(name, Buffer.from(JSON.stringify(account)).toString('base64'), {
 		domain,
@@ -79,7 +85,7 @@ const isOnDomain = (hostname, domain) => {
 
 const domainRedirect = (req) => {
 	const domain = traefikConfig.getDomain();
-	if (!domain || isOnDomain(req.hostname, domain)) {
+	if (!domain || isOnDomain(req.hostname, domain) || isClusterAddress(req)) {
 		return null;
 	}
 
