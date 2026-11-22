@@ -305,7 +305,7 @@ const syncPeerRoutes = async () => {
 
 const syncPiholeRecords = async (clusterDomain, hostname, peers) => {
 	try {
-		if (!await DataService.getApplication('pihole')) {
+		if (!await holdsVirtualIp() || !await DataService.getApplication('pihole')) {
 			return;
 		}
 
