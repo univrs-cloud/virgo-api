@@ -12,6 +12,7 @@ import * as socket from '../../socket.js';
 import * as advertisement from './advertisement.js';
 import * as discovery from './discovery.js';
 import { getOwnAddress, holdsAddress } from '../../utils/network.js';
+import docker from '../../utils/docker_client.js';
 
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
@@ -25,6 +26,9 @@ const NONCE_PATTERN = /^[0-9a-f]{32}$/;
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const PEER_ROUTE_PREFIX = 'peer.';
+const PIHOLE_DNSMASQ_PATH = '/messier/apps/pihole/dnsmasq.d';
+const PIHOLE_PEERS_FILE = 'peers.conf';
+const PIHOLE_LABELS = ['com.docker.compose.project=pihole', 'com.docker.compose.service=pihole'];
 
 let hostModule = null;
 let clock = null;
@@ -193,11 +197,12 @@ const virtualIpConfiguration = async () => {
  * a peer that stored it would be pointed at whichever node holds it rather than at this one. */
 const describeSelf = async () => {
 	const { virtualIp } = await DataService.getConfiguration();
+	const { clusterDomain } = await getNodeIdentity();
 	return {
 		id: await advertisement.getNodeId(),
 		name: (hostModule?.getState('system')?.osInfo?.hostname || ''),
 		address: await getOwnAddress(virtualIp?.address),
-		cluster: await getClusterDomain(),
+		cluster: clusterDomain,
 		version: pkg.version
 	};
 };
@@ -222,11 +227,11 @@ const withoutKeys = (peers) => {
 	return peers.map(({ key, ...peer }) => { return peer; });
 };
 
-const getClusterDomain = async () => {
+const getNodeIdentity = async () => {
 	const { hostname, fqdn } = await si.osInfo();
 	const prefix = `${hostname}.`;
 	const domainName = (hostname && String(fqdn || '').startsWith(prefix) ? fqdn.slice(prefix.length).toLowerCase() : '');
-	return (domainName.split('.').length >= 3 ? domainName : null);
+	return { hostname, clusterDomain: (domainName.split('.').length >= 3 ? domainName : null) };
 };
 
 const peerRoute = (id, name, address, clusterDomain) => {
@@ -269,14 +274,13 @@ http:
 
 const syncPeerRoutes = async () => {
 	try {
-		const clusterDomain = await getClusterDomain();
+		const { hostname, clusterDomain } = await getNodeIdentity();
 		const own = await ownAddresses();
+		const peers = (clusterDomain ? await readConfiguration() : []).filter((peer) => {
+			return LABEL_PATTERN.test(peer.name || '') && peer.address && !own.includes(peer.address);
+		});
 		const wanted = new Map();
-		for (const peer of (clusterDomain ? await readConfiguration() : [])) {
-			if (!LABEL_PATTERN.test(peer.name || '') || !peer.address || own.includes(peer.address)) {
-				continue;
-			}
-
+		for (const peer of peers) {
 			const id = String(peer.id).toLowerCase().replace(/[^a-z0-9-]/g, '-');
 			wanted.set(`${PEER_ROUTE_PREFIX}${id}.yml`, peerRoute(id, peer.name, peer.address, clusterDomain));
 		}
@@ -292,8 +296,46 @@ const syncPeerRoutes = async () => {
 				await fs.writeFile(filePath, content, 'utf8');
 			}
 		}
+
+		await syncPiholeRecords(clusterDomain, hostname, peers);
 	} catch (error) {
 		console.warn(`Could not update the routes to adopted nodes: ${error.message}`);
+	}
+};
+
+const syncPiholeRecords = async (clusterDomain, hostname, peers) => {
+	try {
+		if (!await DataService.getApplication('pihole')) {
+			return;
+		}
+
+		const { virtualIp } = await DataService.getConfiguration();
+		const address = await getOwnAddress(virtualIp?.address);
+		if (clusterDomain && !address) {
+			return;
+		}
+
+		const records = [{ name: hostname, address }, ...peers];
+		const content = (clusterDomain
+			? records.map((record) => { return `address=/${`${record.name}.${clusterDomain}`.toLowerCase()}/${record.address}`; }).join('\n') + '\n'
+			: null);
+		const filePath = path.join(PIHOLE_DNSMASQ_PATH, PIHOLE_PEERS_FILE);
+		if (await fs.readFile(filePath, 'utf8').catch(() => { return null; }) === content) {
+			return;
+		}
+
+		if (content) {
+			await fs.writeFile(filePath, content, 'utf8');
+		} else {
+			await fs.rm(filePath, { force: true });
+		}
+
+		const [container] = await docker.listContainers({ filters: { label: PIHOLE_LABELS } });
+		if (container) {
+			await docker.getContainer(container.Id).restart();
+		}
+	} catch (error) {
+		console.warn(`Could not update the Pi-hole addresses of adopted nodes: ${error.message}`);
 	}
 };
 
@@ -734,9 +776,9 @@ const adopt = async (job, module) => {
 		throw new Error(`${peer.name || peer.address} has a different virtual IP (${peer.virtualIp}).`);
 	}
 
-	const cluster = await getClusterDomain();
-	if ((peer.cluster || null) !== cluster) {
-		throw new Error(`${peer.name || peer.address} is in ${peer.cluster || 'no cluster'}, this node is in ${cluster || 'no cluster'}. Set the same cluster on both first.`);
+	const { clusterDomain } = await getNodeIdentity();
+	if ((peer.cluster || null) !== clusterDomain) {
+		throw new Error(`${peer.name || peer.address} is in ${peer.cluster || 'no cluster'}, this node is in ${clusterDomain || 'no cluster'}. Set the same cluster on both first.`);
 	}
 
 	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
@@ -981,6 +1023,11 @@ const register = (module) => {
 	});
 	module.eventEmitter.on('host:network:identifier:updated', () => {
 		syncPeerRoutes();
+	});
+	module.eventEmitter.on('app:installed', ({ name } = {}) => {
+		if (String(name || '').toLowerCase() === 'pihole') {
+			syncPeerRoutes();
+		}
 	});
 	setInterval(() => {
 		reconciled.clear();
