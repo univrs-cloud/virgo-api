@@ -59,7 +59,7 @@
 		"express-rate-limit": "^8.7.5",
 		"express-validator": "^7.3.2",
 		"ini": "^7.0.0",
-		"ioredis": "^6.0.0",
+		"ioredis": "^6.1.0",
 		"js-yaml": "^5.5.0",
 		"kelvin-to-celsius": "^1.1.0",
 		"linux-sys-user": "^2.0.2",
