@@ -15,6 +15,9 @@ import * as discovery from './discovery.js';
 import { getOwnAddress, holdsAddress } from '../../utils/network.js';
 import { getNodeId, isNodeId } from '../../utils/node_id.js';
 import docker from '../../utils/docker_client.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:peer');
 
 const NAMESPACE = '/peer';
 const KEY_BYTES = 32;
@@ -26,12 +29,16 @@ const STALE_CHECK_TIMEOUT_MS = 5000;
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
 const NONCE_PATTERN = /^[0-9a-f]{32}$/;
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+const VERSION_PATTERN = /^[0-9a-z.+-]{1,32}$/i;
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const PEER_ROUTE_PREFIX = 'peer.';
 const PIHOLE_DNSMASQ_PATH = '/messier/apps/pihole/dnsmasq.d';
 const PIHOLE_PEERS_FILE = 'peers.conf';
 const PIHOLE_LABELS = ['com.docker.compose.project=pihole', 'com.docker.compose.service=pihole'];
-const EXTERNAL_EVENTS = ['peer:remove', 'replication:exchange'];
+const EXTERNAL_EVENTS = ['peer:remove', 'replication:exchange', 'replication:verify'];
+const ROUTINE_EVENTS = ['peer:list'];
+const SSH_PORT = 22;
+const REACH_TIMEOUT_MS = 5000;
 const EXTERNAL_REQUEST_TTL_MS = 5 * 60 * 1000;
 const EXTERNAL_REQUEST_LIMIT = 3;
 const EXTERNAL_RETRY_MS = 60 * 1000;
@@ -48,6 +55,21 @@ const pairing = new Map();
 const pairingKeys = new Map();
 const externalRequests = new Map();
 const requestTimes = new Map();
+
+const describeVersion = (version) => {
+	return (VERSION_PATTERN.test(String(version || '')) ? `version ${version}` : 'an older version');
+};
+
+const describeRequest = (request, source) => {
+	const name = (LABEL_PATTERN.test(String(request?.name || '')) ? request.name : 'a node without a valid name');
+	const id = (isNodeId(request?.id) ? request.id : 'no valid id');
+	return `${name} (${id}) at ${source}`;
+};
+
+const reportProgress = (job, module, message) => {
+	log.info(`${job.name}: ${message}`);
+	return module.updateJobProgress(job, message);
+};
 
 const signCall = (key, nonce, event, body) => {
 	return crypto.createHmac('sha256', Buffer.from(key, 'hex')).update(JSON.stringify(['call', nonce, event, body])).digest('hex');
@@ -306,18 +328,20 @@ const syncPeerRoutes = async () => {
 		const files = await fs.readdir(TRAEFIK_CONFIG_PATH);
 		for (const file of files.filter((entry) => { return entry.startsWith(PEER_ROUTE_PREFIX) && !wanted.has(entry); })) {
 			await fs.rm(path.join(TRAEFIK_CONFIG_PATH, file), { force: true });
+			log.info(`Removed the route file ${file}.`);
 		}
 
 		for (const [file, content] of wanted) {
 			const filePath = path.join(TRAEFIK_CONFIG_PATH, file);
 			if (await fs.readFile(filePath, 'utf8').catch(() => { return null; }) !== content) {
 				await fs.writeFile(filePath, content, 'utf8');
+				log.info(`Wrote the route file ${file}.`);
 			}
 		}
 
 		await syncPiholeRecords(clusterDomain, hostname, peers);
 	} catch (error) {
-		console.warn(`Could not update the routes to adopted nodes: ${error.message}`);
+		log.warn(`Could not update the routes to adopted nodes:`, error);
 	}
 };
 
@@ -344,16 +368,19 @@ const syncPiholeRecords = async (clusterDomain, hostname, peers) => {
 
 		if (content) {
 			await fs.writeFile(filePath, content, 'utf8');
+			log.info(`Wrote the Pi-hole addresses of ${records.length} node(s).`);
 		} else {
 			await fs.rm(filePath, { force: true });
+			log.info('Removed the Pi-hole addresses of adopted nodes.');
 		}
 
 		const [container] = await docker.listContainers({ filters: { label: PIHOLE_LABELS } });
 		if (container) {
 			await docker.getContainer(container.Id).restart();
+			log.info('Restarted Pi-hole to load the node addresses.');
 		}
 	} catch (error) {
-		console.warn(`Could not update the Pi-hole addresses of adopted nodes: ${error.message}`);
+		log.warn(`Could not update the Pi-hole addresses of adopted nodes:`, error);
 	}
 };
 
@@ -366,6 +393,7 @@ const refreshPeers = async () => {
 		const name = (LABEL_PATTERN.test(node?.name || '') ? node.name : peer.name);
 		const address = (node?.address && !own.includes(node.address) ? node.address : peer.address);
 		if (name !== peer.name || address !== peer.address) {
+			log.info(`Adopted node ${peer.name || peer.address} (${peer.id}) is now ${name || address} at ${address}.`);
 			updates.set(peer.id, { name, address });
 		}
 	}
@@ -398,12 +426,15 @@ const saveExternalPeer = async ({ id, name, address, key, role }) => {
 	const peers = await readExternalPeers();
 	const peer = { id, name, address, key, role, pairedAt: new Date().toISOString() };
 	await DataService.setConfiguration('externalPeers', [...peers.filter((entry) => { return entry.id !== id; }), peer]);
+	log.info(`Saved external node ${name || address} (${id}) at ${address}, it is the ${role}.`);
 	await publishExternalPeers();
 };
 
 const forgetExternalPeer = async (nodeId) => {
 	const peers = await readExternalPeers();
+	const peer = peers.find((entry) => { return entry.id === nodeId; });
 	await DataService.setConfiguration('externalPeers', peers.filter((entry) => { return entry.id !== nodeId; }));
+	log.info(`Forgot external node ${peer?.name || peer?.address || nodeId} (${nodeId}).`);
 	await publishExternalPeers();
 };
 
@@ -415,7 +446,9 @@ const publishRequests = () => {
 
 const forgetPeer = async (nodeId) => {
 	const peers = await readConfiguration();
+	const peer = peers.find((entry) => { return entry.id === nodeId; });
 	await DataService.setConfiguration('peers', peers.filter((entry) => { return entry.id !== nodeId; }));
+	log.info(`Forgot adopted node ${peer?.name || peer?.address || nodeId} (${nodeId}).`);
 	await pruneRemovals();
 	await publishPeers();
 	hostModule?.eventEmitter.emit('host:peer:updated');
@@ -427,6 +460,7 @@ const savePeer = async ({ id, name, address, key }, receivedClock) => {
 	const peers = await readConfiguration();
 	const peer = { id, name, address, key, pairedAt: new Date().toISOString(), pairedClock };
 	await DataService.setConfiguration('peers', [...peers.filter((entry) => { return entry.id !== id; }), peer]);
+	log.info(`Saved adopted node ${name || address} (${id}) at ${address}.`);
 	await clearRemoval(id);
 	await publishPeers();
 	hostModule?.eventEmitter.emit('host:peer:updated');
@@ -447,7 +481,7 @@ const retireGhosts = async (peer) => {
 		return entry.id !== peer.id && entry.address === peer.address && !visible.some((node) => { return node.id === entry.id; });
 	});
 	for (const ghost of ghosts) {
-		console.log(`${ghost.name || ghost.address} was replaced by ${peer.name || peer.address} at the same address; removing it.`);
+		log.info(`${ghost.name || ghost.address} was replaced by ${peer.name || peer.address} at the same address; removing it.`);
 		await removePeer(ghost.id);
 	}
 };
@@ -483,6 +517,20 @@ const waitForClose = (connection) => {
 	});
 };
 
+const canConnect = (address, port) => {
+	return new Promise((resolve) => {
+		const probe = net.connect({ host: address, port, timeout: REACH_TIMEOUT_MS });
+		const finish = (isReachable) => {
+			probe.destroy();
+			log.info(`${address} port ${port} is ${(isReachable ? 'reachable' : 'not reachable')} from this node.`);
+			resolve(isReachable);
+		};
+		probe.once('connect', () => { finish(true); });
+		probe.once('timeout', () => { finish(false); });
+		probe.once('error', () => { finish(false); });
+	});
+};
+
 const receiveExternalRequest = async (connection, request) => {
 	const self = await describeSelf();
 	const here = (self.name || self.address);
@@ -505,7 +553,7 @@ const receiveExternalRequest = async (connection, request) => {
 	}
 
 	if (!isSameVersion(request.version)) {
-		return refuse(`${here} runs version ${self.version}, ${name} runs ${(request.version ? `version ${request.version}` : 'an older version')}. Update both to the same version first.`);
+		return refuse(`${here} runs version ${self.version}, ${name} runs ${describeVersion(request.version)}. Update both to the same version first.`);
 	}
 
 	if ([...externalRequests.values()].some((entry) => { return entry.address === address; })) {
@@ -523,12 +571,16 @@ const receiveExternalRequest = async (connection, request) => {
 	}
 
 	requestTimes.set(address, now);
-	if (externalRequests.size >= EXTERNAL_REQUEST_LIMIT) {
-		return refuse(`${here} has too many requests waiting. Try again later.`);
+	if (!await canConnect(address, config.server.port) || !await canConnect(address, SSH_PORT)) {
+		return refuse(`${here} can't reach ${name} at ${address}. The VPN must allow connections both ways.`);
 	}
 
 	if (connection.disconnected) {
 		return refuse('Pairing was cancelled.');
+	}
+
+	if (externalRequests.size >= EXTERNAL_REQUEST_LIMIT) {
+		return refuse(`${here} has too many requests waiting. Try again later.`);
 	}
 
 	const decision = await new Promise((resolve) => {
@@ -546,8 +598,9 @@ const receiveExternalRequest = async (connection, request) => {
 			return true;
 		};
 		timer = setTimeout(() => { settle({ result: 'expired' }); }, EXTERNAL_REQUEST_TTL_MS);
-		externalRequests.set(id, { id, nodeId: request.id, name, address, version: request.version, connection, settle });
+		externalRequests.set(id, { id, nodeId: request.id, name, address, version: self.version, connection, settle });
 		connection.once('disconnect', () => { settle({ result: 'cancelled' }); });
+		log.info(`External request from ${name} (${request.id}) at ${address} is waiting for an admin to answer.`);
 		publishRequests();
 	});
 
@@ -577,6 +630,7 @@ const attachNamespace = () => {
 		// Adoption carries no credential — there is none yet — and can do exactly one thing: ask to be
 		// adopted. Everything else needs the key that adoption hands out.
 		if (mode === 'pair') {
+			log.info(`Pairing connection from ${clientAddress(connection)}.`);
 			connection.identity = { mode: 'pair' };
 			next();
 			return;
@@ -591,6 +645,7 @@ const attachNamespace = () => {
 		}
 
 		if (!peer) {
+			log.info(`Refused a connection from ${clientAddress(connection)}: ${(isNodeId(nodeId) ? `node ${nodeId}` : 'a node without a valid id')} is not adopted or paired here.`);
 			// The caller uses this to tell "you removed me" apart from "I could not reach you", so it
 			// has to say which. It reveals only that an id is not adopted, to someone who already
 			// knows the id.
@@ -606,7 +661,14 @@ const attachNamespace = () => {
 
 	namespace.on('connection', (connection) => {
 		if (connection.identity.mode === 'pair') {
-			connection.on('pair:request', async (request, acknowledge) => {
+			connection.on('pair:request', async (request, reply) => {
+				const source = clientAddress(connection);
+				const requester = (LABEL_PATTERN.test(String(request?.name || '')) ? request.name : source);
+				const acknowledge = (response) => {
+					log.info(`Pairing request from ${describeRequest(request, source)}: ${(response.status === 'ok' ? 'paired' : response.message)}`);
+					reply(response);
+				};
+				log.info(`Pairing request from ${describeRequest(request, source)}${(request?.adopt ? ', asking to adopt this node' : '')}.`);
 				const self = await describeSelf();
 				const offered = (request?.id < self.id && KEY_PATTERN.test(String(request.key || '')));
 				if (!request?.id || request.id === self.id) {
@@ -624,20 +686,19 @@ const attachNamespace = () => {
 					return;
 				}
 
-				const source = clientAddress(connection);
 				const advertised = discovery.discover().find((node) => { return node.id === request.id; });
 				if (!advertised || ![advertised.address, (advertised.holdsVirtualIp ? advertised.virtualIp : null)].filter(Boolean).includes(source)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is not on the network at ${source}.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${requester} is not on the network at ${source}.` });
 					return;
 				}
 
 				if ((request.cluster || null) !== self.cluster) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is in ${request.cluster || 'no cluster'}, ${self.name || self.address} is in ${self.cluster || 'no cluster'}.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${requester} is in ${request.cluster || 'no cluster'}, ${self.name || self.address} is in ${self.cluster || 'no cluster'}.` });
 					return;
 				}
 
 				if (!isSameVersion(request.version)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} runs ${(request.version ? `version ${request.version}` : 'an older version')}, ${self.name || self.address} runs version ${self.version}.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${requester} runs ${describeVersion(request.version)}, ${self.name || self.address} runs version ${self.version}.` });
 					return;
 				}
 
@@ -646,12 +707,12 @@ const attachNamespace = () => {
 				}
 
 				if (await findPeer(request.id)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is already adopted by ${self.name || self.address}. Remove it first to pair again.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${requester} is already adopted by ${self.name || self.address}. Remove it first to pair again.` });
 					return;
 				}
 
 				if (await findExternalPeer(request.id)) {
-					acknowledge({ status: 'failed', message: `Pairing was refused: ${request.name || request.address} is an external backup node of ${self.name || self.address}. Remove it first to adopt it.` });
+					acknowledge({ status: 'failed', message: `Pairing was refused: ${requester} is an external backup node of ${self.name || self.address}. Remove it first to adopt it.` });
 					return;
 				}
 
@@ -681,7 +742,11 @@ const attachNamespace = () => {
 			});
 			connection.on('pair:external', async (request, acknowledge) => {
 				if (typeof acknowledge === 'function') {
-					acknowledge(await receiveExternalRequest(connection, request));
+					const source = clientAddress(connection);
+					log.info(`External request from ${describeRequest(request, source)}.`);
+					const response = await receiveExternalRequest(connection, request);
+					log.info(`External request from ${describeRequest(request, source)}: ${(response.status === 'ok' ? 'accepted' : response.message)}`);
+					acknowledge(response);
 				}
 			});
 			return;
@@ -693,12 +758,14 @@ const attachNamespace = () => {
 		const handle = (event, handler) => {
 			connection.on(event, async (request, acknowledge) => {
 				if (connection.identity.external && !EXTERNAL_EVENTS.includes(event)) {
+					log.warn(`Refused ${event} from external node ${connection.identity.peer.name || connection.identity.peer.address}: external nodes may not do that.`);
 					acknowledge({ status: 'failed', message: 'Not authorised.' });
 					return;
 				}
 
 				const payload = readCall(connection.identity.peer.key, nonce, event, request);
 				if (!payload) {
+					log.warn(`Refused ${event} from ${connection.identity.peer.name || connection.identity.peer.address}: the request could not be verified.`);
 					acknowledge({ status: 'failed', message: 'Not authorised.' });
 					return;
 				}
@@ -711,6 +778,7 @@ const attachNamespace = () => {
 			});
 		};
 		handle('peer:remove', async (payload, respond) => {
+			log.info(`peer:remove from ${connection.identity.peer.name || connection.identity.peer.address} (${connection.identity.peer.id}).`);
 			if (connection.identity.external) {
 				await forgetExternalPeer(connection.identity.peer.id);
 			} else {
@@ -720,8 +788,10 @@ const attachNamespace = () => {
 			respond({ status: 'ok' });
 		});
 		handle('peer:link', async (payload, respond) => {
+			log.info(`peer:link from ${connection.identity.peer.name || connection.identity.peer.address} (${connection.identity.peer.id}).`);
 			const self = await describeSelf();
 			if (!payload?.node?.id || !payload?.node?.address || payload.node.id === self.id || !KEY_PATTERN.test(String(payload.key || ''))) {
+				log.warn(`Refused peer:link from ${connection.identity.peer.name || connection.identity.peer.address}: nothing valid to pair with.`);
 				respond({ status: 'failed', message: 'Nothing to pair with.' });
 				return;
 			}
@@ -730,6 +800,7 @@ const attachNamespace = () => {
 			respond({ status: 'ok', clock: await loadClock() });
 		});
 		handle('peer:forget', async (payload, respond) => {
+			log.info(`peer:forget from ${connection.identity.peer.name || connection.identity.peer.address} (${connection.identity.peer.id}).`);
 			const self = await describeSelf();
 			if (payload?.id && payload.id !== self.id && payload.id !== connection.identity.peer.id) {
 				await removePeer(payload.id, payload.removedClock, [connection.identity.peer.id, ...(Array.isArray(payload.confirmedBy) ? payload.confirmedBy : [])]);
@@ -744,7 +815,20 @@ const attachNamespace = () => {
 			const removed = (await readRemoved()).map((entry) => { return { id: entry.id, clock: (Number(entry.clock) || 0) }; });
 			respond({ status: 'ok', peers, removed, clock: await loadClock() });
 		});
+		handle('replication:verify', async (payload, respond) => {
+			log.info(`${connection.identity.peer.name || connection.identity.peer.address} asked this node to log in to it for backups.`);
+			try {
+				await hostModule?.getPlugin('replication')?.verify(connection.identity.peer.id);
+				respond({ status: 'ok', clock: await loadClock() });
+			} catch (error) {
+				const self = await describeSelf();
+				const peer = connection.identity.peer;
+				log.warn(`Could not log in to ${peer.name || peer.address} for backups: ${String(error.stderr || error.shortMessage || error.message).trim()}`);
+				respond({ status: 'failed', message: `${self.name || self.address} could not log in to ${peer.name || peer.address} at ${peer.address} to take backups. The VPN must allow connections both ways.` });
+			}
+		});
 		handle('replication:exchange', async (payload, respond) => {
+			log.info(`${connection.identity.peer.name || connection.identity.peer.address} sent its backup keys.`);
 			const identity = await hostModule?.getPlugin('replication')?.exchange(connection.identity.peer.id, payload);
 			respond(identity ? { status: 'ok', ...identity, clock: await loadClock() } : { status: 'failed', message: 'Could not prepare replication.' });
 		});
@@ -804,13 +888,21 @@ const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) =
 		throw new Error(`Could not reach ${peer.name || peer.address}.`);
 	}
 
+	const isRoutine = ROUTINE_EVENTS.includes(event);
+	if (!isRoutine) {
+		log.info(`Sending ${event} to ${peer.name || peer.address} at ${address}.`);
+	}
+
 	const connection = connectToPeer(address, { mode: 'call', nodeId: self.id });
 	const sent = await loadClock();
 	const replyNonce = crypto.randomBytes(16).toString('hex');
 	try {
 		const answer = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error(`${peer.name || peer.address} did not answer.`)); }, timeout);
-			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${peer.name || peer.address}.`)); });
+			connection.on('connect_error', (error) => {
+				clearTimeout(timer);
+				reject(new Error(`Could not reach ${peer.name || peer.address}.`, { cause: error }));
+			});
 			connection.on('challenge', (nonce) => {
 				const body = JSON.stringify({ ...payload, clock: sent, replyNonce });
 				connection.emit(event, { payload: body, token: signCall(peer.key, nonce, event, body) }, (response) => {
@@ -826,6 +918,10 @@ const call = async (peerId, event, payload = {}, timeout = REQUEST_TIMEOUT_MS) =
 			});
 		});
 		await observeClock(answer?.clock);
+		if (!isRoutine) {
+			log.info(`${event} to ${peer.name || peer.address} succeeded.`);
+		}
+
 		return answer;
 	} finally {
 		connection.close();
@@ -839,7 +935,7 @@ const broadcast = async (event, payload = {}) => {
 	const results = await Promise.allSettled(peers.map((peer) => { return call(peer.id, event, payload); }));
 	results.forEach((result, index) => {
 		if (result.status === 'rejected') {
-			console.warn(`Could not tell ${peers[index].name || peers[index].address} about ${event}: ${result.reason.message}`);
+			log.warn(`Could not tell ${peers[index].name || peers[index].address} about ${event}:`, result.reason);
 		}
 	});
 };
@@ -853,10 +949,14 @@ const pairWith = async (nodeId, address, adopting = false) => {
 	const configured = await virtualIpConfiguration();
 	const seen = (hostModule?.getState('discovery') || []).find((node) => { return node.id === nodeId; });
 	const connection = connectToPeer(address, { mode: 'pair' });
+	log.info(`Asking ${seen?.name || address} (${nodeId}) at ${address} to pair${(adopting ? ' and be adopted' : '')}.`);
 	try {
 		const response = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => { reject(new Error(`${seen?.name || address} did not answer.`)); }, (adopting ? REQUEST_TIMEOUT_MS + STALE_CHECK_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
-			connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${seen?.name || address}.`)); });
+			connection.on('connect_error', (error) => {
+				clearTimeout(timer);
+				reject(new Error(`Could not reach ${seen?.name || address}.`, { cause: error }));
+			});
 			connection.on('connect', async () => {
 				connection.emit('pair:request', { ...self, key: offered, virtualIp: configured, adopt: adopting, clock: await loadClock() }, (answer) => {
 					clearTimeout(timer);
@@ -882,6 +982,7 @@ const pairWith = async (nodeId, address, adopting = false) => {
 			hostModule?.eventEmitter.emit('host:peer:virtualIp:received', response.virtualIp);
 		}
 
+		log.info(`Paired with ${response.node.name || address} (${response.node.id}).`);
 		return response.node;
 	} finally {
 		connection.close();
@@ -902,9 +1003,11 @@ const holdsVirtualIp = async () => {
 };
 
 const link = async (first, second) => {
+	log.info(`Linking ${first.name || first.address} with ${second.name || second.address}.`);
 	const key = crypto.randomBytes(KEY_BYTES).toString('hex');
 	await call(first.id, 'peer:link', { node: { id: second.id, name: second.name, address: second.address }, key });
 	await call(second.id, 'peer:link', { node: { id: first.id, name: first.name, address: first.address }, key });
+	log.info(`Linked ${first.name || first.address} with ${second.name || second.address}.`);
 };
 
 const introduce = async (nodeId) => {
@@ -913,10 +1016,11 @@ const introduce = async (nodeId) => {
 	const results = await Promise.allSettled(others.map((peer) => { return link(peer, newcomer); }));
 	return others.filter((peer, index) => {
 		if (results[index].status === 'fulfilled') {
+			log.info(`Introduced ${newcomer.name || newcomer.address} to ${peer.name || peer.address}.`);
 			return false;
 		}
 
-		console.warn(`Could not introduce ${newcomer.name || newcomer.address} to ${peer.name || peer.address}: ${results[index].reason.message}`);
+		log.warn(`Could not introduce ${newcomer.name || newcomer.address} to ${peer.name || peer.address}:`, results[index].reason);
 		return true;
 	}).map((peer) => { return peer.name || peer.address; });
 };
@@ -960,9 +1064,9 @@ const adopt = async (job, module) => {
 		throw new Error(`${peer.name || peer.address} is in ${peer.cluster || 'no cluster'}, this node is in ${clusterDomain || 'no cluster'}. Set the same cluster on both first.`);
 	}
 
-	await module.updateJobProgress(job, `Adopting ${peer.name || peer.address}...`);
+	await reportProgress(job, module, `Adopting ${peer.name || peer.address}...`);
 	const node = await pairOnce(peer.id, peer.address, true);
-	await module.updateJobProgress(job, `Introducing ${node.name || peer.address} to the other nodes...`);
+	await reportProgress(job, module, `Introducing ${node.name || peer.address} to the other nodes...`);
 	const failed = await introduce(node.id);
 	if (failed.length) {
 		return `Adopted ${node.name || peer.address}. ${failed.join(', ')} could not be reached and will pair with it when they next see this node.`;
@@ -975,9 +1079,16 @@ const requestExternal = (address, self, onConnect) => {
 	const connection = connectToPeer(address, { mode: 'pair' });
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => { reject(new Error(`${address} did not answer.`)); }, EXTERNAL_REQUEST_TTL_MS + REQUEST_TIMEOUT_MS);
-		connection.on('connect_error', () => { clearTimeout(timer); reject(new Error(`Could not reach ${address}.`)); });
-		connection.on('disconnect', () => { clearTimeout(timer); reject(new Error(`${address} stopped answering.`)); });
+		connection.on('connect_error', (error) => {
+			clearTimeout(timer);
+			reject(new Error(`Could not reach ${address}.`, { cause: error }));
+		});
+		connection.on('disconnect', (reason) => {
+			clearTimeout(timer);
+			reject(new Error(`${address} stopped answering.`, { cause: new Error(reason) }));
+		});
 		connection.on('connect', async () => {
+			log.info(`Connected to ${address}, sending the external request.`);
 			await onConnect();
 			connection.emit('pair:external', { id: self.id, name: self.name, version: self.version }, (answer) => {
 				clearTimeout(timer);
@@ -1010,8 +1121,9 @@ const adoptExternal = async (job, module) => {
 	}
 
 	const self = await describeSelf();
-	await module.updateJobProgress(job, `Connecting to ${address}...`);
-	const response = await requestExternal(address, self, () => { return module.updateJobProgress(job, `Waiting for ${address} to accept...`); });
+	log.info(`Asking ${address} to keep the backups of this node.`);
+	await reportProgress(job, module, `Connecting to ${address}...`);
+	const response = await requestExternal(address, self, () => { return reportProgress(job, module, `Waiting for ${address} to accept...`); });
 	const node = (response.node || {});
 	const name = (LABEL_PATTERN.test(String(node.name || '')) ? node.name : address);
 	if (!isNodeId(node.id) || node.id === self.id || !KEY_PATTERN.test(String(response.key || ''))) {
@@ -1027,6 +1139,24 @@ const adoptExternal = async (job, module) => {
 	}
 
 	await saveExternalPeer({ id: node.id, name, address, key: response.key, role: 'recipient' });
+	await reportProgress(job, module, `Setting up backups with ${name}...`);
+	try {
+		await module.getPlugin('replication').pair(node.id);
+		log.info(`Exchanged backup keys with ${name}, asking it to log in to this node.`);
+		await call(node.id, 'replication:verify', {}, REQUEST_TIMEOUT_MS * 2);
+		log.info(`${name} logged in to this node for backups.`);
+	} catch (error) {
+		log.info(`Undoing the pairing with ${name}.`);
+		try {
+			await call(node.id, 'peer:remove');
+		} catch (removeError) {
+			log.warn(`Could not tell ${name} it was removed:`, removeError);
+		}
+
+		await forgetExternalPeer(node.id);
+		throw new Error(`Could not set up backups with ${name}. ${error.message}`, { cause: error.cause });
+	}
+
 	return `Adopted ${name} as an external backup node.`;
 };
 
@@ -1041,7 +1171,7 @@ const findRequest = (requestId) => {
 
 const acceptRequest = async (job, module) => {
 	const request = findRequest(job.data.config?.requestId);
-	await module.updateJobProgress(job, `Accepting ${request.name}...`);
+	await reportProgress(job, module, `Accepting ${request.name}...`);
 	const key = crypto.randomBytes(KEY_BYTES).toString('hex');
 	await saveExternalPeer({ id: request.nodeId, name: request.name, address: request.address, key, role: 'source' });
 	if (!request.settle({ result: 'accept', key })) {
@@ -1060,13 +1190,13 @@ const denyRequest = async (job, module) => {
 
 const blockRequest = async (job, module) => {
 	const request = findRequest(job.data.config?.requestId);
-	await module.updateJobProgress(job, `Blocking ${request.address}...`);
+	await reportProgress(job, module, `Blocking ${request.address}...`);
 	request.settle({ result: 'block' });
 	await waitForClose(request.connection);
 	try {
 		await execa('fail2ban-client', ['set', PAIRING_JAIL, 'banip', request.address]);
 	} catch (error) {
-		console.warn(`Could not block ${request.address}: ${error.shortMessage || error.message}`);
+		log.warn(`Could not block ${request.address}: ${error.shortMessage || error.message}`);
 		throw new Error(`Could not block ${request.address}. ${request.name} was told it is blocked, but it can still ask again.`);
 	}
 
@@ -1076,11 +1206,25 @@ const blockRequest = async (job, module) => {
 const stillAdopted = async (address, nodeId, timeout = REQUEST_TIMEOUT_MS) => {
 	const connection = connectToPeer(address, { mode: 'call', nodeId });
 	try {
-		return await new Promise((resolve) => {
-			const timer = setTimeout(() => { resolve(true); }, timeout);
-			connection.on('connect', () => { clearTimeout(timer); resolve(true); });
-			connection.on('connect_error', (error) => { clearTimeout(timer); resolve(error?.data?.reason !== 'unknown'); });
+		const isAdopted = await new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				log.info(`${address} did not answer whether it still has this node; keeping it.`);
+				resolve(true);
+			}, timeout);
+			connection.on('connect', () => {
+				clearTimeout(timer);
+				resolve(true);
+			});
+			connection.on('connect_error', (error) => {
+				clearTimeout(timer);
+				if (error?.data?.reason !== 'unknown') {
+					log.info(`Could not ask ${address} whether it still has this node (${error?.message || 'unknown error'}); keeping it.`);
+				}
+
+				resolve(error?.data?.reason !== 'unknown');
+			});
 		});
+		return isAdopted;
 	} finally {
 		connection.close();
 	}
@@ -1096,7 +1240,7 @@ const dropStalePeers = async () => {
 	const results = await Promise.all(peers.map(({ address }) => { return stillAdopted(address, self.id, STALE_CHECK_TIMEOUT_MS); }));
 	for (const [index, adopted] of results.entries()) {
 		if (!adopted) {
-			console.log(`${peers[index].peer.name || peers[index].peer.address} no longer has this node adopted; removing it.`);
+			log.info(`${peers[index].peer.name || peers[index].peer.address} no longer has this node adopted; removing it.`);
 			await forgetPeer(peers[index].peer.id);
 		}
 	}
@@ -1114,7 +1258,7 @@ const reconcile = async (peer, address, nodeId) => {
 		return true;
 	}
 
-	console.log(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
+	log.info(`${peer.name || peer.address} no longer has this node adopted; removing it.`);
 	await forgetPeer(peer.id);
 	return false;
 };
@@ -1131,9 +1275,10 @@ const reconcileVirtualIp = async (peer, node) => {
 
 	try {
 		const answer = await call(peer.id, 'virtualIp:current');
+		log.info(`Taking the virtual IP settings from ${peer.name || peer.address}: ${answer.virtualIp?.address || 'none'}.`);
 		hostModule?.eventEmitter.emit('host:peer:virtualIp:configure', answer.virtualIp);
 	} catch (error) {
-		console.warn(`Could not read the virtual IP from ${peer.name || peer.address}: ${error.message}`);
+		log.warn(`Could not read the virtual IP from ${peer.name || peer.address}:`, error);
 	}
 };
 
@@ -1142,14 +1287,14 @@ const reconcilePeers = async (peer) => {
 	try {
 		answer = await call(peer.id, 'peer:list');
 	} catch (error) {
-		console.warn(`Could not read the adopted nodes of ${peer.name || peer.address}: ${error.message}`);
+		log.warn(`Could not read the adopted nodes of ${peer.name || peer.address}:`, error);
 		return;
 	}
 
 	for (const removal of (answer.removed || [])) {
 		const known = await findPeer(removal.id);
 		if (known && removal.id !== peer.id && (Number(removal.clock) || 0) > (Number(known.pairedClock) || 0)) {
-			console.log(`${known.name || known.address} was removed while this node was away; forgetting it.`);
+			log.info(`${known.name || known.address} was removed while this node was away; forgetting it.`);
 			await removePeer(removal.id, removal.clock, [peer.id]);
 		}
 	}
@@ -1168,11 +1313,11 @@ const reconcilePeers = async (peer) => {
 			continue;
 		}
 
-		console.log(`${other.name || node.address} was adopted while ${peer.name || peer.address} was away; pairing them.`);
+		log.info(`${other.name || node.address} was adopted while ${peer.name || peer.address} was away; pairing them.`);
 		try {
 			await link(peer, other);
 		} catch (error) {
-			console.warn(`Could not pair ${peer.name || peer.address} with ${other.name || node.address}: ${error.message}`);
+			log.warn(`Could not pair ${peer.name || peer.address} with ${other.name || node.address}:`, error);
 		}
 	}
 };
@@ -1238,7 +1383,7 @@ const reconcileExternalPeers = async () => {
 		}
 
 		if (!await stillAdopted(peer.address, self.id)) {
-			console.log(`${peer.name || peer.address} no longer has this node paired; removing it.`);
+			log.info(`${peer.name || peer.address} no longer has this node paired; removing it.`);
 			await forgetExternalPeer(peer.id);
 		}
 	}
@@ -1259,7 +1404,7 @@ const scheduleReconcile = async () => {
 		await refreshPeers();
 		await syncPeerRoutes();
 	} catch (error) {
-		console.warn(`Could not reconcile adopted nodes: ${error.message}`);
+		log.warn(`Could not reconcile adopted nodes:`, error);
 	} finally {
 		reconciling = false;
 	}
@@ -1271,11 +1416,11 @@ const remove = async (job, module) => {
 	const { config } = job.data;
 	const external = await findExternalPeer(config.peerId);
 	if (external) {
-		await module.updateJobProgress(job, `Removing ${external.name || external.address}...`);
+		await reportProgress(job, module, `Removing ${external.name || external.address}...`);
 		try {
 			await call(external.id, 'peer:remove');
 		} catch (error) {
-			console.warn(`Could not tell ${external.name || external.address} it was removed: ${error.message}`);
+			log.warn(`Could not tell ${external.name || external.address} it was removed:`, error);
 		}
 
 		await forgetExternalPeer(external.id);
@@ -1288,13 +1433,13 @@ const remove = async (job, module) => {
 		throw new Error(`${seen?.name || seen?.address || config.peerId} is not adopted.`);
 	}
 
-	await module.updateJobProgress(job, `Removing ${peer.name || peer.address}...`);
+	await reportProgress(job, module, `Removing ${peer.name || peer.address}...`);
 	// Best effort: a node that has died still has to be removable, so failing to reach it is not a
 	// reason to leave it adopted here. When it does answer, both sides forget each other.
 	try {
 		await call(peer.id, 'peer:remove');
 	} catch (error) {
-		console.warn(`Could not tell ${peer.name || peer.address} it was removed: ${error.message}`);
+		log.warn(`Could not tell ${peer.name || peer.address} it was removed:`, error);
 	}
 
 	const removedClock = await removePeer(peer.id);
@@ -1306,18 +1451,32 @@ const remove = async (job, module) => {
 			await confirmRemovals(others[index].id, [peer.id]);
 			told.push(others[index].id);
 		} else {
-			console.warn(`Could not tell ${others[index].name || others[index].address} that ${peer.name || peer.address} was removed: ${result.reason.message}`);
+			log.warn(`Could not tell ${others[index].name || others[index].address} that ${peer.name || peer.address} was removed:`, result.reason);
 		}
 	}
 
 	if (told.length > 1) {
 		const confirmations = await Promise.allSettled(told.map((id) => { return call(id, 'peer:forget', { id: peer.id, removedClock, confirmedBy: told }); }));
 		confirmations.filter((result) => { return result.status === 'rejected'; }).forEach((result) => {
-			console.warn(`Could not confirm the removal of ${peer.name || peer.address}: ${result.reason.message}`);
+			log.warn(`Could not confirm the removal of ${peer.name || peer.address}:`, result.reason);
 		});
 	}
 
 	return `${peer.name || peer.address} removed.`;
+};
+
+const logged = (run) => {
+	return async (job, module) => {
+		log.info(`${job.name} started by ${job.data?.username || 'unknown'} with ${JSON.stringify(job.data?.config || {})}.`);
+		try {
+			const result = await run(job, module);
+			log.info(`${job.name} finished: ${result}`);
+			return result;
+		} catch (error) {
+			log.warn(`${job.name} failed:`, error);
+			throw error;
+		}
+	};
 };
 
 const onConnection = async (socket, module) => {
@@ -1351,7 +1510,7 @@ const register = (module) => {
 		reconciled.clear();
 		scheduleReconcile();
 		reconcileExternalPeers().catch((error) => {
-			console.warn(`Could not reconcile external nodes: ${error.message}`);
+			log.warn(`Could not reconcile external nodes:`, error);
 		});
 	}, RECONCILE_INTERVAL_MS);
 };
@@ -1372,11 +1531,11 @@ export default {
 		'host:peer:request:block': { job: 'host:peer:request:block', parallel: true }
 	},
 	jobs: {
-		'host:peer:adopt': adopt,
-		'host:peer:remove': remove,
-		'host:peer:external:adopt': adoptExternal,
-		'host:peer:request:accept': acceptRequest,
-		'host:peer:request:deny': denyRequest,
-		'host:peer:request:block': blockRequest
+		'host:peer:adopt': logged(adopt),
+		'host:peer:remove': logged(remove),
+		'host:peer:external:adopt': logged(adoptExternal),
+		'host:peer:request:accept': logged(acceptRequest),
+		'host:peer:request:deny': logged(denyRequest),
+		'host:peer:request:block': logged(blockRequest)
 	}
 };

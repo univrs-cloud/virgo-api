@@ -1,6 +1,9 @@
 import { Op } from 'sequelize';
 import * as database from './stats.js';
 import Sample from './models/Sample.js';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('database:stats_service');
 
 let synced = false;
 
@@ -29,7 +32,7 @@ class StatsService {
 				raw: true
 			});
 		} catch (error) {
-			console.error(`Error reading stats samples from database:`, error);
+			log.error(`Error reading stats samples from database:`, error);
 			return [];
 		}
 	}
@@ -46,7 +49,7 @@ class StatsService {
 			});
 			return true;
 		} catch (error) {
-			console.error(`Error writing stats samples to database:`, error);
+			log.error(`Error writing stats samples to database:`, error);
 			return false;
 		}
 	}

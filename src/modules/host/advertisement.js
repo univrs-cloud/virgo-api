@@ -10,7 +10,9 @@ import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
 import { getOwnAddress, holdsAddress } from '../../utils/network.js';
 import { getNodeId } from '../../utils/node_id.js';
+import { createLog } from '../../utils/log.js';
 
+const log = createLog('host:advertisement');
 
 const SERVICE_FILE = '/etc/avahi/services/univrs.service';
 const SERVICE_TYPE = '_univrs._tcp';
@@ -231,13 +233,13 @@ const advertise = () => {
 			await previous;
 			await writeFile(SERVICE_FILE, buildDocument(await buildRecords()));
 		} catch (error) {
-			console.warn(`Could not publish the discovery service: ${error.shortMessage || error.message}`);
+			log.warn(`Could not publish the discovery service: ${error.shortMessage || error.message}`);
 		}
 
 		try {
 			await announceCluster();
 		} catch (error) {
-			console.warn(`Could not publish the cluster shares: ${error.shortMessage || error.message}`);
+			log.warn(`Could not publish the cluster shares: ${error.shortMessage || error.message}`);
 		}
 	})();
 

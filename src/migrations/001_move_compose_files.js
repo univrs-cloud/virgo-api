@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { execa } from 'execa';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const COMPOSE_DATASET = 'messier/docker/compose';
 const OLD_COMPOSE_DIR = '/opt/docker';
@@ -11,7 +14,7 @@ const COMPOSE_FILES = ['docker-compose.yml', '.env'];
 const moveComposeFiles = async () => {
 	const { exitCode: datasetExists } = await execa('zfs', ['list', '-j', '-o', 'name', COMPOSE_DATASET], { reject: false });
 	if (datasetExists !== 0) {
-		console.log(`Dataset ${COMPOSE_DATASET} does not exist. Skipping compose files move.`);
+		log.info(`Dataset ${COMPOSE_DATASET} does not exist. Skipping compose files move.`);
 		return;
 	}
 
@@ -25,12 +28,12 @@ const moveComposeFiles = async () => {
 		await execa('docker', ['compose', 'down'], { cwd: oldProjectDir });
 		await execa('docker', ['compose', '-p', name, 'up', '-d'], { cwd: projectDir });
 		await fs.rm(oldProjectDir, { recursive: true, force: true });
-		console.log(`Moved ${name} to ${projectDir}`);
+		log.info(`Moved ${name} to ${projectDir}`);
 	}
 
 	await execa('zfs', ['destroy', '-r', COMPOSE_DATASET]);
 	await fs.rm(OLD_COMPOSE_DIR, { recursive: true, force: true });
-	console.log(`Removed ${COMPOSE_DATASET}.`);
+	log.info(`Removed ${COMPOSE_DATASET}.`);
 };
 
 export default moveComposeFiles;

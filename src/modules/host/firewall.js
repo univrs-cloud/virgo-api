@@ -1,5 +1,8 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:firewall');
 
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const SERVICES_FILE = '/etc/services';
@@ -47,7 +50,7 @@ const loadServiceNames = async () => {
 			}
 		}
 	} catch (error) {
-		console.error('loadServiceNames:', error);
+		log.error('loadServiceNames:', error);
 	}
 	return serviceNames;
 };
@@ -96,7 +99,7 @@ const loadBans = async (jail, addresses) => {
 			};
 		});
 	} catch (error) {
-		console.error('loadBans:', error);
+		log.error('loadBans:', error);
 		return addresses.map((address) => { return { address, bannedAt: null, expiresAt: null, permanent: false }; });
 	}
 };
@@ -121,11 +124,11 @@ const loadJails = async () => {
 const loadFirewall = async (module) => {
 	const [filter, jails] = await Promise.all([
 		loadRules().catch((error) => {
-			console.error('loadRules:', error);
+			log.error('loadRules:', error);
 			return { policy: null, rules: false };
 		}),
 		loadJails().catch((error) => {
-			console.error('loadJails:', error);
+			log.error('loadJails:', error);
 			return false;
 		})
 	]);

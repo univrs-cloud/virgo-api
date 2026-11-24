@@ -1,10 +1,13 @@
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:snapshot_rules');
 
 const loadRules = async (module) => {
 	try {
 		module.setState('snapshotRules', await sanoid.getRules());
 	} catch (error) {
-		console.error('loadRules:', error);
+		log.error('loadRules:', error);
 		module.setState('snapshotRules', false);
 	}
 	module.emitChanged('host:snapshotRules', module.getState('snapshotRules'), { audience: 'admin' });

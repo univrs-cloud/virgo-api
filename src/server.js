@@ -4,6 +4,9 @@ import http from 'http';
 import https from 'https';
 import { fileURLToPath } from 'url';
 import config from '../config.js';
+import { createLog } from './utils/log.js';
+
+const log = createLog('server');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ACME_RETRY_DELAY_MS = 15000;
@@ -25,11 +28,11 @@ function createAcmeServer(app) {
 			return;
 		}
 
-		console.error(`ACME hook cannot bind ${config.acme.host}:${config.acme.port} (${error.code || error.message}); retrying in ${ACME_RETRY_DELAY_MS / 1000}s`);
+		log.error(`ACME hook cannot bind ${config.acme.host}:${config.acme.port} (${error.code || error.message}); retrying in ${ACME_RETRY_DELAY_MS / 1000}s`);
 		retrying = setTimeout(() => {
 			retrying = null;
 			server.listen(config.acme.port, config.acme.host, () => {
-				console.log(`ACME hook recovered at http://${config.acme.host}:${config.acme.port}/acme`);
+				log.info(`ACME hook recovered at http://${config.acme.host}:${config.acme.port}/acme`);
 			});
 		}, ACME_RETRY_DELAY_MS);
 		retrying.unref();

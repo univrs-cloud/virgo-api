@@ -1,5 +1,8 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:system_update');
 
 const checkUpdates = async (socket, module) => {
 	if (module.getState('checkUpdates')) {
@@ -57,7 +60,7 @@ const update = async (socket, module) => {
 			updateScript,
 		]);
 	} catch (error) {
-		console.error(error.message);
+		log.error(error.message);
 	}
 	await module.checkUpdate();
 };

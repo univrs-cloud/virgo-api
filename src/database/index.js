@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { Sequelize } from 'sequelize';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('database');
 
 const POOL_DATABASE_FILE = '/messier/.config/virgo.db';
 // Without OPEN_CREATE sqlite will not bring the file into existence, and sequelize will not create
@@ -49,7 +52,7 @@ const ensureOpen = async () => {
 		try {
 			await open();
 		} catch (error) {
-			console.error('Unable to open the database on the pool:', error);
+			log.error('Unable to open the database on the pool:', error);
 		} finally {
 			opening = null;
 		}

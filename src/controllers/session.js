@@ -1,6 +1,9 @@
 import express from 'express';
 import * as authelia from '../utils/authelia.js';
 import * as sessions from '../utils/sessions.js';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('session');
 
 /**
  * Signing in and out. The session itself is Authelia's: these routes carry credentials to it and its
@@ -49,7 +52,7 @@ router.delete('/session', async (req, res, next) => {
 	try {
 		const { isEnded, status, cookies } = await authelia.logout({ cookie: req.headers.cookie, fqdn: requestFqdn(req) });
 		if (!isEnded) {
-			console.error(`Could not end the session: Authelia answered ${status}.`);
+			log.error(`Could not end the session: Authelia answered ${status}.`);
 			res.sendStatus(502);
 			return;
 		}

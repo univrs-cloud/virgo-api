@@ -3,6 +3,9 @@ import { execa } from 'execa';
 import * as yaml from 'js-yaml';
 import linuxSysUser from 'linux-sys-user';
 import BaseModule from '../base.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('user');
 
 const linuxUser = linuxSysUser.promise();
 const ROLE_CHECK_INTERVAL = 30000;
@@ -74,7 +77,7 @@ class UserModule extends BaseModule {
 			proc.stdin.end();
 			await proc;
 		} catch (error) {
-			console.error(error);
+			log.error(error);
 		}
 	}
 

@@ -3,6 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Queue } from 'bullmq';
 import config from '../config.js';
+import { createLog } from './utils/log.js';
+
+const log = createLog('queues');
 
 const MODULES = fs.readdirSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'modules'), { withFileTypes: true })
 	.filter((entry) => { return entry.isDirectory() && fs.existsSync(path.join(entry.parentPath, entry.name, 'index.js')); })
@@ -42,7 +45,7 @@ async function cleanupQueues() {
 		port: config.redis.port
 	};
 
-	console.log('Cleaning up stale BullMQ jobs...');
+	log.info('Cleaning up stale BullMQ jobs...');
 
 	for (const name of QUEUE_NAMES) {
 		try {
@@ -54,7 +57,7 @@ async function cleanupQueues() {
 		}
 	}
 
-	console.log('Queue cleanup complete.');
+	log.info('Queue cleanup complete.');
 }
 
 export {

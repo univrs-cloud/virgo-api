@@ -2,6 +2,9 @@ import fs from 'fs';
 import ini from 'ini';
 import { execa } from 'execa';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('share:delete');
 
 const deleteFolder = async (job, module) => {
 	const { config } = job.data;
@@ -31,7 +34,7 @@ const deleteFolder = async (job, module) => {
 		try {
 			await sanoid.removeSection(dataset);
 		} catch (error) {
-			console.error(`Could not remove the ${dataset} snapshots configuration: ${error.message}`);
+			log.error(`Could not remove the ${dataset} snapshots configuration: ${error.message}`);
 		}
 	}
 	delete shares[name];

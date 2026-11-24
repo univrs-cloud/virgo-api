@@ -2,6 +2,9 @@ import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import StatsService from '../../database/stats_service.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:stats');
 
 const SAMPLE_INTERVAL_MS = 1000;
 const SAVE_INTERVAL_MS = 60 * 1000;
@@ -26,7 +29,7 @@ const saveSamples = async () => {
 			savedUntil = (pending.at(-1)?.time ?? savedUntil);
 		}
 	} catch (error) {
-		console.error('saveSamples:', error);
+		log.error('saveSamples:', error);
 	}
 };
 
@@ -124,7 +127,7 @@ const recordSample = async (module) => {
 		}
 		previousReading = reading;
 	} catch (error) {
-		console.error('recordSample:', error);
+		log.error('recordSample:', error);
 	}
 };
 
@@ -210,7 +213,7 @@ const getCpuSensors = async (module) => {
 	try {
 		module.setState('cpuSensors', { temperature: { main: await readCpuTemperature() }, fan: await readFanSpeed() });
 	} catch (error) {
-		console.error('getCpuSensors:', error);
+		log.error('getCpuSensors:', error);
 		module.setState('cpuSensors', false);
 	}
 	module.nsp.emit('host:cpu:sensors', module.getState('cpuSensors'));

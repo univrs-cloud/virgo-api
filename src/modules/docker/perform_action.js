@@ -5,6 +5,9 @@ import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
 import DataService from '../../database/data_service.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:perform_action');
 
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause', 'remove'];
@@ -29,7 +32,7 @@ const downloadComposeFile = async (job, module, template, name, composeProjectDi
 
 		await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), await response.text(), 'utf-8');
 	} catch (error) {
-		console.error(`Could not download the ${name} project template: ${error.message}`);
+		log.error(`Could not download the ${name} project template: ${error.message}`);
 		await module.updateJobProgress(job, `Could not download ${template.title}'s project template, recreating from cache...`);
 	}
 };
@@ -99,7 +102,7 @@ const performAppAction = async (job, module) => {
 				await sanoid.setMode(dataset, 'paused');
 			}
 		} catch (error) {
-			console.error(`Could not pause the ${existingApp.name} snapshots: ${error.message}`);
+			log.error(`Could not pause the ${existingApp.name} snapshots: ${error.message}`);
 		}
 		module.eventEmitter.emit('configured:updated');
 	}

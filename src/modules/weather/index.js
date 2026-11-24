@@ -1,5 +1,8 @@
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('weather');
 
 class WeatherModule extends BaseModule {
 	#fetchDelay = 10000;
@@ -73,16 +76,16 @@ class WeatherModule extends BaseModule {
 			
 			weather = await weatherResponse.json();
 		} catch (error) {
-			console.error(`Weather fetch error:`, error.message);
+			log.error(`Weather fetch error:`, error.message);
 			if (error.name === 'AbortError') {
-				console.error(`Request timed out after 30 seconds`);
+				log.error(`Request timed out after 30 seconds`);
 			}
 			weather = false;
 			this.fetchRetries--;
 		} finally {
 			this.request = null;
 			if (weather === false && this.fetchRetries >= 0) {
-				console.log(`Retrying weather fetch in ${this.fetchDelay}ms. Attempts remaining: ${this.fetchRetries}`);
+				log.info(`Retrying weather fetch in ${this.fetchDelay}ms. Attempts remaining: ${this.fetchRetries}`);
 				setTimeout(() => {
 					this.fetchWeather();
 				}, this.fetchDelay);
@@ -95,7 +98,7 @@ class WeatherModule extends BaseModule {
 			this.setState('weather', weather);
 			this.emitState('weather');
 		} else {
-			console.error(`Failed to fetch weather data after all retry attempts`);
+			log.error(`Failed to fetch weather data after all retry attempts`);
 		}
 		
 		return ``;

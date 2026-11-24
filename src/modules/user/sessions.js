@@ -1,4 +1,7 @@
 import * as sessions from '../../utils/sessions.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('user:sessions');
 
 const isSameUser = (first, second) => {
 	return String(first ?? '').toLowerCase() === String(second ?? '').toLowerCase();
@@ -14,7 +17,7 @@ const endUserSessions = async (username) => {
 		const userSessions = (await sessions.list()).filter((session) => { return isSameUser(session.username, username); });
 		await sessions.end(userSessions.map((session) => { return session.hash; }));
 	} catch (error) {
-		console.error(`Error ending the sessions of ${username}:`, error);
+		log.error(`Error ending the sessions of ${username}:`, error);
 	}
 };
 

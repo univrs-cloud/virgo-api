@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
@@ -32,21 +35,21 @@ const countRows = async (sequelize, QueryTypes, name) => {
 
 const renameShortcutsTable = async (sequelize, QueryTypes) => {
 	if (!await tableExists(sequelize, QueryTypes, 'Bookmarks')) {
-		console.log(`No Bookmarks table found. Skipping table rename.`);
+		log.info(`No Bookmarks table found. Skipping table rename.`);
 		return;
 	}
 
 	if (await tableExists(sequelize, QueryTypes, 'Shortcuts')) {
 		if (await countRows(sequelize, QueryTypes, 'Shortcuts') > 0) {
-			console.log(`Shortcuts table already holds rows. Leaving Bookmarks in place for manual review.`);
+			log.info(`Shortcuts table already holds rows. Leaving Bookmarks in place for manual review.`);
 			return;
 		}
 		await sequelize.query('DROP TABLE `Shortcuts`');
-		console.log(`Dropped the empty Shortcuts table left by a model sync.`);
+		log.info(`Dropped the empty Shortcuts table left by a model sync.`);
 	}
 
 	await sequelize.query('ALTER TABLE `Bookmarks` RENAME TO `Shortcuts`');
-	console.log(`Renamed Bookmarks to Shortcuts.`);
+	log.info(`Renamed Bookmarks to Shortcuts.`);
 };
 
 const rebuildItemOrders = async (sequelize, QueryTypes, createSql) => {
@@ -87,12 +90,12 @@ const rebuildItemOrders = async (sequelize, QueryTypes, createSql) => {
 		await sequelize.query('PRAGMA foreign_keys = ON');
 	}
 
-	console.log(`Rebuilt ItemOrders without the bookmark type constraint.`);
+	log.info(`Rebuilt ItemOrders without the bookmark type constraint.`);
 };
 
 const rewriteItemOrderTypes = async (sequelize, QueryTypes) => {
 	if (!await tableExists(sequelize, QueryTypes, 'ItemOrders')) {
-		console.log(`No ItemOrders table found. Skipping type rewrite.`);
+		log.info(`No ItemOrders table found. Skipping type rewrite.`);
 		return;
 	}
 
@@ -113,29 +116,29 @@ const rewriteItemOrderTypes = async (sequelize, QueryTypes) => {
 		throw new Error(`${pending.total} ItemOrders rows still carry the bookmark type.`);
 	}
 
-	console.log(`Rewrote the ItemOrders bookmark rows to shortcut.`);
+	log.info(`Rewrote the ItemOrders bookmark rows to shortcut.`);
 };
 
 const moveIcons = async () => {
 	if (!await exists(OLD_ICONS_DIR)) {
-		console.log(`No bookmark icons directory found. Skipping icons move.`);
+		log.info(`No bookmark icons directory found. Skipping icons move.`);
 		return;
 	}
 
 	await fs.mkdir(path.dirname(NEW_ICONS_DIR), { recursive: true });
 	await fs.rename(OLD_ICONS_DIR, NEW_ICONS_DIR);
-	console.log(`Moved ${OLD_ICONS_DIR} -> ${NEW_ICONS_DIR}`);
+	log.info(`Moved ${OLD_ICONS_DIR} -> ${NEW_ICONS_DIR}`);
 };
 
 const renameBookmarksToShortcuts = async () => {
 	try {
 		if (await exists(NEW_ICONS_DIR)) {
-			console.log(`${NEW_ICONS_DIR} already exists. Skipping the bookmark to shortcut rename.`);
+			log.info(`${NEW_ICONS_DIR} already exists. Skipping the bookmark to shortcut rename.`);
 			return;
 		}
 
 		if (!await exists(DATABASE_FILE)) {
-			console.log(`No database file found. Skipping the bookmark to shortcut rename.`);
+			log.info(`No database file found. Skipping the bookmark to shortcut rename.`);
 			await moveIcons();
 			return;
 		}
@@ -147,9 +150,9 @@ const renameBookmarksToShortcuts = async () => {
 		await rewriteItemOrderTypes(sequelize, QueryTypes);
 		await moveIcons();
 
-		console.log(`Bookmarks renamed to shortcuts successfully!`);
+		log.info(`Bookmarks renamed to shortcuts successfully!`);
 	} catch (error) {
-		console.error(`Bookmark to shortcut rename failed:`, error);
+		log.error(`Bookmark to shortcut rename failed:`, error);
 	}
 };
 

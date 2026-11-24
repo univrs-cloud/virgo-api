@@ -4,6 +4,9 @@ import Session from './models/Session.js';
 import { Application, Shortcut, ItemOrder } from './models/associations.js';
 import * as traefikConfig from '../utils/traefik_config.js';
 import { getCoreApps } from '../utils/core_apps.js';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('database:data_service');
 
 const DEFAULT_CONFIGURATION = {
 	location: {
@@ -26,11 +29,11 @@ class DataService {
 			await Shortcut.sync({ force: false });
 			await ItemOrder.sync({ force: false });
 			await Session.sync({ force: false });
-			console.log(`Database models synchronized.`);
+			log.info(`Database models synchronized.`);
 			await Application.update({ canBeRemoved: false }, { where: { name: getCoreApps(), canBeRemoved: true } });
 			return true;
 		} catch (error) {
-			console.error(`Unable to connect to the database:`, error);
+			log.error(`Unable to connect to the database:`, error);
 			return false;
 		}
 	}
@@ -52,7 +55,7 @@ class DataService {
 			}
 			return configuration;
 		} catch (error) {
-			console.error(`Error reading configuration from database:`, error);
+			log.error(`Error reading configuration from database:`, error);
 			// Return default configuration if database read fails
 			return structuredClone(DEFAULT_CONFIGURATION);
 		}
@@ -71,7 +74,7 @@ class DataService {
 			});
 			return true;
 		} catch (error) {
-			console.error(`Error writing configuration key '${key}' to database:`, error);
+			log.error(`Error writing configuration key '${key}' to database:`, error);
 			return false;
 		}
 	}
@@ -85,7 +88,7 @@ class DataService {
 			await Configuration.destroy({ where: { key } });
 			return true;
 		} catch (error) {
-			console.error(`Error deleting configuration key '${key}' from database:`, error);
+			log.error(`Error deleting configuration key '${key}' from database:`, error);
 			return false;
 		}
 	}
@@ -101,7 +104,7 @@ class DataService {
 			}
 			return true;
 		} catch (error) {
-			console.error(`Error updating configuration in database:`, error);
+			log.error(`Error updating configuration in database:`, error);
 			return false;
 		}
 	}
@@ -118,7 +121,7 @@ class DataService {
 			});
 			return applications;
 		} catch (error) {
-			console.error(`Error reading applications from database:`, error);
+			log.error(`Error reading applications from database:`, error);
 			return [];
 		}
 	}
@@ -135,7 +138,7 @@ class DataService {
 			});
 			return application;
 		} catch (error) {
-			console.error(`Error reading application '${name}' from database:`, error);
+			log.error(`Error reading application '${name}' from database:`, error);
 			return null;
 		}
 	}
@@ -148,7 +151,7 @@ class DataService {
 		try {
 			return (await Application.count({ where: { name } }) > 0);
 		} catch (error) {
-			console.error(`Error reading application '${name}' from database:`, error);
+			log.error(`Error reading application '${name}' from database:`, error);
 			return null;
 		}
 	}
@@ -172,7 +175,7 @@ class DataService {
 			await DataService.setItemOrder(application.id, 'app', order);
 			return true;
 		} catch (error) {
-			console.error(`Error writing application '${applicationData.name}' to database:`, error);
+			log.error(`Error writing application '${applicationData.name}' to database:`, error);
 			return false;
 		}
 	}
@@ -198,7 +201,7 @@ class DataService {
 			}
 			return true;
 		} catch (error) {
-			console.error(`Error updating application '${name}' in database:`, error);
+			log.error(`Error updating application '${name}' in database:`, error);
 			return false;
 		}
 	}
@@ -222,7 +225,7 @@ class DataService {
 			});
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting application '${name}' from database:`, error);
+			log.error(`Error deleting application '${name}' from database:`, error);
 			return false;
 		}
 	}
@@ -239,7 +242,7 @@ class DataService {
 			});
 			return await traefikConfig.enrichShortcuts(shortcuts);
 		} catch (error) {
-			console.error(`Error reading shortcuts from database:`, error);
+			log.error(`Error reading shortcuts from database:`, error);
 			return [];
 		}
 	}
@@ -256,7 +259,7 @@ class DataService {
 			});
 			return shortcut;
 		} catch (error) {
-			console.error(`Error reading shortcut '${name}' from database:`, error);
+			log.error(`Error reading shortcut '${name}' from database:`, error);
 			return null;
 		}
 	}
@@ -313,7 +316,7 @@ class DataService {
 			
 			return true;
 		} catch (error) {
-			console.error(`Error writing shortcut '${shortcutData.name}' to database:`, error);
+			log.error(`Error writing shortcut '${shortcutData.name}' to database:`, error);
 			return false;
 		}
 	}
@@ -345,7 +348,7 @@ class DataService {
 			
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting shortcut '${name}' from database:`, error);
+			log.error(`Error deleting shortcut '${name}' from database:`, error);
 			return false;
 		}
 	}
@@ -363,7 +366,7 @@ class DataService {
 			});
 			return true;
 		} catch (error) {
-			console.error(`Error writing item order for ${itemId} (${type}) to database:`, error);
+			log.error(`Error writing item order for ${itemId} (${type}) to database:`, error);
 			return false;
 		}
 	}
@@ -382,7 +385,7 @@ class DataService {
 			});
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting item order for ${itemId} (${type}):`, error);
+			log.error(`Error deleting item order for ${itemId} (${type}):`, error);
 			return false;
 		}
 	}
@@ -418,7 +421,7 @@ class DataService {
 			const enrichedShortcutEntries = await traefikConfig.enrichShortcuts(shortcutEntries);
 			return [...appEntries, ...enrichedShortcutEntries];
 		} catch (error) {
-			console.error(`Error getting configured items:`, error);
+			log.error(`Error getting configured items:`, error);
 			return [];
 		}
 	}
@@ -449,7 +452,7 @@ class DataService {
 			const maxOrder = allOrders.length > 0 ? Math.max(...allOrders) : 0;
 			return maxOrder + 1;
 		} catch (error) {
-			console.error(`Error getting next order for category '${category}':`, error);
+			log.error(`Error getting next order for category '${category}':`, error);
 			return 1;
 		}
 	}
@@ -465,7 +468,7 @@ class DataService {
 			});
 			return sessions.map((session) => { return session.get({ plain: true }); });
 		} catch (error) {
-			console.error(`Error reading sessions from database:`, error);
+			log.error(`Error reading sessions from database:`, error);
 			return [];
 		}
 	}
@@ -479,7 +482,7 @@ class DataService {
 			await Session.upsert(sessionData);
 			return true;
 		} catch (error) {
-			console.error(`Error writing session to database:`, error);
+			log.error(`Error writing session to database:`, error);
 			return false;
 		}
 	}
@@ -495,7 +498,7 @@ class DataService {
 			});
 			return updated > 0;
 		} catch (error) {
-			console.error(`Error updating session in database:`, error);
+			log.error(`Error updating session in database:`, error);
 			return false;
 		}
 	}
@@ -511,7 +514,7 @@ class DataService {
 			});
 			return deleted > 0;
 		} catch (error) {
-			console.error(`Error deleting sessions from database:`, error);
+			log.error(`Error deleting sessions from database:`, error);
 			return false;
 		}
 	}
@@ -519,9 +522,9 @@ class DataService {
 	static async close() {
 		try {
 			await database.sequelize.close();
-			console.log(`Database connection closed.`);
+			log.info(`Database connection closed.`);
 		} catch (error) {
-			console.error(`Error closing database connection:`, error);
+			log.error(`Error closing database connection:`, error);
 		}
 	}
 }

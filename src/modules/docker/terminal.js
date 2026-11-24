@@ -1,6 +1,9 @@
 import stream from 'stream';
 import { execa } from 'execa';
 import docker from '../../utils/docker_client.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:terminal');
 
 // Track active terminal sessions per socket to clean up listeners
 const activeSessions = new WeakMap();
@@ -152,7 +155,7 @@ const terminalConnect = async (socket, containerId) => {
 
 		socket.emit('docker:container:terminal:connected');
 	} catch (error) {
-		console.error(error);
+		log.error(error);
 		cleanupSession(socket);
 		socket.emit('docker:container:terminal:error', 'Failed to start container terminal stream.');
 	}

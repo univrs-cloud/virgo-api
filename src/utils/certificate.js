@@ -3,6 +3,9 @@ import { Resolver } from 'dns/promises';
 import config from '../../config.js';
 import docker from './docker_client.js';
 import * as traefikConfig from './traefik_config.js';
+import { createLog } from './log.js';
+
+const log = createLog('certificate');
 
 const ACME_STORE = { le: '/messier/apps/traefik/letsencrypt/acme.json', ledns: '/messier/apps/traefik/letsencrypt/acme-dns.json' };
 const PUBLIC_RESOLVERS = ['1.1.1.1', '8.8.8.8'];
@@ -106,7 +109,7 @@ const readAcmeError = async (fqdn) => {
 		});
 		return (line ? parseAcmeError(line) : null);
 	} catch (error) {
-		console.error('readAcmeError:', error);
+		log.error('readAcmeError:', error);
 		return null;
 	}
 };

@@ -2,6 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { setTimeout as sleep } from 'timers/promises';
 import { fileURLToPath } from 'url';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
@@ -42,7 +45,7 @@ const stopIndexer = async (lockPath) => {
 		return;
 	}
 
-	console.log(`Stopping the running indexer (PID ${pid})...`);
+	log.info(`Stopping the running indexer (PID ${pid})...`);
 	process.kill(pid, 'SIGTERM');
 	for (let attempt = 0; attempt < STOP_ATTEMPTS && isAlive(pid); attempt++) {
 		await sleep(STOP_INTERVAL);
@@ -56,14 +59,14 @@ const stopIndexer = async (lockPath) => {
 const removeIndexerConfiguration = async () => {
 	try {
 		if (!await exists(DATABASE_FILE)) {
-			console.log(`No database file found. Skipping the indexer configuration removal.`);
+			log.info(`No database file found. Skipping the indexer configuration removal.`);
 			return;
 		}
 
 		const { default: DataService } = await import('../database/data_service.js');
 		const configuration = await DataService.getConfiguration();
 		if (!Object.hasOwn(configuration, 'indexer')) {
-			console.log(`No indexer configuration found. Skipping its removal.`);
+			log.info(`No indexer configuration found. Skipping its removal.`);
 			return;
 		}
 
@@ -71,16 +74,16 @@ const removeIndexerConfiguration = async () => {
 		for (const suffix of ['', '-wal', '-shm', '.lock']) {
 			await fs.rm(`${INDEX_DATABASE_FILE}${suffix}`, { force: true });
 		}
-		console.log(`Deleted the index database.`);
+		log.info(`Deleted the index database.`);
 
 		if (!await DataService.deleteConfiguration('indexer')) {
-			console.log(`Could not remove the indexer configuration.`);
+			log.info(`Could not remove the indexer configuration.`);
 			return;
 		}
 
-		console.log(`Removed the indexer configuration.`);
+		log.info(`Removed the indexer configuration.`);
 	} catch (error) {
-		console.error(`Removing the indexer configuration failed:`, error);
+		log.error(`Removing the indexer configuration failed:`, error);
 	}
 };
 

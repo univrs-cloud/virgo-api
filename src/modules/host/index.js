@@ -7,6 +7,9 @@ import pkg from '../../../package.json' with { type: 'json' };
 import BaseModule from '../base.js';
 import * as setup from '../../utils/setup_state.js';
 import * as virtualIp from './virtual_ip.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host');
 
 const { version } = pkg;
 
@@ -75,7 +78,7 @@ class HostModule extends BaseModule {
 					zfs: { version: JSON.parse(zfsVersion).zfs_version.kernel.replace('zfs-kmod-', '') }
 				});
 			} catch (error) {
-				console.error(error);
+				log.error(error);
 			}
 			this.emitState('system');
 		})();
@@ -379,14 +382,14 @@ class HostModule extends BaseModule {
 		const isRebootRequired = (await this.#loadRebootRequired()).length > 0;
 
 		if (exitCode === null) {
-			console.error('Exit code file is empty or missing after update finished');
+			log.error('Exit code file is empty or missing after update finished');
 		} else {
-			console.log(`Update completed - exit code: ${exitCode}`);
+			log.info(`Update completed - exit code: ${exitCode}`);
 		}
 
 		const resolvedExitCode = (exitCode === null ? 1 : exitCode);
 		const state = (resolvedExitCode === 0 ? 'succeeded' : 'failed');
-		console.log(`Setting update state to: ${state} (exitCode: ${resolvedExitCode})`);
+		log.info(`Setting update state to: ${state} (exitCode: ${resolvedExitCode})`);
 		const currentUpdate = this.getState('update') ?? { steps: [] };
 		this.setState('update', { ...currentUpdate, isRebootRequired, state });
 		this.emitUpdateState();
@@ -519,7 +522,7 @@ class HostModule extends BaseModule {
 				reasons.push({ reason: 'kernel', running, installed });
 			}
 		} catch (error) {
-			console.error(error);
+			log.error(error);
 		}
 		try {
 			const { stdout: zfsVersion } = await execa('zfs', ['version', '-j']);
@@ -530,7 +533,7 @@ class HostModule extends BaseModule {
 				reasons.push({ reason: 'zfs', running, installed });
 			}
 		} catch (error) {
-			console.error(error);
+			log.error(error);
 		}
 		this.setState('rebootRequired', reasons);
 		this.emitState('rebootRequired');
@@ -596,7 +599,7 @@ class HostModule extends BaseModule {
 				virtualIp: (configuration?.address ? { ...configuration, holding } : null)
 			});
 		} catch (error) {
-			console.error('Error reading the virtual IP configuration:', error);
+			log.error('Error reading the virtual IP configuration:', error);
 		}
 	}
 

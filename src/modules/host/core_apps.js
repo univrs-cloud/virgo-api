@@ -9,6 +9,9 @@ import { getCoreApps, getCoreAppTitle } from '../../utils/core_apps.js';
 import { getOwnAddress } from '../../utils/network.js';
 import docker from '../../utils/docker_client.js';
 import { getQueueName } from '../../queues.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:core_apps');
 
 const APPS_DIR = '/messier/apps';
 const COMPOSE_DIR = '.docker';
@@ -191,7 +194,7 @@ const installCoreApps = async (job, module) => {
 		const { exitCode, stderr } = await execa('virgo', ['apps', 'install', name, '--force', '--env-json', JSON.stringify(CORE_APP_ENV[name]({ fqdn, address }))], { reject: false });
 		if (exitCode !== 0) {
 			failedApps.push(title);
-			console.error(`Could not install ${title}: ${stderr}`);
+			log.error(`Could not install ${title}: ${stderr}`);
 		}
 	}
 

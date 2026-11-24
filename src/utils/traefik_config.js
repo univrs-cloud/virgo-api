@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
+import { createLog } from './log.js';
+
+const log = createLog('traefik_config');
 
 const TRAEFIK_CONFIG_PATH = '/messier/apps/traefik/config';
 const TRAEFIK_ENV_PATH = '/messier/apps/traefik/.docker/.env';
@@ -13,20 +16,20 @@ const IGNORED_FILES = ['traefik.yml', 'local-service.yml'];
 const getDomain = () => {
 	try {
 		if (!fs.existsSync(TRAEFIK_ENV_PATH)) {
-			console.error(`Traefik .env file not found: ${TRAEFIK_ENV_PATH}`);
+			log.error(`Traefik .env file not found: ${TRAEFIK_ENV_PATH}`);
 			return null;
 		}
 
 		const content = fs.readFileSync(TRAEFIK_ENV_PATH, 'utf8');
 		const match = content.match(/^DOMAIN=["']?([^"'\n]+)["']?$/m);
 		if (!match) {
-			console.error('DOMAIN not found in Traefik .env file');
+			log.error('DOMAIN not found in Traefik .env file');
 			return null;
 		}
 		
 		return match[1].trim();
 	} catch (error) {
-		console.error('Error reading Traefik .env file:', error.message);
+		log.error('Error reading Traefik .env file:', error.message);
 		return null;
 	}
 };
@@ -86,11 +89,11 @@ const readAll = async () => {
 					});
 				}
 			} catch (error) {
-				console.error(`Error parsing Traefik config ${file}:`, error.message);
+				log.error(`Error parsing Traefik config ${file}:`, error.message);
 			}
 		}
 	} catch (error) {
-		console.error('Error reading Traefik configs:', error.message);
+		log.error('Error reading Traefik configs:', error.message);
 	}
 	
 	return configs;
@@ -244,7 +247,7 @@ const write = async (name, options) => {
 		fs.writeFileSync(filePath, yamlContent, 'utf8');
 		return true;
 	} catch (error) {
-		console.error(`Error writing Traefik config ${name}:`, error.message);
+		log.error(`Error writing Traefik config ${name}:`, error.message);
 		return false;
 	}
 };
@@ -264,7 +267,7 @@ const remove = async (name) => {
 		}
 		return false;
 	} catch (error) {
-		console.error(`Error deleting Traefik config ${name}:`, error.message);
+		log.error(`Error deleting Traefik config ${name}:`, error.message);
 		return false;
 	}
 };

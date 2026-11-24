@@ -3,6 +3,9 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:scheduled');
 
 const MANIFEST_ACCEPT = [
 	'application/vnd.docker.distribution.manifest.list.v2+json',
@@ -119,7 +122,7 @@ const getRegistryDigest = async (image) => {
 
 		if (manifestResponse.status === 429) {
 			const retryAfter = manifestResponse.headers.get('Retry-After');
-			console.warn(`Rate limited by registry for ${image}${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
+			log.warn(`Rate limited by registry for ${image}${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
 			try {
 				await manifestResponse.arrayBuffer();
 			} catch { }
@@ -143,7 +146,7 @@ const getRegistryDigest = async (image) => {
 
 		return manifestResponse.headers.get('docker-content-digest');
 	} catch (error) {
-		console.warn(`Could not fetch digest for ${image}: ${error.message}`);
+		log.warn(`Could not fetch digest for ${image}: ${error.message}`);
 		return null;
 	}
 };
@@ -162,7 +165,7 @@ const checkForUpdates = async (module) => {
 	} catch (error) {
 		// Docker is down until setup prepares the pool it stores its data on, and it is stopped again
 		// during any later pool work. Nothing is installed then, so there is nothing to check.
-		console.warn(`Could not check for app updates: ${error.message}`);
+		log.warn(`Could not check for app updates: ${error.message}`);
 		return;
 	}
 
@@ -254,7 +257,7 @@ const fetchStackFiles = async (module) => {
 		try {
 			await fs.access(appsDir);
 		} catch (error) {
-			console.warn(`Apps directory ${appsDir} does not exist. Skipping compose files update.`);
+			log.warn(`Apps directory ${appsDir} does not exist. Skipping compose files update.`);
 			return;
 		}
 
@@ -293,7 +296,7 @@ const fetchStackFiles = async (module) => {
 				// Download the template
 				const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
 				if (!response.ok) {
-					console.warn(`Failed to download template for ${appName}: HTTP ${response.status}`);
+					log.warn(`Failed to download template for ${appName}: HTTP ${response.status}`);
 					continue;
 				}
 
@@ -302,19 +305,19 @@ const fetchStackFiles = async (module) => {
 				// Replace the docker-compose.yml file
 				await fs.writeFile(composeFilePath, stack, 'utf-8');
 				await module.ensureAppDirEnv(path.dirname(composeFilePath));
-				console.log(`Updated docker-compose.yml for ${appName}`);
+				log.info(`Updated docker-compose.yml for ${appName}`);
 			} catch (error) {
-				console.warn(`Error updating compose file for ${appName}:`, error.message);
+				log.warn(`Error updating compose file for ${appName}:`, error.message);
 			}
 		}
 	} catch (error) {
-		console.error(`Error updating compose files:`, error);
+		log.error(`Error updating compose files:`, error);
 	}
 };
 
 const register = (module) => {
 	checkForUpdates(module)
-		.catch((error) => { console.error('checkForUpdates:', error); });
+		.catch((error) => { log.error('checkForUpdates:', error); });
 
 	// Schedule updates checker to run daily at midnight
 	module.addJobSchedule(

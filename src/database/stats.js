@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { Sequelize } from 'sequelize';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('database:stats');
 
 const STATS_DATABASE_FILE = '/messier/.config/stats.db';
 const READ = sqlite3.OPEN_READWRITE;
@@ -44,7 +47,7 @@ const ensureOpen = async () => {
 		try {
 			await open();
 		} catch (error) {
-			console.error('Unable to open the stats database on the pool:', error);
+			log.error('Unable to open the stats database on the pool:', error);
 		} finally {
 			opening = null;
 		}

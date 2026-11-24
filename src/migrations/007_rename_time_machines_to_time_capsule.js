@@ -3,6 +3,9 @@ import path from 'path';
 import { setTimeout as sleep } from 'timers/promises';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
@@ -49,7 +52,7 @@ const stopSamba = async () => {
 		await sleep(RETRY_INTERVAL);
 	}
 
-	console.log(`Samba is still running after ${STOP_ATTEMPTS} seconds.`);
+	log.info(`Samba is still running after ${STOP_ATTEMPTS} seconds.`);
 };
 
 const unmount = async (dataset) => {
@@ -63,7 +66,7 @@ const unmount = async (dataset) => {
 			throw new Error(result.stderr || result.shortMessage);
 		}
 
-		console.log(`${dataset} is busy. Trying again in a second...`);
+		log.info(`${dataset} is busy. Trying again in a second...`);
 		await sleep(RETRY_INTERVAL);
 	}
 };
@@ -83,13 +86,13 @@ const renameDataset = async () => {
 	const hasOld = await datasetExists(OLD_DATASET);
 	const hasNew = await datasetExists(NEW_DATASET);
 	if (hasOld && hasNew) {
-		console.log(`Both ${OLD_DATASET} and ${NEW_DATASET} exist. Leaving them in place for manual review.`);
+		log.info(`Both ${OLD_DATASET} and ${NEW_DATASET} exist. Leaving them in place for manual review.`);
 		return false;
 	}
 
 	if (!hasOld) {
 		if (!hasNew) {
-			console.log(`Neither ${OLD_DATASET} nor ${NEW_DATASET} exists. Skipping the dataset rename.`);
+			log.info(`Neither ${OLD_DATASET} nor ${NEW_DATASET} exists. Skipping the dataset rename.`);
 		}
 		return hasNew;
 	}
@@ -100,7 +103,7 @@ const renameDataset = async () => {
 	}
 
 	await execa('zfs', ['rename', '-u', OLD_DATASET, NEW_DATASET]);
-	console.log(`Renamed ${OLD_DATASET} to ${NEW_DATASET}.`);
+	log.info(`Renamed ${OLD_DATASET} to ${NEW_DATASET}.`);
 	await execa('zfs', ['set', `mountpoint=${NEW_MOUNTPOINT}`, NEW_DATASET]);
 	for (const { name, mountpoint } of tree) {
 		if (name !== OLD_DATASET && isOldMountpoint(mountpoint)) {
@@ -115,19 +118,19 @@ const renameDataset = async () => {
 		throw new Error(`Still not under ${NEW_MOUNTPOINT}: ${misplaced.map(({ name, mountpoint }) => { return `${name} at ${mountpoint}`; }).join(', ')}.`);
 	}
 
-	console.log(`Mounted ${NEW_DATASET} and its backup disks under ${NEW_MOUNTPOINT}.`);
+	log.info(`Mounted ${NEW_DATASET} and its backup disks under ${NEW_MOUNTPOINT}.`);
 	return true;
 };
 
 const renameConfiguration = async () => {
 	if (await exists(OLD_CONF)) {
 		if (await exists(NEW_CONF)) {
-			console.log(`Both ${OLD_CONF} and ${NEW_CONF} exist. Leaving them in place for manual review.`);
+			log.info(`Both ${OLD_CONF} and ${NEW_CONF} exist. Leaving them in place for manual review.`);
 			return false;
 		}
 
 		await fs.rename(OLD_CONF, NEW_CONF);
-		console.log(`Renamed ${OLD_CONF} to ${NEW_CONF}.`);
+		log.info(`Renamed ${OLD_CONF} to ${NEW_CONF}.`);
 	}
 
 	if (await exists(ALL_CONF)) {
@@ -135,7 +138,7 @@ const renameConfiguration = async () => {
 		const updated = includes.split(OLD_CONF).join(NEW_CONF);
 		if (updated !== includes) {
 			await fs.writeFile(ALL_CONF, updated, 'utf8');
-			console.log(`Updated the include in ${ALL_CONF}.`);
+			log.info(`Updated the include in ${ALL_CONF}.`);
 		}
 	}
 
@@ -153,7 +156,7 @@ const rewriteShares = async () => {
 		.replace(OLD_SHARE_SECTION, `$1${NEW_SHARE_PREFIX}`);
 	if (updated !== shares) {
 		await fs.writeFile(NEW_CONF, updated, 'utf8');
-		console.log(`Moved the shares in ${NEW_CONF} to ${NEW_MOUNTPOINT} and renamed them to ${NEW_SHARE_PREFIX}.`);
+		log.info(`Moved the shares in ${NEW_CONF} to ${NEW_MOUNTPOINT} and renamed them to ${NEW_SHARE_PREFIX}.`);
 	}
 };
 
@@ -170,7 +173,7 @@ const hasOldLayout = async () => {
 const renameTimeMachinesToTimeCapsule = async () => {
 	try {
 		if (!await hasOldLayout()) {
-			console.log(`No time machines layout found. Skipping the time capsule rename.`);
+			log.info(`No time machines layout found. Skipping the time capsule rename.`);
 			return;
 		}
 
@@ -183,7 +186,7 @@ const renameTimeMachinesToTimeCapsule = async () => {
 			await execa('systemctl', ['start', SAMBA_UNIT], { reject: false });
 		}
 	} catch (error) {
-		console.error(`Renaming time machines to time capsule failed:`, error);
+		log.error(`Renaming time machines to time capsule failed:`, error);
 	}
 };
 

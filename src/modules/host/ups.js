@@ -1,5 +1,8 @@
 import { createConnection } from 'net';
 import camelcaseKeys from 'camelcase-keys';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:ups');
 
 const checkUps = async (module) => {
 	let socket = createConnection('/var/run/virgo-ups.sock');
@@ -18,7 +21,7 @@ const checkUps = async (module) => {
 					status = camelcaseKeys(status, { deep: true });
 					module.setState('ups', status);
 				} catch (error) {
-					console.error('UPS socket response parse error:', error.message);
+					log.error('UPS socket response parse error:', error.message);
 					module.setState('ups', { error: 'invalid', message: error.message });
 				}
 			}
@@ -27,13 +30,13 @@ const checkUps = async (module) => {
 		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('error', (error) => {
-		console.error('UPS socket error:', error.message);
+		log.error('UPS socket error:', error.message);
 		module.setState('ups', { error: 'unreachable', message: error.message });
 		module.emitState('ups');
 		module.eventEmitter.emit('host:ups:updated', module.getState('ups'));
 	});
 	socket.on('close', () => {
-		console.log('UPS socket disconnected, reconnecting in 5s...');
+		log.info('UPS socket disconnected, reconnecting in 5s...');
 		socket = null;
 		buffer = '';
 		setTimeout(() => { checkUps(module); }, 5000);

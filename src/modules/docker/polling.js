@@ -1,6 +1,9 @@
 import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
 import docker from '../../utils/docker_client.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:polling');
 
 const EVENTS_RECONNECT_DELAY_MS = 5000;
 const CONTAINERS_DEBOUNCE_MS = 250;
@@ -87,7 +90,7 @@ const watchContainerEvents = async (module) => {
 						scheduleContainers(module);
 					}
 				} catch (error) {
-					console.error('watchContainerEvents:', error);
+					log.error('watchContainerEvents:', error);
 				}
 			}
 		});
@@ -97,7 +100,7 @@ const watchContainerEvents = async (module) => {
 		startedAtCache.clear();
 		getContainers(module);
 	} catch (error) {
-		console.error('watchContainerEvents:', error);
+		log.error('watchContainerEvents:', error);
 		reconnect();
 	}
 };
@@ -119,7 +122,7 @@ const getAppsStorageResouceMetrics = async (module) => {
 		const { stdout: zfsList } = await execa('zfs', ['list', '-o', 'used,usedbydataset,usedbysnapshots,logicalused', '-j', '--json-int']);
 		datasets = JSON.parse(zfsList || '{}')?.datasets || {};
 	} catch (error) {
-		console.warn(`Could not read app storage metrics: ${error.message}`);
+		log.warn(`Could not read app storage metrics: ${error.message}`);
 		return;
 	}
 	const appsStorageResourceMetrics = {};

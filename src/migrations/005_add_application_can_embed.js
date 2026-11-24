@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
@@ -42,7 +45,7 @@ const fetchTemplates = async () => {
 const addApplicationCanEmbed = async () => {
 	try {
 		if (!await exists(DATABASE_FILE)) {
-			console.log(`No database file found. Skipping the application canEmbed column.`);
+			log.info(`No database file found. Skipping the application canEmbed column.`);
 			return;
 		}
 
@@ -51,17 +54,17 @@ const addApplicationCanEmbed = async () => {
 
 		const columns = await sequelize.query('PRAGMA table_info(`Applications`)', { type: QueryTypes.SELECT });
 		if (columns.length === 0) {
-			console.log(`No Applications table found. Skipping the application canEmbed column.`);
+			log.info(`No Applications table found. Skipping the application canEmbed column.`);
 			return;
 		}
 
 		if (columns.some((column) => { return column.name.toLowerCase() === 'canembed'; })) {
-			console.log(`Applications already has the canEmbed column. Skipping.`);
+			log.info(`Applications already has the canEmbed column. Skipping.`);
 			return;
 		}
 
 		await sequelize.query('ALTER TABLE `Applications` ADD COLUMN `canEmbed` TINYINT(1)');
-		console.log(`Added the canEmbed column to Applications.`);
+		log.info(`Added the canEmbed column to Applications.`);
 
 		const templates = await fetchTemplates();
 		const applications = await sequelize.query('SELECT `id`, `name` FROM `Applications`', { type: QueryTypes.SELECT });
@@ -75,12 +78,12 @@ const addApplicationCanEmbed = async () => {
 				'UPDATE `Applications` SET `canEmbed` = ? WHERE `id` = ?',
 				{ replacements: [(template.embed ? 1 : 0), application.id] }
 			);
-			console.log(`Set canEmbed to ${template.embed} for ${application.name}.`);
+			log.info(`Set canEmbed to ${template.embed} for ${application.name}.`);
 		}
 
-		console.log(`Application canEmbed values set from the templates successfully!`);
+		log.info(`Application canEmbed values set from the templates successfully!`);
 	} catch (error) {
-		console.error(`Adding the application canEmbed column failed:`, error);
+		log.error(`Adding the application canEmbed column failed:`, error);
 	}
 };
 

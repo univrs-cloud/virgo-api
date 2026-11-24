@@ -9,6 +9,9 @@ import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js
 import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:install');
 
 const streamPipeline = promisify(stream.pipeline);
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -150,7 +153,7 @@ const install = async (job, module, template, name, title) => {
 			await sanoid.setMode(dataset, 'enabled');
 		}
 	} catch (error) {
-		console.error(`Could not set the ${name} snapshots configuration: ${error.message}`);
+		log.error(`Could not set the ${name} snapshots configuration: ${error.message}`);
 	}
 
 	const icon = template.logo.split('/').pop();

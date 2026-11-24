@@ -3,6 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import DataService from '../database/data_service.js';
 import smtp from '../modules/configuration/smtp.js';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const { updateNotificationConfigurationFiles } = smtp;
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
@@ -25,7 +28,7 @@ const updateNotificationConfiguration = async () => {
 	try {
 		// Check if a database already exists; if not, skip
 		if (!(await databaseExists())) {
-			console.log(`No database file found. Skipping notification configuration update.`);
+			log.info(`No database file found. Skipping notification configuration update.`);
 			return;
 		}
 
@@ -34,9 +37,9 @@ const updateNotificationConfiguration = async () => {
 
 		await updateNotificationConfigurationFiles();
 
-		console.log(`Notification configuration updated successfully!`);
+		log.info(`Notification configuration updated successfully!`);
 	} catch (error) {
-		console.error(`Notification configuration update failed:`, error);
+		log.error(`Notification configuration update failed:`, error);
 	}
 };
 

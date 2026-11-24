@@ -1,4 +1,7 @@
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:service_logs');
 
 const OUTPUT_IDLE_MS = 10;
 const OUTPUT_MAX_WAIT_MS = 250;
@@ -88,7 +91,7 @@ const serviceLogsConnect = async (socket, serviceName) => {
 		socket.emit('host:service:logs:connected');
 	} catch (error) {
 		cleanupSession(socket);
-		console.error('[host] Failed to start service logs stream:', error);
+		log.error('Failed to start service logs stream:', error);
 		socket.emit('host:service:logs:error', 'Failed to start service logs stream.');
 	}
 };

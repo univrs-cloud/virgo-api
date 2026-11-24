@@ -1,3 +1,7 @@
+import { createLog } from './log.js';
+
+const log = createLog('poller');
+
 class Poller {
 	#CACHE_TTL = 1 * 60 * 1000; // 1 minute in ms
 	#module;
@@ -90,7 +94,7 @@ class Poller {
 		try {
 			await this.#callback(this.#module);
 		} catch (error) {
-			console.error(error);
+			log.error(error);
 		}
 
 		if (this.#isRunning && generation === this.#generation) {

@@ -5,6 +5,9 @@ import DataService from '../../database/data_service.js';
 import * as database from '../../database/index.js';
 import { BOND_NAME, getDefaultInterfaceName, isAddressInUse, holdsAddress } from '../../utils/network.js';
 import * as discovery from './discovery.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:virtual_ip');
 
 const ENVIRONMENT_FILE = '/etc/default/virgo-virtual-ip';
 const UNIT = 'virgo-virtual-ip.service';
@@ -150,7 +153,7 @@ const assertClaimable = async () => {
 	try {
 		peers = await discovery.discover();
 	} catch (error) {
-		console.warn(`Could not check the network for other virtual IPs: ${error.shortMessage || error.message}`);
+		log.warn(`Could not check the network for other virtual IPs: ${error.shortMessage || error.message}`);
 		return;
 	}
 
@@ -237,7 +240,7 @@ const storeConfiguration = async (received, module) => {
 		await DataService.setConfiguration('virtualIp', configuration);
 		module.eventEmitter.emit('host:network:virtualIp:updated');
 	} catch (error) {
-		console.warn(`Could not store the virtual IP from the other node: ${error.shortMessage || error.message}`);
+		log.warn(`Could not store the virtual IP from the other node: ${error.shortMessage || error.message}`);
 	}
 };
 
@@ -357,7 +360,7 @@ const reassert = async (module) => {
 		await execa('systemctl', ['restart', UNIT]);
 		module.eventEmitter.emit('host:network:virtualIp:updated');
 	} catch (error) {
-		console.warn(`Could not re-assert the virtual IP: ${error.shortMessage || error.message}`);
+		log.warn(`Could not re-assert the virtual IP: ${error.shortMessage || error.message}`);
 	}
 };
 
@@ -373,7 +376,7 @@ const announce = async () => {
 	try {
 		await execa('arping', ['-U', '-q', '-c', '3', '-I', configuration.device || BOND_NAME, configuration.address]);
 	} catch (error) {
-		console.warn(`Could not announce the virtual IP: ${error.shortMessage || error.message}`);
+		log.warn(`Could not announce the virtual IP: ${error.shortMessage || error.message}`);
 	}
 };
 
@@ -390,7 +393,7 @@ const retryClaim = async (module) => {
 
 	const { exitCode } = await execa('systemctl', ['start', UNIT], { reject: false });
 	if (exitCode === 0 && await holdsAddress(configuration.address)) {
-		console.log(`Claimed ${configuration.address} after the check at boot could not.`);
+		log.info(`Claimed ${configuration.address} after the check at boot could not.`);
 		module.eventEmitter.emit('host:network:virtualIp:updated');
 	}
 };
@@ -399,7 +402,7 @@ const register = (module) => {
 	announce();
 	setInterval(() => {
 		retryClaim(module).catch((error) => {
-			console.warn(`Could not retry claiming the virtual IP: ${error.shortMessage || error.message}`);
+			log.warn(`Could not retry claiming the virtual IP: ${error.shortMessage || error.message}`);
 		});
 	}, RETRY_INTERVAL_MS);
 	module.eventEmitter.on('host:peer:virtualIp:received', (received) => {

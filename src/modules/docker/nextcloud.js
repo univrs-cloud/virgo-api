@@ -1,6 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:nextcloud');
 
 const APP_NAME = 'nextcloud';
 const APP_ID_PATTERN = /^[a-z0-9_]+$/;
@@ -154,7 +157,7 @@ const changeGroupMembership = async (job, module, isAdding) => {
 
 			return `${user.displayName} ${(isAdding ? 'added to' : 'removed from')} ${group.displayName}.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -222,7 +225,7 @@ const addUser = async (job, module) => {
 
 			return `Account ${name} created.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -269,7 +272,7 @@ const editUser = async (job, module) => {
 
 			return `Account ${displayName} updated.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -330,7 +333,7 @@ const setUserEnabled = async (job, module, isEnabling) => {
 
 			return `${user.displayName} ${(isEnabling ? 'unlocked' : 'locked')}.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -381,7 +384,7 @@ const deleteUser = async (job, module) => {
 
 			return `Account ${user.displayName} deleted.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -412,7 +415,7 @@ const addGroup = async (job, module) => {
 
 			return `Group ${name} created.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -443,7 +446,7 @@ const deleteGroup = async (job, module) => {
 
 			return `Group ${group.displayName} deleted.`;
 		} finally {
-			await loadAccounts(module).catch((error) => { console.error('Nextcloud accounts:', error); });
+			await loadAccounts(module).catch((error) => { log.error('Nextcloud accounts:', error); });
 		}
 	});
 };
@@ -595,7 +598,7 @@ const register = (module) => {
 		}
 
 		await checkForUpdates(module, container)
-			.catch((error) => { console.error('Nextcloud app updates check:', error); });
+			.catch((error) => { log.error('Nextcloud app updates check:', error); });
 	});
 
 	module.addJobSchedule(

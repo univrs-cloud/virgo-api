@@ -6,6 +6,9 @@ import * as yaml from 'js-yaml';
 import docker from '../../utils/docker_client.js';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:rollback');
 
 const IMAGES_PROPERTY = 'univrs:images';
 const OVERRIDE_FILE = 'docker-compose.override.yml';
@@ -124,7 +127,7 @@ const checkImages = async (services, title) => {
 		try {
 			available = await isAvailable(repository, digest);
 		} catch (error) {
-			console.error(`Could not check ${image}: ${error.message}`);
+			log.error(`Could not check ${image}: ${error.message}`);
 			throw new Error(`${title} was not rolled back: could not check whether the ${service} version it ran then is still available.`);
 		}
 

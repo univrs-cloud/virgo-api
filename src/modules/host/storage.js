@@ -3,6 +3,9 @@ import { execa } from 'execa';
 import * as database from '../../database/index.js';
 import DataService from '../../database/data_service.js';
 import { getTopology, getVdevArguments } from '../../utils/topology.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:storage');
 
 // The node's pool. Nothing else may be created or imported under this node's name.
 const POOL_NAME = 'messier';
@@ -142,7 +145,7 @@ const scanImportablePools = async (module) => {
 			const { stdout: zpoolImport } = await execa('zpool', ['import']);
 			module.setState('importable', parseImportablePools(zpoolImport));
 		} catch (error) {
-			console.error('scanImportablePools:', error);
+			log.error('scanImportablePools:', error);
 			module.setState('importable', false);
 		}
 

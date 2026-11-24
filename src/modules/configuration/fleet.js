@@ -11,6 +11,9 @@ import * as email from '../../utils/email.js';
 import * as network from '../../utils/network.js';
 import { getNodeId } from '../../utils/node_id.js';
 import * as virtualIp from '../host/virtual_ip.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('configuration:fleet');
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';
@@ -89,7 +92,7 @@ const reportDomainToFleet = async () => {
 
 	fleetSocket.emit('node:domain:claim', identifier, (response) => {
 		if (response?.status !== 'succeeded') {
-			console.error(`Fleet domain claim failed: ${response?.message || 'no response'}`);
+			log.error(`Fleet domain claim failed: ${response?.message || 'no response'}`);
 		}
 	});
 };
@@ -101,7 +104,7 @@ const scheduleDomainReport = () => {
 		try {
 			await reportDomainToFleet();
 		} catch (error) {
-			console.error('Error reporting the node address to fleet:', error);
+			log.error('Error reporting the node address to fleet:', error);
 		}
 	}, DOMAIN_REPORT_DELAY_MS);
 	domainReportTimer.unref();
@@ -242,7 +245,7 @@ const connect = async ({ token, nodeId }) => {
 		reportStorageToFleet();
 		reportUpsToFleet();
 		reportPeersToFleet().catch((error) => {
-			console.error('Error reporting peers to fleet:', error);
+			log.error('Error reporting peers to fleet:', error);
 		});
 		requestAppUpdateJobs();
 		scheduleDomainReport();
@@ -263,7 +266,7 @@ const connect = async ({ token, nodeId }) => {
 		broadcastConfigurationUpdate();
 	});
 	fleetSocket.on('connect_error', (error) => {
-		console.error('Fleet connection error:', error?.message || error);
+		log.error('Fleet connection error:', error?.message || error);
 		if (error?.message === AUTH_FAILED_ERROR) {
 			fleetState.setRuntimeState({ connected: false, authFailed: true });
 			fleetSocket?.disconnect();
@@ -423,12 +426,12 @@ const startIfEnabled = async () => {
 				try {
 					await connect({ token: fleet.token, nodeId: fleet.nodeId });
 				} catch (error) {
-					console.error('Error starting fleet connection:', error);
+					log.error('Error starting fleet connection:', error);
 				}
 			}, delay);
 		}
 	} catch (error) {
-		console.error('Error starting fleet connection:', error);
+		log.error('Error starting fleet connection:', error);
 	}
 };
 
@@ -464,7 +467,7 @@ const register = (module) => {
 		try {
 			await reportPeersToFleet();
 		} catch (error) {
-			console.error('Error reporting peers to fleet:', error);
+			log.error('Error reporting peers to fleet:', error);
 		}
 	});
 	module.eventEmitter.on('host:network:identifier:updated', scheduleDomainReport);
@@ -492,7 +495,7 @@ export const relayAcmeChallenge = async (action, { fqdn, value }) => {
 		throw new Error('Not connected to fleet');
 	}
 
-	console.log(`[acme] relaying ${action} for ${fqdn} to fleet`);
+	log.info(`Relaying the ACME ${action} for ${fqdn} to fleet.`);
 
 	const response = await fleetSocket.timeout(ACME_RELAY_TIMEOUT_MS).emitWithAck(`acme:${action}`, { fqdn, value });
 	if (response?.status !== 'succeeded') {

@@ -1,4 +1,7 @@
 import fs from 'fs/promises';
+import { createLog } from './log.js';
+
+const log = createLog('sanoid');
 
 const CONF_FILE = '/etc/sanoid/sanoid.conf';
 const TEMPLATE_PREFIX = 'template_';
@@ -447,7 +450,7 @@ const getPolicies = async (datasets) => {
 			policies[dataset] = policyOf(sections, dataset);
 		}
 	} catch (error) {
-		console.error(`Could not read ${CONF_FILE}:`, error);
+		log.error(`Could not read ${CONF_FILE}:`, error);
 		for (const dataset of datasets) {
 			policies[dataset] = null;
 		}

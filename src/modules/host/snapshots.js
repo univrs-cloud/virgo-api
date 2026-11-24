@@ -1,5 +1,8 @@
 import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:snapshots');
 
 const getSnapshots = async (module) => {
 	try {
@@ -8,7 +11,7 @@ const getSnapshots = async (module) => {
 		const snapshots = camelcaseKeys(datasets, { deep: true });
 		module.setState('snapshots', snapshots);
 	} catch (error) {
-		console.error('getSnapshots:', error);
+		log.error('getSnapshots:', error);
 		module.setState('snapshots', false);
 	}
 	module.emitChanged('host:storage:snapshots', module.getState('snapshots'), { audience: 'admin' });

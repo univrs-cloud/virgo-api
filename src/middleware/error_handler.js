@@ -1,9 +1,13 @@
+import { createLog } from '../utils/log.js';
+
+const log = createLog('http');
+
 /**
  * Global error handling middleware.
  * This should be the last middleware added to the Express app.
  */
 export default (error, req, res, next) => {
-	console.error(error);
+	log.error(error);
 	const statusCode = error.status || 500;
 	res.status(statusCode).send({
 		message: error.message || 'Oops! Something went wrong.',

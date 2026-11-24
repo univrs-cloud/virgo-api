@@ -3,6 +3,9 @@ import path from 'path';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
 import { isNodeId } from '../../utils/node_id.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:replication');
 
 const USER_NAME = 'virgo-replication';
 const HOME_PATH = '/var/lib/virgo-replication';
@@ -17,10 +20,26 @@ const HOST_KEY_PATH = '/etc/ssh/ssh_host_ed25519_key.pub';
 const POOL_PERMISSIONS = 'send,hold';
 const KEY_PATTERN = /^ssh-ed25519 [A-Za-z0-9+/]+={0,3}$/;
 const ADDRESS_PATTERN = /^[0-9a-f.:]+$/i;
+const SSH_TIMEOUT_SECONDS = 10;
 
 let hostModule = null;
 let syncing = false;
 let syncAgain = false;
+let lock = Promise.resolve();
+
+const exclusive = (task) => {
+	const run = lock.then(task);
+	lock = run.catch(() => {});
+	return run;
+};
+
+const prepareLocally = async (task) => {
+	try {
+		return await exclusive(task);
+	} catch (error) {
+		throw new Error('This node could not prepare its backups. Try again, or restart it if it keeps failing.', { cause: error });
+	}
+};
 
 const readKey = async (filePath) => {
 	const content = await fs.readFile(filePath, 'utf8').catch(() => { return ''; });
@@ -34,6 +53,7 @@ const writeIfChanged = async (filePath, content, mode) => {
 		const temporary = `${filePath}.tmp`;
 		await fs.writeFile(temporary, content, { encoding: 'utf8', mode });
 		await fs.rename(temporary, filePath);
+		log.info(`Updated ${filePath}.`);
 	}
 
 	await fs.chown(filePath, 0, 0);
@@ -78,7 +98,7 @@ const ensureClientKey = async () => {
 		return derived;
 	}
 
-	console.log('The replication key is missing or unreadable; creating a new one.');
+	log.info('The replication key is missing or unreadable; creating a new one.');
 	await fs.rm(PRIVATE_KEY_PATH, { force: true });
 	await fs.rm(PUBLIC_KEY_PATH, { force: true });
 	await execa('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', USER_NAME, '-f', PRIVATE_KEY_PATH]);
@@ -92,7 +112,7 @@ const ensureHostKey = async () => {
 		return existing;
 	}
 
-	console.log('The SSH host key is missing; creating it.');
+	log.info('The SSH host key is missing; creating it.');
 	await execa('ssh-keygen', ['-A']);
 	await execa('systemctl', ['reload-or-restart', 'ssh'], { reject: false });
 	return readKey(HOST_KEY_PATH);
@@ -131,6 +151,7 @@ const storeIdentity = async (peerId, publicKey, hostKey) => {
 	}
 
 	await DataService.setConfiguration('replicationPeers', [...identities.filter((entry) => { return entry.id !== peerId; }), { id: peerId, publicKey, hostKey }]);
+	log.info(`Stored new backup keys for ${peerId}.`);
 };
 
 const writeAccess = async () => {
@@ -172,6 +193,7 @@ const writeAccess = async () => {
 		].join('\n');
 	}).join('\n');
 
+	log.info(`Backup access: ${recipients.length} node(s) may take backups from this node, this node takes backups from ${sources.length} node(s).`);
 	await writeIfChanged(AUTHORIZED_KEYS_PATH, authorizedKeys, 0o644);
 	await writeIfChanged(KNOWN_HOSTS_PATH, knownHosts, 0o600);
 	await writeIfChanged(SSH_CONFIG_PATH, sshConfig, 0o600);
@@ -181,6 +203,16 @@ const readIdentity = (payload) => {
 	const publicKey = String(payload?.publicKey || '');
 	const hostKey = String(payload?.hostKey || '');
 	return (KEY_PATTERN.test(publicKey) && KEY_PATTERN.test(hostKey) ? { publicKey, hostKey } : null);
+};
+
+const exchangeWith = async (peer, own) => {
+	const identity = readIdentity(await hostModule.getPlugin('peer').call(peer.id, 'replication:exchange', own));
+	if (!identity) {
+		throw new Error(`${peer.name || peer.address} sent replication keys that are not valid.`);
+	}
+
+	await prepareLocally(() => { return storeIdentity(peer.id, identity.publicKey, identity.hostKey); });
+	log.info(`Exchanged backup keys with ${peer.name || peer.address} (${peer.id}).`);
 };
 
 const sync = async () => {
@@ -193,25 +225,21 @@ const sync = async () => {
 	try {
 		do {
 			syncAgain = false;
-			const own = await ensureLocal();
+			const own = await exclusive(ensureLocal);
 			const peers = await readPeers();
+			log.info(`Exchanging backup keys with ${peers.length} node(s).`);
 			for (const peer of (own ? peers : [])) {
 				try {
-					const identity = readIdentity(await hostModule.getPlugin('peer').call(peer.id, 'replication:exchange', own));
-					if (!identity) {
-						throw new Error(`${peer.name || peer.address} sent replication keys that are not valid.`);
-					}
-
-					await storeIdentity(peer.id, identity.publicKey, identity.hostKey);
+					await exchangeWith(peer, own);
 				} catch (error) {
-					console.warn(`Could not exchange replication keys with ${peer.name || peer.address}: ${error.message}`);
+					log.warn(`Could not exchange replication keys with ${peer.name || peer.address}:`, error);
 				}
 			}
 
-			await writeAccess();
+			await exclusive(writeAccess);
 		} while (syncAgain);
 	} catch (error) {
-		console.warn(`Could not prepare replication: ${error.message}`);
+		log.warn('Could not prepare replication:', error);
 	} finally {
 		syncing = false;
 	}
@@ -224,14 +252,34 @@ const exchange = async (peerId, payload) => {
 	}
 
 	try {
-		const own = await ensureLocal();
-		await storeIdentity(peerId, identity.publicKey, identity.hostKey);
-		await writeAccess();
-		return own;
+		return await exclusive(async () => {
+			const own = await ensureLocal();
+			await storeIdentity(peerId, identity.publicKey, identity.hostKey);
+			await writeAccess();
+			log.info(`Received backup keys from ${peerId} and sent this node's keys back.`);
+			return own;
+		});
 	} catch (error) {
-		console.warn(`Could not prepare replication: ${error.message}`);
+		log.warn('Could not prepare replication:', error);
 		return null;
 	}
+};
+
+const pair = async (peerId) => {
+	const own = await prepareLocally(ensureLocal);
+	const peer = (await readPeers()).find((entry) => { return entry.id === peerId; });
+	if (!own || !peer) {
+		throw new Error('This node could not prepare its backups. Try again, or restart it if it keeps failing.');
+	}
+
+	await exchangeWith(peer, own);
+	await prepareLocally(writeAccess);
+};
+
+const verify = async (peerId) => {
+	log.info(`Logging in to ${peerId} over SSH to check backups can be taken.`);
+	await execa('ssh', ['-F', SSH_CONFIG_PATH, '-o', 'BatchMode=yes', '-o', `ConnectTimeout=${SSH_TIMEOUT_SECONDS}`, peerId, 'true'], { timeout: SSH_TIMEOUT_SECONDS * 2000 });
+	log.info(`SSH login to ${peerId} succeeded.`);
 };
 
 const register = (module) => {
@@ -251,5 +299,7 @@ const register = (module) => {
 export default {
 	name: 'replication',
 	register,
-	exchange
+	exchange,
+	pair,
+	verify
 };

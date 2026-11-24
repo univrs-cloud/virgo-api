@@ -6,6 +6,9 @@ import ini from 'ini';
 import BaseModule from '../base.js';
 import BackupDisk from '../../utils/backup_disk.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('share');
 
 class ShareModule extends BaseModule {
 	#configurationFiles = [
@@ -144,7 +147,7 @@ class ShareModule extends BaseModule {
 			}
 			return usage;
 		} catch (error) {
-			console.error(`Error reading projectspace for ${datasetName}:`, error);
+			log.error(`Error reading projectspace for ${datasetName}:`, error);
 			return new Map();
 		}
 	}
@@ -255,7 +258,7 @@ class ShareModule extends BaseModule {
 					}
 					share.cap = (share.size > 0 ? share.alloc / share.size * 100 : 0);
 				} catch (error) {
-					console.error(`Error checking disk space for ${name}:`, error);
+					log.error(`Error checking disk space for ${name}:`, error);
 				}
 				if (share.isBackupDisk && share.path) {
 					try {

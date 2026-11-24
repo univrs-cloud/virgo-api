@@ -2,22 +2,25 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
 
 const isMainModule = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 
 const configureZram = async () => {
-	console.log(`Starting zram configuration...`);
+	log.info(`Starting zram configuration...`);
 	try {
-		console.log('Checking if zram-tools is installed...');
+		log.info('Checking if zram-tools is installed...');
 		try {
 			await execa('dpkg', ['-s', 'zram-tools']);
-			console.log(`zram-tools is configured. Skipping configuration.`);
+			log.info(`zram-tools is configured. Skipping configuration.`);
 			return;
 		} catch (error) {
-			console.log('zram-tools is not installed, proceeding with configuration...');
+			log.info('zram-tools is not installed, proceeding with configuration...');
 		}
 
-		console.log('Creating configure-zram-size script...');
+		log.info('Creating configure-zram-size script...');
 		const configureZramScript = `#!/bin/bash
 # Detect RAM size and configure zram percentage
 
@@ -42,46 +45,46 @@ echo "Configured zram: \${PERCENT}% of RAM with zstd compression"
 `;
 		fs.writeFileSync('/usr/local/bin/configure-zram-size', configureZramScript);
 		fs.chmodSync('/usr/local/bin/configure-zram-size', '755');
-		console.log('configure-zram-size script created');
+		log.info('configure-zram-size script created');
 
-		console.log('Installing zram-tools...');
+		log.info('Installing zram-tools...');
 		await execa('apt', ['update']);
 		await execa('apt', ['install', '-y', 'zram-tools']);
-		console.log('zram-tools installed');
+		log.info('zram-tools installed');
 
-		console.log('Running configure-zram-size...');
+		log.info('Running configure-zram-size...');
 		await execa('/usr/local/bin/configure-zram-size');
-		console.log('Initial zram configuration applied');
+		log.info('Initial zram configuration applied');
 
-		console.log('Enabling and starting zramswap.service...');
+		log.info('Enabling and starting zramswap.service...');
 		await execa('systemctl', ['enable', '--now', 'zramswap.service']);
 		await execa('systemctl', ['restart', 'zramswap.service']);
-		console.log('zramswap.service enabled and started');
+		log.info('zramswap.service enabled and started');
 
 		if (fs.existsSync('/etc/dphys-swapfile')) {
-			console.log('Configuring swap to 512MB...');
+			log.info('Configuring swap to 512MB...');
 			let swapConfig = fs.readFileSync('/etc/dphys-swapfile', 'utf8');
 			swapConfig = swapConfig.replace(/^CONF_SWAPSIZE=.*/gm, 'CONF_SWAPSIZE=512');
 			swapConfig = swapConfig.replace(/^#CONF_SWAPSIZE=/gm, 'CONF_SWAPSIZE=');
 			fs.writeFileSync('/etc/dphys-swapfile', swapConfig);
-			console.log('/etc/dphys-swapfile updated to 512MB');
+			log.info('/etc/dphys-swapfile updated to 512MB');
 
-			console.log('Restarting dphys-swapfile.service...');
+			log.info('Restarting dphys-swapfile.service...');
 			try {
 				await execa('systemctl', ['restart', 'dphys-swapfile.service']);
-				console.log('dphys-swapfile.service restarted');
+				log.info('dphys-swapfile.service restarted');
 			} catch (error) {
-				console.log('Note: dphys-swapfile.service restart failed (may not be running yet):', error.message);
+				log.info('Note: dphys-swapfile.service restart failed (may not be running yet):', error.message);
 			}
 		}
 
-		console.log('Current swap status:');
+		log.info('Current swap status:');
 		const { stdout } = await execa('swapon', ['--show']);
-		console.log(stdout);
+		log.info(stdout);
 
-		console.log(`zram configuration completed successfully!`);
+		log.info(`zram configuration completed successfully!`);
 	} catch (error) {
-		console.log(`zram configuration failed:`, error);
+		log.info(`zram configuration failed:`, error);
 	}
 };
 

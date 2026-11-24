@@ -2,6 +2,9 @@ import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 import * as trustedProxy from '../../utils/trusted_proxy.js';
 import * as fleetState from '../../utils/fleet_state.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('configuration');
 
 const configurationFor = (configuration, tier) => {
 	const { smtp, trustedProxies, ...visible } = (configuration ?? {});
@@ -36,7 +39,7 @@ class ConfigurationModule extends BaseModule {
 		try {
 			this.emitState('configuration');
 		} catch (error) {
-			console.error(`Error broadcasting configuration:`, error);
+			log.error(`Error broadcasting configuration:`, error);
 		}
 	}
 
@@ -49,7 +52,7 @@ class ConfigurationModule extends BaseModule {
 			}
 			this.setState('configuration', configuration);
 		} catch (error) {
-			console.error(`Error loading configuration:`, error);
+			log.error(`Error loading configuration:`, error);
 		}
 	}
 }

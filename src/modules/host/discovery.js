@@ -1,5 +1,8 @@
 import { execa } from 'execa';
 import { getNodeId } from '../../utils/node_id.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:discovery');
 
 const SERVICE_TYPE = '_univrs._tcp';
 const MIN_RESTART_DELAY_MS = 1000;
@@ -144,7 +147,7 @@ const watch = async () => {
 	try {
 		selfId = await getNodeId();
 	} catch (error) {
-		console.warn(
+		log.warn(
 			`Discovery is unavailable: ${error.shortMessage || error.message}`
 		);
 		return;
@@ -202,7 +205,7 @@ const watch = async () => {
 					publish();
 				}
 			} catch (error) {
-				console.warn(
+				log.warn(
 					`Could not read a discovery record: ${error.message}`
 				);
 			}

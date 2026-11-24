@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { execa } from 'execa';
 import FileWatcher from '../../utils/file_watcher.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('share:watcher');
 
 let configurationWatcher;
 
@@ -17,7 +20,7 @@ const watchConfigurations = (module) => {
 				await execa('smbcontrol', ['all', 'reload-config']);
 				module.eventEmitter.emit('shares:updated');
 			} catch (error) {
-				console.error(error);
+				log.error(error);
 			}
 		});
 
@@ -26,7 +29,7 @@ const watchConfigurations = (module) => {
 			fs.accessSync(configurationPath);
 			configurationWatcher.add(configurationPath);
 		} catch (error) {
-			console.error(`Path does not exist yet: ${configurationPath}`);
+			log.error(`Path does not exist yet: ${configurationPath}`);
 		}
 	});
 
@@ -41,12 +44,12 @@ const watchConfigurations = (module) => {
 				}
 			} catch (error) {
 				allWatched = false;
-				console.log(`Waiting for path to exist: ${configurationPath}`);
+				log.info(`Waiting for path to exist: ${configurationPath}`);
 			}
 		});
 
 		if (allWatched) {
-			console.log(`All share configurations are now being watched. Stopping retry interval.`);
+			log.info(`All share configurations are now being watched. Stopping retry interval.`);
 			clearInterval(retryInterval);
 		}
 	}, 10000);

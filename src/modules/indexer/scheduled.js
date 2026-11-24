@@ -1,4 +1,7 @@
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('indexer:scheduled');
 
 const index = async () => {
 	try {
@@ -7,10 +10,10 @@ const index = async () => {
 		// A pass that outlives the hourly schedule still holds the lock. That is
 		// the previous run working, not a failure of this one.
 		if ((error.stderr ?? '').includes('Another indexer is already running')) {
-			console.log('indexer: previous run still in progress, skipping this tick.');
+			log.info('indexer: previous run still in progress, skipping this tick.');
 			return ``;
 		}
-		console.error('indexer failed:', error);
+		log.error('indexer failed:', error);
 	}
 	return ``;
 };

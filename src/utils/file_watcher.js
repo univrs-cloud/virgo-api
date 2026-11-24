@@ -1,4 +1,7 @@
 import chokidar from 'chokidar';
+import { createLog } from './log.js';
+
+const log = createLog('file_watcher');
 
 class FileWatcher {
 	#watcher = null;
@@ -30,7 +33,7 @@ class FileWatcher {
 				this.#triggerCallbacks(event, path);
 			})
 			.on('error', (error) => {
-				console.error(`FileWatcher error: ${error}`);
+				log.error(`FileWatcher error: ${error}`);
 			});
 		return this;
 	}
@@ -59,7 +62,7 @@ class FileWatcher {
 				this.#toWatch.push(item);
 				this.#watcher?.add(item);
 			} else {
-				console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
+				log.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
 			}
 		});
 		return this;
@@ -72,7 +75,7 @@ class FileWatcher {
 				this.#toWatch = this.#toWatch.filter((existingItem) => { return existingItem !== item; });
 				this.#watcher?.unwatch(item);
 			} else {
-				console.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
+				log.warn(`FileWatcher "${item}" is not a string and will be ignored.`);
 			}
 		});
 		return this;
@@ -114,7 +117,7 @@ class FileWatcher {
 			try {
 				callback(event, path);
 			} catch (error) {
-				console.error(`FileWatcher callback error:`, error);
+				log.error(`FileWatcher callback error:`, error);
 			}
 		});
 	}

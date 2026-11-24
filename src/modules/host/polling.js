@@ -8,6 +8,9 @@ import DataService from '../../database/data_service.js';
 import * as certificate from '../../utils/certificate.js';
 import * as setup from '../../utils/setup_state.js';
 import { getTopologies } from '../../utils/topology.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:polling');
 
 const BY_ID_DIR = '/dev/disk/by-id';
 const ID_PREFIXES = ['nvme-eui.', 'wwn-', 'ata-', 'scsi-', 'virtio-'];
@@ -75,7 +78,7 @@ const getDriveIds = async () => {
 			ids[device] = [...(ids[device] || []), entry];
 		}
 	} catch (error) {
-		console.error('getDriveIds:', error);
+		log.error('getDriveIds:', error);
 	}
 
 	return ids;
@@ -114,7 +117,7 @@ const listBlockDevices = async () => {
 		const { stdout } = await execa('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,RM,RO,ROTA,MODEL,SERIAL,MOUNTPOINTS']);
 		return JSON.parse(stdout || '{}').blockdevices || [];
 	} catch (error) {
-		console.error('listBlockDevices:', error);
+		log.error('listBlockDevices:', error);
 		return [];
 	}
 };
@@ -256,7 +259,7 @@ const readSystemDrive = async (device) => {
 			health: getDriveHealth(smart)
 		};
 	} catch (error) {
-		console.error('readSystemDrive:', error);
+		log.error('readSystemDrive:', error);
 		return null;
 	}
 };
@@ -473,7 +476,7 @@ const getDrives = async (module) => {
 		const systemDrive = await readSystemDrive(blockDevices.find(isSystemDisk));
 		module.setState('drives', (systemDrive ? [...drives, systemDrive] : drives));
 	} catch (error) {
-		console.error('getDrives:', error);
+		log.error('getDrives:', error);
 		module.setState('drives', false);
 	}
 
@@ -508,7 +511,7 @@ const getNextScrub = async () => {
 		}
 	} catch (error) {
 		if (error?.code !== 'ENOENT') {
-			console.error('getNextScrub:', error);
+			log.error('getNextScrub:', error);
 		}
 	}
 	return null;
@@ -588,7 +591,7 @@ const getStorage = async (module) => {
 		module.setState('storage', storage);
 		addPoolActions(module);
 	} catch (error) {
-		console.error('getStorage:', error);
+		log.error('getStorage:', error);
 		module.setState('storage', false);
 	}
 	module.emitChanged('host:storage', module.getState('storage'));
@@ -609,7 +612,7 @@ const getTime = (module) => {
 		const time = si.time();
 		module.setState('time', time);
 	} catch (error) {
-		console.error('getTime:', error);
+		log.error('getTime:', error);
 		module.setState('time', false);
 	}
 	module.nsp.emit('host:time', module.getState('time'));
@@ -640,11 +643,11 @@ const register = (module) => {
 		getCertificate(module);
 	}
 	resumeCertificatePoll(module)
-		.catch((error) => { console.error('resumeCertificatePoll:', error); });
+		.catch((error) => { log.error('resumeCertificatePoll:', error); });
 	module.eventEmitter.on('host:storage:fetch', () => {
 		getStorage(module);
 		resumeCertificatePoll(module)
-			.catch((error) => { console.error('resumeCertificatePoll:', error); });
+			.catch((error) => { log.error('resumeCertificatePoll:', error); });
 	});
 	module.eventEmitter.on('app:installed', ({ name } = {}) => {
 		if (name !== 'traefik') {

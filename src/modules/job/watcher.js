@@ -1,5 +1,8 @@
 
 import { Queue, QueueEvents } from 'bullmq';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('job:watcher');
 
 const queues = new Map();
 const PENDING_STATES = ['wait', 'paused', 'prioritized', 'delayed', 'active'];
@@ -35,7 +38,7 @@ const register = (module) => {
 						}
 					}
 				} catch (error) {
-					console.error(`Error processing job ${response.jobId}:`, error);
+					log.error(`Error processing job ${response.jobId}:`, error);
 				}
 			});
 		});
@@ -49,7 +52,7 @@ const register = (module) => {
 				module.eventEmitter.emit('app:update:job:updated', job);
 			}
 		} catch (error) {
-			console.error('Error listing app update jobs:', error);
+			log.error('Error listing app update jobs:', error);
 		}
 	});
 };

@@ -1,5 +1,8 @@
 import os from 'os';
 import { promises as fs } from 'fs';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('host:arc');
 
 const ARC_MAX_FILE = '/sys/module/zfs/parameters/zfs_arc_max';
 const ARCSTATS_FILE = '/proc/spl/kstat/zfs/arcstats';
@@ -21,7 +24,7 @@ const loadArc = async (module) => {
 			misses: readArcstat('misses')
 		});
 	} catch (error) {
-		console.error('loadArc:', error);
+		log.error('loadArc:', error);
 		module.setState('arc', false);
 	}
 	module.emitState('arc');

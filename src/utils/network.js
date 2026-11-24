@@ -1,5 +1,8 @@
 import fs from 'fs/promises';
 import { execa } from 'execa';
+import { createLog } from './log.js';
+
+const log = createLog('network');
 
 const BOND_NAME = 'bond0';
 const SYS_CLASS_NET = '/sys/class/net';
@@ -92,7 +95,7 @@ const isAddressInUse = async (ipAddress) => {
 			return true;
 		}
 
-		console.warn(`Could not check whether ${ipAddress} is in use: ${error.shortMessage || error.message}`);
+		log.warn(`Could not check whether ${ipAddress} is in use: ${error.shortMessage || error.message}`);
 		return null;
 	}
 };

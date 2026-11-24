@@ -2,6 +2,9 @@ import { promises as fs } from 'fs';
 import net from 'net';
 import path from 'path';
 import { execa } from 'execa';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:mailserver');
 
 const APP_NAME = 'mailserver';
 const DEFAULT_SELECTOR = 'dms';
@@ -328,7 +331,7 @@ const run = async (job, module, task) => {
 		try {
 			return await task(job.data?.config ?? {});
 		} finally {
-			await loadState(module).catch((error) => { console.error('MailServer state:', error); });
+			await loadState(module).catch((error) => { log.error('MailServer state:', error); });
 		}
 	});
 };

@@ -6,6 +6,9 @@ import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 import docker from '../../utils/docker_client.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker');
 
 // Digest-only projection: Docker renders `status` as prose ("Up 4 minutes"), so it advances on its own clock
 // even when nothing about the container changed. `state` says the same thing as an enum, which is all
@@ -251,7 +254,7 @@ class DockerModule extends BaseModule {
 			this.setState('configured', configured);
 		} catch (error) {
 			this.setState('configured', false);
-			console.error(`Error loading configured:`, error);
+			log.error(`Error loading configured:`, error);
 		}
 	}
 
@@ -272,7 +275,7 @@ class DockerModule extends BaseModule {
 			if (!this.getState('templates')) {
 				this.setState('templates', false);
 			}
-			console.error(`Error loading templates:`, error);
+			log.error(`Error loading templates:`, error);
 			return false;
 		}
 	}

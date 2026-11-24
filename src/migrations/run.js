@@ -1,5 +1,9 @@
+import { createLog } from '../utils/log.js';
+
+const log = createLog('migrations');
+
 (async () => {
-	console.log(`Post install running...`);
+	log.info(`Post install running...`);
 	try {
 		const { default: moveComposeFiles } = await import('./001_move_compose_files.js');
 		await moveComposeFiles();
@@ -22,8 +26,8 @@
 		const { default: renameTimeMachinesToTimeCapsule } = await import('./007_rename_time_machines_to_time_capsule.js');
 		await renameTimeMachinesToTimeCapsule();
 
-		console.log(`Post install completed successfully!`);
+		log.info(`Post install completed successfully!`);
 	} catch (error) {
-		console.error(`Post install failed:`, error);
+		log.error(`Post install failed:`, error);
 	}
 })();

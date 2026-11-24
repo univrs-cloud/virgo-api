@@ -1,6 +1,9 @@
 import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { createLog } from '../../utils/log.js';
+
+const log = createLog('docker:snapshots');
 
 const updateSnapshots = async (job, module) => {
 	const { config } = job.data;
@@ -40,7 +43,7 @@ const updateSnapshots = async (job, module) => {
 
 const register = (module) => {
 	sanoid.setValues(module.appsDataset, { post_snapshot_script: 'virgo apps snapshots record-digests', script_timeout: '30' })
-		.catch((error) => { console.error(`Could not set the ${module.appsDataset} snapshot script: ${error.message}`); });
+		.catch((error) => { log.error(`Could not set the ${module.appsDataset} snapshot script: ${error.message}`); });
 };
 
 export default {

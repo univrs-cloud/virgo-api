@@ -16,6 +16,7 @@ import * as nlp from '../utils/nlp.js';
 import * as proxyCredential from '../utils/proxy_credential.js';
 import { isPrivateAddress, isLoopbackAddress } from '../utils/private_address.js';
 import { getQueueName, getScheduledQueueName, getParallelQueueName, getParallelConcurrency } from '../queues.js';
+import { createLog } from '../utils/log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // How long a socket goes on trusting the identity it resolved before checking it again.
@@ -63,6 +64,7 @@ const clientAddress = (socket) => {
 
 class BaseModule {
 	#name;
+	#log;
 	#io;
 	#nsp;
 	#eventEmitter;
@@ -80,6 +82,7 @@ class BaseModule {
 
 	constructor(name) {
 		this.#name = name;
+		this.#log = createLog(name);
 		this.#io = socket.getIO();
 		this.#nsp = this.#io.of(`/${this.#name}`);
 		// Namespace-wide sends are delivered socket by socket, so they pass through the same wrapper as
@@ -247,7 +250,7 @@ class BaseModule {
 			const queue = (parallel && this.#parallelQueue ? this.#parallelQueue : this.#queue);
 			return await queue.add(name, data, { jobId: randomUUID() });
 		} catch (error) {
-			console.error(`Error starting job:`, error);
+			this.#log.error(`Error starting job:`, error);
 			return null;
 		}
 	}
@@ -266,7 +269,7 @@ class BaseModule {
 				}
 			);
 		} catch (error) {
-			console.error(`Error starting job:`, error);
+			this.#log.error(`Error starting job:`, error);
 		}
 	}
 
@@ -275,7 +278,7 @@ class BaseModule {
 			const state = await job.getState();
 			await job.updateProgress({ state, message, progress });
 		} catch (error) {
-			console.error(`Failed to update job progress:`, error);
+			this.#log.error(`Failed to update job progress:`, error);
 		}
 	}
 
@@ -544,7 +547,7 @@ class BaseModule {
 			}
 		});
 		worker.on('error', (error) => {
-			console.error(error);
+			this.#log.error(error);
 		});
 	}
 
@@ -612,7 +615,7 @@ class BaseModule {
 				const module = await import(pathToFileURL(path.join(pluginDir, file)).href);
 				const plugin = module.default;
 				if (!plugin || typeof plugin !== 'object') {
-					console.warn(`[${this.#name}] Invalid plugin in ${file}: not an object`);
+					this.#log.warn(`Invalid plugin in ${file}: not an object`);
 					continue;
 				}
 				this.#plugins.push(plugin);
@@ -625,7 +628,7 @@ class BaseModule {
 					});
 				}
 			} catch (error) {
-				console.error(`[${this.#name}] Failed to load plugin ${file}:`, error);
+				this.#log.error(`Failed to load plugin ${file}:`, error);
 			}
 		}
 	}

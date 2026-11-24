@@ -22,6 +22,9 @@ import {
 	isCompressible,
 	gzipStream
 } from './local_assets.js';
+import { createLog } from './log.js';
+
+const log = createLog('webrtc_proxy');
 
 const MAX_PENDING_CONTINUATIONS = 8;
 const MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
@@ -385,7 +388,7 @@ const createEventsChannel = (session, channel) => {
 
 			dispatch(frame);
 		} catch (error) {
-			console.error('Error handling a WebRTC events frame:', error);
+			log.error('Error handling a WebRTC events frame:', error);
 		}
 	});
 
@@ -609,7 +612,7 @@ const createAssetsChannel = (session, channel) => {
 				}
 			}
 		} catch (error) {
-			console.error('Error handling a WebRTC asset frame:', error);
+			log.error('Error handling a WebRTC asset frame:', error);
 		}
 	});
 
