@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execa } from 'execa';
 import DataService from '../../database/data_service.js';
+import { isNodeId } from '../../utils/node_id.js';
 
 const USER_NAME = 'virgo-replication';
 const HOME_PATH = '/var/lib/virgo-replication';
@@ -15,7 +16,6 @@ const SSH_CONFIG_PATH = path.join(CLIENT_PATH, 'ssh_config');
 const HOST_KEY_PATH = '/etc/ssh/ssh_host_ed25519_key.pub';
 const POOL_PERMISSIONS = 'send,hold';
 const KEY_PATTERN = /^ssh-ed25519 [A-Za-z0-9+/]+={0,3}$/;
-const ID_PATTERN = /^[0-9a-f]+$/;
 const ADDRESS_PATTERN = /^[0-9a-f.:]+$/i;
 
 let hostModule = null;
@@ -114,6 +114,11 @@ const ensureLocal = async () => {
 	return (publicKey && hostKey ? { publicKey, hostKey } : null);
 };
 
+const readPeers = async () => {
+	const { peers, externalPeers } = await DataService.getConfiguration();
+	return [...(peers || []), ...(externalPeers || [])];
+};
+
 const readIdentities = async () => {
 	return (await DataService.getConfiguration()).replicationPeers || [];
 };
@@ -129,7 +134,7 @@ const storeIdentity = async (peerId, publicKey, hostKey) => {
 };
 
 const writeAccess = async () => {
-	const peers = (await DataService.getConfiguration()).peers || [];
+	const peers = await readPeers();
 	const identities = await readIdentities();
 	const kept = identities.filter((entry) => { return peers.some((peer) => { return peer.id === entry.id; }); });
 	if (kept.length !== identities.length) {
@@ -139,16 +144,18 @@ const writeAccess = async () => {
 	const entries = peers.map((peer) => {
 		return { peer, identity: kept.find((entry) => { return entry.id === peer.id; }) };
 	}).filter(({ peer, identity }) => {
-		return identity && ID_PATTERN.test(peer.id) && ADDRESS_PATTERN.test(String(peer.address || ''));
+		return identity && isNodeId(peer.id) && ADDRESS_PATTERN.test(String(peer.address || ''));
 	});
 
-	const authorizedKeys = entries.map(({ peer, identity }) => {
+	const recipients = entries.filter(({ peer }) => { return peer.role !== 'source'; });
+	const sources = entries.filter(({ peer }) => { return peer.role !== 'recipient'; });
+	const authorizedKeys = recipients.map(({ peer, identity }) => {
 		return `restrict,from="${peer.address}" ${identity.publicKey} ${USER_NAME}@${peer.id}\n`;
 	}).join('');
-	const knownHosts = entries.map(({ peer, identity }) => {
+	const knownHosts = sources.map(({ peer, identity }) => {
 		return `${peer.id} ${identity.hostKey}\n`;
 	}).join('');
-	const sshConfig = entries.map(({ peer }) => {
+	const sshConfig = sources.map(({ peer }) => {
 		return [
 			`Host ${peer.id}`,
 			`\tHostName ${peer.address}`,
@@ -187,7 +194,7 @@ const sync = async () => {
 		do {
 			syncAgain = false;
 			const own = await ensureLocal();
-			const peers = (await DataService.getConfiguration()).peers || [];
+			const peers = await readPeers();
 			for (const peer of (own ? peers : [])) {
 				try {
 					const identity = readIdentity(await hostModule.getPlugin('peer').call(peer.id, 'replication:exchange', own));
@@ -231,6 +238,9 @@ const register = (module) => {
 	hostModule = module;
 	sync();
 	module.eventEmitter.on('host:peers:updated', () => {
+		sync();
+	});
+	module.eventEmitter.on('host:peers:external:updated', () => {
 		sync();
 	});
 	module.eventEmitter.on('host:storage:prepared', () => {

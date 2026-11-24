@@ -9,8 +9,8 @@ import * as webrtcProxy from '../../utils/webrtc_proxy.js';
 import * as fleetState from '../../utils/fleet_state.js';
 import * as email from '../../utils/email.js';
 import * as network from '../../utils/network.js';
+import { getNodeId } from '../../utils/node_id.js';
 import * as virtualIp from '../host/virtual_ip.js';
-import { getNodeId } from '../host/advertisement.js';
 
 const fleetUrl = config.fleet.url;
 const AUTH_FAILED_ERROR = 'Node authentication failed';

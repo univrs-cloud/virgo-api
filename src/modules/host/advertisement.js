@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
@@ -10,6 +9,7 @@ import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
 import * as setup from '../../utils/setup_state.js';
 import { getOwnAddress, holdsAddress } from '../../utils/network.js';
+import { getNodeId } from '../../utils/node_id.js';
 
 
 const SERVICE_FILE = '/etc/avahi/services/univrs.service';
@@ -22,32 +22,8 @@ const VIRTUAL_IP_UNIT = 'virgo-virtual-ip.service';
 const SAMBA_CONFIGURATION_FILE = '/etc/samba/smb.conf';
 const SETTLE_INTERVAL_MS = 2000;
 const SETTLE_TIMEOUT_MS = 180000;
-const MACHINE_ID_FILE = '/etc/machine-id';
-const ID_NAMESPACE = 'univrs:node-discovery';
 
-let cachedNodeId = null;
 let advertiseQueue = Promise.resolve();
-
-/** Stable per appliance and safe to publish. */
-const getNodeId = async () => {
-	if (cachedNodeId) {
-		return cachedNodeId;
-	}
-
-	const machineId = (await fs.readFile(MACHINE_ID_FILE, 'utf8')).trim();
-
-	if (!machineId) {
-		throw new Error(`${MACHINE_ID_FILE} is empty`);
-	}
-
-	cachedNodeId = crypto
-		.createHash('sha256')
-		.update(`${ID_NAMESPACE}:${machineId}`)
-		.digest('hex')
-		.slice(0, 16);
-
-	return cachedNodeId;
-};
 
 const escapeXml = (value) => {
 	return String(value).replace(/[<>&'"]/g, (character) => {
@@ -305,5 +281,3 @@ export default {
 	name: 'advertisement',
 	register
 };
-
-export { getNodeId };

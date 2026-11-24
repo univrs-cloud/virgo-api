@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import * as advertisement from './advertisement.js';
+import { getNodeId } from '../../utils/node_id.js';
 
 const SERVICE_TYPE = '_univrs._tcp';
 const MIN_RESTART_DELAY_MS = 1000;
@@ -142,7 +142,7 @@ const watch = async () => {
 	let selfId = null;
 
 	try {
-		selfId = await advertisement.getNodeId();
+		selfId = await getNodeId();
 	} catch (error) {
 		console.warn(
 			`Discovery is unavailable: ${error.shortMessage || error.message}`

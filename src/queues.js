@@ -14,7 +14,8 @@ const getQueueName = (moduleName) => `${moduleName}-jobs`;
 const getScheduledQueueName = (moduleName) => `${moduleName}-scheduled-jobs`;
 
 const PARALLEL_CONCURRENCY = {
-	docker: 4
+	docker: 4,
+	host: 4
 };
 
 const getParallelQueueName = (moduleName) => `${moduleName}-parallel-jobs`;
