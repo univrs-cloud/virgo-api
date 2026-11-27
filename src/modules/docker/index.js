@@ -303,7 +303,7 @@ class DockerModule extends BaseModule {
 			}
 		}
 
-		const nextcloudAppUpdates = this.toArray(this.getState('nextcloudAppUpdates'));
+		const nextcloudAppUpdates = this.toArray(this.getState('nextcloud')?.appUpdates);
 		const nextcloud = configured.find((entry) => { return entry.type === 'app' && String(entry.name).toLowerCase() === 'nextcloud'; });
 		if (nextcloud && nextcloudAppUpdates.length > 0) {
 			if (!apps.has(nextcloud.name)) {

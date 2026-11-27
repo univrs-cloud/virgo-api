@@ -113,13 +113,17 @@ const readAccounts = async (container) => {
 	};
 };
 
+const setNextcloudState = (module, key, value) => {
+	module.setState('nextcloud', { ...module.getState('nextcloud'), [key]: value });
+	module.emitState('nextcloud');
+};
+
 const loadAccounts = async (module) => {
 	if (!pendingAccountsLoad) {
 		pendingAccountsLoad = (async () => {
 			const container = findNextcloudContainer(module);
 			const accounts = (container ? await readAccounts(container) : null);
-			module.setState('nextcloudAccounts', { isRunning: Boolean(container), isReadable: Boolean(accounts), defaultLimit: accounts?.defaultLimit ?? null, users: accounts?.users ?? [], groups: accounts?.groups ?? [] });
-			module.emitState('nextcloudAccounts');
+			setNextcloudState(module, 'accounts', accounts ?? false);
 		})().finally(() => {
 			pendingAccountsLoad = null;
 		});
@@ -138,7 +142,7 @@ const changeGroupMembership = async (job, module, isAdding) => {
 			}
 
 			await loadAccounts(module);
-			const accounts = module.getState('nextcloudAccounts');
+			const accounts = module.getState('nextcloud')?.accounts;
 			const user = module.toArray(accounts?.users).find((item) => { return item.id === job.data?.config?.user; });
 			const group = module.toArray(accounts?.groups).find((item) => { return item.id === job.data?.config?.group; });
 			if (!user || !group) {
@@ -193,7 +197,7 @@ const addUser = async (job, module) => {
 			}
 
 			await loadAccounts(module);
-			const accounts = module.getState('nextcloudAccounts');
+			const accounts = module.getState('nextcloud')?.accounts;
 			if (module.toArray(accounts?.users).some((user) => { return user.id.toLowerCase() === id.toLowerCase(); })) {
 				throw new Error(`An account named ${id} already exists.`);
 			}
@@ -252,7 +256,7 @@ const editUser = async (job, module) => {
 			}
 
 			await loadAccounts(module);
-			const user = module.toArray(module.getState('nextcloudAccounts')?.users).find((item) => { return item.id === config.user; });
+			const user = module.toArray(module.getState('nextcloud')?.accounts?.users).find((item) => { return item.id === config.user; });
 			if (!user) {
 				throw new Error('This account no longer exists. Open the list again.');
 			}
@@ -290,7 +294,7 @@ const changeUserPassword = async (job, module) => {
 		}
 
 		await loadAccounts(module);
-		const user = module.toArray(module.getState('nextcloudAccounts')?.users).find((item) => { return item.id === job.data?.config?.user; });
+		const user = module.toArray(module.getState('nextcloud')?.accounts?.users).find((item) => { return item.id === job.data?.config?.user; });
 		if (!user) {
 			throw new Error('This account no longer exists. Open the list again.');
 		}
@@ -314,7 +318,7 @@ const setUserEnabled = async (job, module, isEnabling) => {
 			}
 
 			await loadAccounts(module);
-			const accounts = module.getState('nextcloudAccounts');
+			const accounts = module.getState('nextcloud')?.accounts;
 			const user = module.toArray(accounts?.users).find((item) => { return item.id === job.data?.config?.user; });
 			if (!user) {
 				throw new Error('This account no longer exists. Open the list again.');
@@ -347,7 +351,7 @@ const deleteUser = async (job, module) => {
 			}
 
 			await loadAccounts(module);
-			const accounts = module.getState('nextcloudAccounts');
+			const accounts = module.getState('nextcloud')?.accounts;
 			const users = module.toArray(accounts?.users);
 			const user = users.find((item) => { return item.id === job.data?.config?.user; });
 			if (!user) {
@@ -403,7 +407,7 @@ const addGroup = async (job, module) => {
 			}
 
 			await loadAccounts(module);
-			if (module.toArray(module.getState('nextcloudAccounts')?.groups).some((group) => { return group.id.toLowerCase() === name.toLowerCase() || group.displayName.toLowerCase() === name.toLowerCase(); })) {
+			if (module.toArray(module.getState('nextcloud')?.accounts?.groups).some((group) => { return group.id.toLowerCase() === name.toLowerCase() || group.displayName.toLowerCase() === name.toLowerCase(); })) {
 				throw new Error(`A group named ${name} already exists.`);
 			}
 
@@ -429,7 +433,7 @@ const deleteGroup = async (job, module) => {
 			}
 
 			await loadAccounts(module);
-			const group = module.toArray(module.getState('nextcloudAccounts')?.groups).find((item) => { return item.id === job.data?.config?.group; });
+			const group = module.toArray(module.getState('nextcloud')?.accounts?.groups).find((item) => { return item.id === job.data?.config?.group; });
 			if (!group) {
 				throw new Error('This group no longer exists. Open the list again.');
 			}
@@ -512,8 +516,7 @@ const checkForUpdates = async (module, container) => {
 		pendingCheck = (async () => {
 			const { stdout, exitCode } = await occ(container, ['app:update', '--showonly']);
 			if (exitCode !== 0) {
-				module.setState('nextcloudAppUpdates', false);
-				module.emitState('nextcloudAppUpdates');
+				setNextcloudState(module, 'appUpdates', false);
 				module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
 				return;
 			}
@@ -521,10 +524,9 @@ const checkForUpdates = async (module, container) => {
 			const updates = toLines(stdout).map((line) => { return UPDATE_LINE_PATTERN.exec(line); }).filter(Boolean);
 			const installedVersions = (updates.length > 0 ? await getInstalledVersions(container) : {});
 			const changelogs = (updates.length > 0 ? await getChangelogs(module) : {});
-			module.setState('nextcloudAppUpdates', updates.map(([, id, version]) => {
+			setNextcloudState(module, 'appUpdates', updates.map(([, id, version]) => {
 				return { id, version, currentVersion: (typeof installedVersions[id] === 'string' ? installedVersions[id] : null), changelog: (changelogs[`${id}@${version}`] ?? null) };
 			}).sort((first, second) => { return first.id.localeCompare(second.id); }));
-			module.emitState('nextcloudAppUpdates');
 			module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
 		})().finally(() => {
 			pendingCheck = null;
@@ -541,7 +543,7 @@ const checkApps = async (job, module) => {
 
 	await module.updateJobProgress(job, `Checking Nextcloud apps for updates...`);
 	await checkForUpdates(module, container);
-	const updates = module.getState('nextcloudAppUpdates');
+	const updates = module.getState('nextcloud')?.appUpdates;
 	if (!Array.isArray(updates)) {
 		throw new Error('Could not check Nextcloud apps for updates. Try again later.');
 	}
@@ -588,11 +590,11 @@ const loadWhenRunning = async (module) => {
 	}
 
 	const loads = [];
-	if (!Array.isArray(module.getState('nextcloudAppUpdates'))) {
+	if (!module.getState('nextcloud')?.appUpdates) {
 		loads.push(checkForUpdates(module, container)
 			.catch((error) => { log.error('Nextcloud app updates check:', error); }));
 	}
-	if (!module.getState('nextcloudAccounts')) {
+	if (!module.getState('nextcloud')?.accounts) {
 		loads.push(loadAccounts(module)
 			.catch((error) => { log.error('Nextcloud accounts:', error); }));
 	}
@@ -602,8 +604,7 @@ const loadWhenRunning = async (module) => {
 
 const register = (module) => {
 	module.declareState({
-		nextcloudAppUpdates: { event: 'app:nextcloud:updates', audience: 'admin', gated: true },
-		nextcloudAccounts: { event: 'app:nextcloud:accounts', audience: 'admin', gated: true }
+		nextcloud: { event: 'app:nextcloud', audience: 'admin', gated: true }
 	});
 
 	module.eventEmitter.on('app:containers:fetched', () => {

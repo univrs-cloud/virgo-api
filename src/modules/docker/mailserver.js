@@ -230,6 +230,12 @@ const loadState = async (module) => {
 	if (!pendingLoad) {
 		pendingLoad = (async () => {
 			const container = findMailContainer(module);
+			if (!container) {
+				module.setState('mailserver', false);
+				module.emitState('mailserver');
+				return;
+			}
+
 			const dir = configDir(module);
 			const [accountLines, aliasLines, quotaLines, dkim, usage, bans, defaultDomain, defaultLimit] = await Promise.all([
 				readLines(path.join(dir, 'postfix-accounts.cf')),
@@ -266,7 +272,7 @@ const loadState = async (module) => {
 					aliases: aliases.filter((alias) => { return domainOf(alias.address) === name; }).length
 				};
 			});
-			module.setState('mailserver', { isRunning: Boolean(container), defaultDomain, defaultLimit, domains, accounts, aliases, bans });
+			module.setState('mailserver', { defaultDomain, defaultLimit, domains, accounts, aliases, bans });
 			module.emitState('mailserver');
 		})().finally(() => {
 			pendingLoad = null;
