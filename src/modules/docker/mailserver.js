@@ -485,10 +485,24 @@ const unbanIp = async (job, module) => {
 	});
 };
 
+const loadWhenRunning = async (module) => {
+	if (module.getState('mailserver') || !findMailContainer(module)) {
+		return;
+	}
+
+	await loadState(module)
+		.catch((error) => { log.error('MailServer state:', error); });
+};
+
 const register = (module) => {
 	module.declareState({
 		mailserver: { event: 'app:mailserver', audience: 'admin', gated: true }
 	});
+
+	module.eventEmitter.on('app:containers:fetched', () => {
+		loadWhenRunning(module);
+	});
+	loadWhenRunning(module);
 };
 
 export default {

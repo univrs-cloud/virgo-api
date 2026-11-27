@@ -581,25 +581,35 @@ const updateApps = async (job, module) => {
 	return (container ? `${title} updated.` : `Nextcloud is not running, so only Nextcloud itself is updated.`);
 };
 
+const loadWhenRunning = async (module) => {
+	const container = findNextcloudContainer(module);
+	if (!container) {
+		return;
+	}
+
+	const loads = [];
+	if (!Array.isArray(module.getState('nextcloudAppUpdates'))) {
+		loads.push(checkForUpdates(module, container)
+			.catch((error) => { log.error('Nextcloud app updates check:', error); }));
+	}
+	if (!module.getState('nextcloudAccounts')) {
+		loads.push(loadAccounts(module)
+			.catch((error) => { log.error('Nextcloud accounts:', error); }));
+	}
+
+	await Promise.all(loads);
+};
+
 const register = (module) => {
 	module.declareState({
 		nextcloudAppUpdates: { event: 'app:nextcloud:updates', audience: 'admin', gated: true },
 		nextcloudAccounts: { event: 'app:nextcloud:accounts', audience: 'admin', gated: true }
 	});
 
-	module.eventEmitter.on('app:containers:fetched', async () => {
-		if (Array.isArray(module.getState('nextcloudAppUpdates'))) {
-			return;
-		}
-
-		const container = findNextcloudContainer(module);
-		if (!container) {
-			return;
-		}
-
-		await checkForUpdates(module, container)
-			.catch((error) => { log.error('Nextcloud app updates check:', error); });
+	module.eventEmitter.on('app:containers:fetched', () => {
+		loadWhenRunning(module);
 	});
+	loadWhenRunning(module);
 
 	module.addJobSchedule(
 		'app:nextcloud:updates:check',
