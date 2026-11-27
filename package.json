@@ -49,8 +49,8 @@
 		"chokidar": "^6.0.0",
 		"commander": "^15.1.0",
 		"compression": "^1.8.2",
-		"compromise": "^14.20.0",
-		"cron-parser": "^5.10.6",
+		"compromise": "^14.21.0",
+		"cron-parser": "^5.10.7",
 		"docker-compose": "^1.5.0",
 		"dockerode": "^5.0.1",
 		"dotenv": "^18.0.10",
@@ -79,7 +79,7 @@
 		"bufferutil": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.6.6",
+		"@types/node": "^26.6.11",
 		"node-deb": "^0.10.7"
 	},
 	"overrides": {

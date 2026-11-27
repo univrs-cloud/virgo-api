@@ -41,84 +41,6 @@ const DROP_FTS_TRIGGERS_SQL = `
 	DROP TRIGGER IF EXISTS fts_paths_au;
 `;
 
-/**
- * Ordered schema migrations. `CREATE TABLE IF NOT EXISTS` cannot change an existing table, so
- * anything beyond adding a new table or index has to go here. The array index + 1 is the
- * `user_version` a database is at once that entry has run.
- */
-const MIGRATIONS = [
-	// 1 — rebuild fts_paths with the corrected tokenizer (see FTS_TABLE_SQL).
-	(db) => {
-		db.exec(`${DROP_FTS_TRIGGERS_SQL} DROP TABLE IF EXISTS fts_paths;`);
-		db.exec(FTS_TABLE_SQL);
-		rebuildFts(db);
-		db.exec(FTS_TRIGGERS_SQL);
-	},
-	// 2 — record each change's own timestamp, which zfs diff always gave us.
-	(db) => {
-		addColumnIfMissing(db, 'changes', 'changed_at', 'INTEGER');
-	},
-	// 3 — keep the real path of a file a rename overwrote, so its snapshot
-	// recovery path does not point at the moved-aside placeholder name.
-	(db) => {
-		addColumnIfMissing(db, 'files', 'overwritten_from', 'TEXT');
-	},
-	(db) => {
-		db.exec(`
-			UPDATE snapshots SET diff_done = 0
-			WHERE id IN (
-				SELECT DISTINCT fv.snapshot_id FROM file_versions fv
-				WHERE NOT EXISTS (SELECT 1 FROM changes c WHERE c.file_id = fv.file_id AND c.snapshot_id = fv.snapshot_id)
-			)
-			AND EXISTS (
-				SELECT 1 FROM snapshots s2
-				WHERE s2.dataset_id = snapshots.dataset_id
-				AND (s2.created_at < snapshots.created_at OR (s2.created_at = snapshots.created_at AND s2.id < snapshots.id))
-			)
-		`);
-	},
-	(db) => {
-		db.exec(`
-			UPDATE snapshots SET diff_done = 0
-			WHERE EXISTS (
-				SELECT 1 FROM snapshots s2
-				WHERE s2.dataset_id = snapshots.dataset_id
-				AND (s2.created_at < snapshots.created_at OR (s2.created_at = snapshots.created_at AND s2.id < snapshots.id))
-			)
-		`);
-	},
-];
-
-/**
- * Migrations run after the CREATE TABLE IF NOT EXISTS block, so a table that
- * happened to be created by this run already carries the new column and a plain
- * ALTER would throw and abort open().
- */
-function addColumnIfMissing(db, table, column, declaration) {
-	const present = db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info(?) WHERE name = ?`).get(table, column).n;
-	if (!present) {
-		db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
-	}
-}
-
-function migrate(db, isFreshDatabase) {
-	// A database created by this build already has the current schema; stamping it
-	// skips a pointless drop-and-rebuild of an empty FTS index on every new install.
-	if (isFreshDatabase) {
-		db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
-		return;
-	}
-	const from = db.prepare('PRAGMA user_version').get().user_version ?? 0;
-	if (from >= MIGRATIONS.length) {
-		return;
-	}
-	for (let v = from; v < MIGRATIONS.length; v++) {
-		console.log(`  ⤴  Migrating index schema to v${v + 1}…`);
-		MIGRATIONS[v](db);
-		db.exec(`PRAGMA user_version = ${v + 1}`);
-	}
-}
-
 // A file of the right name would satisfy a plain existence check and then fail inside SQLite, so what
 // is asked is whether the path is a directory at all.
 const isDirectory = (target) => {
@@ -166,10 +88,6 @@ function open(dbPath = null) {
 		PRAGMA cache_size = -${cacheKiB};
 		PRAGMA mmap_size = ${mmapBytes};
 	`);
-
-	const isFreshDatabase = !db.prepare(
-		`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'files'`
-	).get().n;
 
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS datasets (
@@ -250,16 +168,9 @@ function open(dbPath = null) {
 		-- During bulk indexing they are dropped and FTS is rebuilt in one
 		-- shot at the end via disableBulkMode() for dramatically less overhead.
 
-		-- idx_fv_file(file_id) is a prefix of idx_fv_file_size, idx_files_path
-		-- duplicates the implicit UNIQUE(dataset_id, path) index, and
-		-- idx_files_deleted is covered by idx_files_dataset for every query we
-		-- issue. Each one only cost write throughput and space on a full crawl.
 		CREATE INDEX IF NOT EXISTS idx_fv_snapshot ON file_versions(snapshot_id);
 		CREATE INDEX IF NOT EXISTS idx_fv_file_size ON file_versions(file_id, snapshot_id DESC, size);
 		CREATE INDEX IF NOT EXISTS idx_files_dataset ON files(dataset_id, deleted_at_snap_id);
-		DROP INDEX IF EXISTS idx_fv_file;
-		DROP INDEX IF EXISTS idx_files_path;
-		DROP INDEX IF EXISTS idx_files_deleted;
 		CREATE INDEX IF NOT EXISTS idx_changes_snap ON changes(snapshot_id);
 		CREATE INDEX IF NOT EXISTS idx_changes_file ON changes(file_id, snapshot_id);
 		CREATE INDEX IF NOT EXISTS idx_changes_type ON changes(change_type);
@@ -302,8 +213,6 @@ function open(dbPath = null) {
 		JOIN snapshots s_del ON s_del.id = f.deleted_at_snap_id
 		WHERE f.deleted_at_snap_id IS NOT NULL;
 	`);
-
-	migrate(db, isFreshDatabase);
 
 	return db;
 }
