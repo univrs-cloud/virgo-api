@@ -2,14 +2,17 @@ import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
 import stream from 'stream';
 import { promisify } from 'util';
+import camelcaseKeys from 'camelcase-keys';
 import { execa } from 'execa';
 import dockerCompose from 'docker-compose';
 import validator from 'validator';
+import docker from '../../utils/docker_client.js';
 import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 import { isCoreApp } from '../../utils/core_apps.js';
 import * as sanoid from '../../utils/sanoid.js';
 import { createLog } from '../../utils/log.js';
+import { formatPortConflicts, getPortConflicts } from './port_conflicts.js';
 
 const log = createLog('docker:install');
 
@@ -70,6 +73,11 @@ const install = async (job, module, template, name, title) => {
 	const existingApp = await DataService.getApplication(name);
 	if (existingApp && !config?.force) {
 		throw new Error(`App already installed.`);
+	}
+	const containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
+	const conflicts = getPortConflicts(template.ports, containers, module.getState('configured'), name);
+	if (conflicts.length > 0) {
+		throw new Error(formatPortConflicts(conflicts, 'installing this app'));
 	}
 
 	await module.updateJobProgress(job, `${title} installation starting...`);

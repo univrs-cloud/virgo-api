@@ -1,139 +1,135 @@
-import { createWriteStream, promises as fs } from 'fs';
 import path from 'path';
-import stream from 'stream';
-import { promisify } from 'util';
+import { promises as fs } from 'fs';
 import dockerCompose from 'docker-compose';
-import { execa } from 'execa';
-import camelcaseKeys from 'camelcase-keys';
-import docker from '../../utils/docker_client.js';
-import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
+import validator from 'validator';
+import config from '../../../config.js';
 import DataService from '../../database/data_service.js';
+import { isCoreApp } from '../../utils/core_apps.js';
+import * as traefikConfig from '../../utils/traefik_config.js';
 
-const streamPipeline = promisify(stream.pipeline);
-const SNAPSHOT_PREFIX = 'update_';
-const IMAGES_PROPERTY = 'univrs:images';
+const ENV_KEY_PATTERN = /^([A-Za-z_][A-Za-z0-9_]*)=/;
 
-const generateSnapshotName = () => {
-	const now = new Date();
-	const pad = (value) => { return String(value).padStart(2, '0'); };
-	return `${SNAPSHOT_PREFIX}${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}_${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+const envLine = (key, value) => {
+	const escaped = String(value ?? '')
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/\$/g, '\\$')
+		.replace(/\r/g, '\\r')
+		.replace(/\n/g, '\\n');
+	return `${key}="${escaped}"`;
 };
 
-const getServiceImageDigests = async (containers) => {
-	const images = camelcaseKeys(await docker.listImages({ all: true, digests: true }), { deep: true });
-	const result = {};
-	for (const container of containers) {
-		const image = images.find((image) => { return image.id === container.imageId; });
-		const digest = image?.repoDigests?.[0]?.split('@')[1];
-		if (digest) {
-			result[container.labels?.comDockerComposeService] = { image: container.image, digest };
+const isGated = (field) => {
+	const policy = String(field.auth?.policy ?? '').toLowerCase();
+	if (policy === '' || policy === 'none') {
+		return false;
+	}
+
+	if (policy === 'optional') {
+		return field.auth.default === true;
+	}
+
+	return true;
+};
+
+const isFleetDomain = (domain) => {
+	return domain.endsWith(`.${config.fleet.zone}`);
+};
+
+const toValue = (field, value, appDomain) => {
+	const text = String(value ?? '');
+	if (field.type === 'radio' || field.type === 'select') {
+		const option = (Array.isArray(field.select) ? field.select : []).find((option) => { return String(option.value).toLowerCase() === text.toLowerCase(); });
+		if (!option) {
+			throw new Error(`${field.label} has a choice that isn't offered.`);
 		}
-	}
-	return result;
-};
 
-const templateDetails = (template, name) => {
-	const details = { title: (template.multiple === true ? `${template.title} (${name.slice(template.name.length + 1)})` : template.title) };
-	const [category] = (Array.isArray(template.categories) ? template.categories : []);
-	if (category) {
-		details.category = category;
-	}
-	return details;
-};
-
-const takeSnapshot = async (job, module, name, title, containers) => {
-	const dataset = `${module.appsDataset}/${name}`;
-	const snapshotName = generateSnapshotName();
-	await module.updateJobProgress(job, `Taking ${title} snapshot...`);
-	try {
-		await execa('zfs', ['snapshot', '-r', '-o', `${IMAGES_PROPERTY}=${JSON.stringify(await getServiceImageDigests(containers))}`, `${dataset}@${snapshotName}`]);
-	} catch (error) {
-		throw new Error(`Could not take ${title} snapshot.`);
+		return String(option.value);
 	}
 
-	const { stdout: zfsList } = await execa('zfs', ['list', '-t', 'snapshot', '-j', '-o', 'name', '-d', '1', dataset]);
-	const previousSnapshots = Object.keys(JSON.parse(zfsList || '{}')?.datasets || {}).filter((name) => {
-		const [, current] = name.split('@');
-		return current?.startsWith(SNAPSHOT_PREFIX) && current !== snapshotName;
-	});
-	for (const previousSnapshot of previousSnapshots) {
-		await execa('zfs', ['destroy', '-r', previousSnapshot]);
+	if (text.trim() === '') {
+		throw new Error(`${field.label} can't be empty.`);
 	}
+
+	if (field.name.toLowerCase() === 'domain') {
+		const domain = text.trim().toLowerCase();
+		if (!validator.isFQDN(domain, { require_tld: false })) {
+			throw new Error(`'${text}' is not a valid domain name.`);
+		}
+
+		if (isFleetDomain(domain) && domain !== appDomain) {
+			throw new Error(`The domain can only be ${appDomain}.`);
+		}
+
+		return domain;
+	}
+
+	return text;
 };
 
 const updateApp = async (job, module) => {
-	const { config } = job.data;
-	const existingApp = await DataService.getApplication(config?.name);
-	if (!existingApp) {
+	const { config: request } = job.data;
+	const name = String(request?.name ?? '');
+	return await module.withAppLock(name, () => { return update(job, module, name, request?.env); });
+};
+
+const update = async (job, module, name, env) => {
+	const app = await DataService.getApplication(name);
+	if (!app) {
 		throw new Error(`App not found.`);
 	}
 
-	const containers = await module.findContainersByAppName(config.name);
-	if (containers.length === 0) {
-		throw new Error(`Containers for app '${config.name}' not found.`);
-	}
-	
-	const container = containers[0];
-	const composeProject = container.labels?.comDockerComposeProject;
-	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
-	await module.updateJobProgress(job, `${existingApp.title} update starting...`);
-	await takeSnapshot(job, module, config.name, existingApp.title, containers);
-	const template = module.findTemplateByAppName(await module.refreshTemplates(), config.name);
-	if (template) {
-		const changes = templateDetails(template, config.name);
-		if (typeof template.embed === 'boolean') {
-			changes.canEmbed = template.embed;
-		}
-		try {
-			const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
-			if (response.ok) {
-				const stack = await response.text();
-				await module.updateJobProgress(job, `Writing ${template.title} project template...`);
-				await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), stack, 'utf-8');
-				const icon = template.logo.split('/').pop();
-				const responseIcon = await fetch(template.logo);
-				if (responseIcon.ok) {
-					await streamPipeline(responseIcon.body, createWriteStream(path.join(module.appIconsDir, icon)));
-					changes.icon = icon;
-				}
-			}
-		} catch (error) {}
-		await DataService.updateApplication(config.name, changes);
-		module.eventEmitter.emit('configured:updated');
+	const template = module.findTemplateByAppName(await module.getTemplates(), name);
+	const fields = (Array.isArray(template?.env) ? template.env : []).filter((field) => { return field?.editable === true && !isGated(field); });
+	if (isCoreApp(name) || fields.length === 0) {
+		throw new Error(`${app.title} can't be edited.`);
 	}
 
-	await module.ensureAppDirEnv(composeProjectDir);
-	await module.updateJobProgress(job, `Downloading ${existingApp.title}...`);
-	const parsePullProgress = dockerPullProgressParser();
-	await dockerCompose.pullAll({
-		cwd: composeProjectDir,
-		composeOptions: [['-p', composeProject], ['--progress', 'json']],
-		callback: (chunk) => {
-			const progress = parsePullProgress(chunk);
-			if (progress) {
-				module.updateJobProgress(job, `Downloading ${existingApp.title}...`, progress);
-			}
+	const appDomain = String((String(template.scope ?? '').toLowerCase() === 'node' ? traefikConfig.getDomain() : traefikConfig.getClusterDomain()) ?? '').toLowerCase();
+	const submitted = Object.entries(env ?? {});
+	const changes = {};
+	for (const field of fields) {
+		const [, value] = submitted.find(([key]) => { return key.toLowerCase() === field.name.toLowerCase(); }) ?? [];
+		if (value === undefined || (field.type === 'password' && String(value) === '')) {
+			continue;
 		}
+
+		changes[field.name] = toValue(field, value, appDomain);
+	}
+
+	const domain = String(changes.DOMAIN ?? (await module.readAppEnv(name))?.DOMAIN ?? appDomain).toLowerCase();
+	if (Object.hasOwn(changes, 'CERTRESOLVER') && domain === appDomain && isFleetDomain(domain)) {
+		changes.CERTRESOLVER = '';
+	}
+
+	await module.updateJobProgress(job, `Saving ${app.title} settings...`);
+	const composeProjectDir = path.join(module.appsDir, name, module.composeDir);
+	const envFile = path.join(composeProjectDir, '.env');
+	const remaining = { ...changes };
+	const lines = (await fs.readFile(envFile, 'utf-8')).split('\n').filter((line) => { return line.trim() !== ''; }).map((line) => {
+		const key = line.match(ENV_KEY_PATTERN)?.[1];
+		if (!key || !Object.hasOwn(remaining, key)) {
+			return line;
+		}
+
+		const updated = envLine(key, remaining[key]);
+		delete remaining[key];
+		return updated;
 	});
-	await module.updateJobProgress(job, `Updating ${existingApp.title}...`);
+	await fs.writeFile(envFile, [...lines, ...Object.entries(remaining).map(([key, value]) => { return envLine(key, value); })].join('\n'), 'utf-8');
+	await module.ensureAppDirEnv(composeProjectDir);
+
+	await module.updateJobProgress(job, `Restarting ${app.title}...`);
 	await dockerCompose.upAll({
 		cwd: composeProjectDir,
-		composeOptions: [['-p', composeProject]],
+		composeOptions: [['-p', name]],
 		commandOptions: ['--remove-orphans'],
 		callback: (chunk) => {
 			module.updateJobProgress(job, chunk.toString());
 		}
 	});
-
-	await module.updateJobProgress(job, `Cleaning up...`);
-	await docker.pruneImages();
-	let updates = module.toArray(module.getState('updates')).filter((update) => {
-		return !containers.some((container) => { return container.id === update.containerId; });
-	});
-	module.setState('updates', updates);
-	module.eventEmitter.emit('app:updates:updated', module.getAppUpdatesSummary());
-	module.emitState('updates');
-	return `${existingApp.title} updated.`;
+	module.eventEmitter.emit('configured:updated');
+	return `${app.title} settings saved.`;
 };
 
 export default {
@@ -142,14 +138,6 @@ export default {
 		'app:update': { job: 'app:update' }
 	},
 	jobs: {
-		'app:update': (job, module) => {
-			return module.withAppLock(job.data?.config?.name, async () => {
-				try {
-					return await updateApp(job, module);
-				} finally {
-					module.eventEmitter.emit('host:storage:snapshots:fetch');
-				}
-			});
-		}
+		'app:update': updateApp
 	}
 };

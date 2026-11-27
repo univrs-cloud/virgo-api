@@ -1,14 +1,65 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import camelcaseKeys from 'camelcase-keys';
+import * as yaml from 'js-yaml';
 import config from '../../../config.js';
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 import docker from '../../utils/docker_client.js';
 import * as sanoid from '../../utils/sanoid.js';
+import { isCoreApp } from '../../utils/core_apps.js';
+import * as traefikConfig from '../../utils/traefik_config.js';
 import { createLog } from '../../utils/log.js';
 
 const log = createLog('docker');
+const ENV_LINE_PATTERN = /^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/gm;
+
+const CUSTOM_MARKER = 'custom';
+const CUSTOM_NAME_PREFIX = 'custom-';
+const TEMPLATES_FETCH_TIMEOUT_MS = 15000;
+const VOLUME_PATTERN = /^\$\{APP_DIR(?::-[^}]*)?\}\/(.+?):([^:]+?)(:ro)?$/;
+const PORT_PATTERN = /^(\d+):(\d+)\/(tcp|udp)$/;
+const LABEL_PATTERN = /^traefik\.http\.(services|routers)\.[^.]+\.(loadbalancer\.server\.port|rule|middlewares)=(.*)$/;
+const HOST_PATTERN = /Host\(`([^`]+)`\)/g;
+
+const toCustomService = (name, definition, nodeDomain) => {
+	const toList = (value) => { return (Array.isArray(value) ? value.map(String) : []); };
+	const networks = toList(definition?.networks);
+	const isPublic = networks.includes('virgo');
+	const isInternal = networks.includes('internal');
+	const labels = Object.fromEntries(toList(definition?.labels).map((label) => { return label.match(LABEL_PATTERN); }).filter(Boolean).map(([, , key, value]) => { return [key, value]; }));
+	const hosts = [...String(labels.rule ?? '').matchAll(HOST_PATTERN)].map(([, host]) => { return host.replace('${DOMAIN}', nodeDomain).toLowerCase(); });
+	const middlewares = String(labels.middlewares ?? '').split(',');
+	const ports = [];
+	for (const [, published, target, protocol] of toList(definition?.ports).map((port) => { return port.match(PORT_PATTERN); }).filter(Boolean)) {
+		const existing = ports.find((port) => { return port.published === published && port.target === target; });
+		if (existing) {
+			existing.protocol = 'both';
+		} else {
+			ports.push({ published, target, protocol });
+		}
+	}
+
+	return {
+		name,
+		image: String(definition?.image ?? ''),
+		network: (isPublic && isInternal ? 'both' : (isInternal ? 'internal' : 'public')),
+		domain: hosts[0] ?? '',
+		port: String(labels['loadbalancer.server.port'] ?? ''),
+		isPrivate: middlewares.includes('authelia@file'),
+		isRedirectingWww: hosts.length > 1,
+		restart: String(definition?.restart ?? 'unless-stopped'),
+		ports,
+		volumes: toList(definition?.volumes).map((volume) => { return volume.match(VOLUME_PATTERN); }).filter(Boolean).map(([, source, target, readOnly]) => {
+			return { source, target, isReadOnly: Boolean(readOnly) };
+		}),
+		variables: toList(definition?.environment).map((variable) => { return { name: variable.split('=')[0] }; })
+	};
+};
+
+const toEnvKey = (serviceName, variableName) => {
+	return `${serviceName.replace(/-/g, '_').toUpperCase()}__${variableName}`;
+};
 
 // Digest-only projection: Docker renders `status` as prose ("Up 4 minutes"), so it advances on its own clock
 // even when nothing about the container changed. `state` says the same thing as an enum, which is all
@@ -22,7 +73,7 @@ const withoutRenderedStatus = (containers) => {
 };
 
 const configuredFor = (configured, tier) => {
-	const visible = configured.map((entry) => {
+	const visible = configured.map(({ env, custom, ...entry }) => {
 		if (!entry.traefik) {
 			return entry;
 		}
@@ -40,6 +91,7 @@ class DockerModule extends BaseModule {
 	#appIconsDir = '/messier/.config/assets/img/apps';
 	#platform = (process.arch === 'x64' ? 'amd64' : process.arch);
 	#appLocks = new Map();
+	#configuredRefreshQueue = Promise.resolve();
 
 	constructor() {
 		super('docker');
@@ -58,14 +110,15 @@ class DockerModule extends BaseModule {
 			updates: { event: 'app:updates', audience: 'admin', gated: true }
 		});
 		
-		(async () => {
+		this.#queueConfiguredRefresh(async () => {
 			await Promise.all([
 				this.#loadConfigured(),
 				this.#loadTemplates()
 			]);
+			await this.#loadAppSettings();
 			this.#emitConfigured();
 			this.#emitTemplates();
-		})();
+		});
 
 		this.eventEmitter
 			.on('app:containers:fetched', async () => {
@@ -74,16 +127,31 @@ class DockerModule extends BaseModule {
 			.on('app:resourceMetrics:fetched', async () => {
 				this.emitState('appsResourceMetrics');
 			})
-			.on('configured:updated', async () => {
-				await this.#loadConfigured();
-				this.#emitConfigured();
+			.on('configured:updated', () => {
+				return this.#queueConfiguredRefresh(async () => {
+					await this.#loadConfigured();
+					await this.#loadAppSettings();
+					this.#emitConfigured();
+				});
 			})
-			.on('app:templates:fetch', async () => {
+			.on('app:templates:fetch', () => {
 				// Gated because this one is an hourly cron over a rarely-changing remote catalogue, not a
 				// reaction to something having changed. No sortArrays: order is the catalogue's own.
-				await this.#loadTemplates();
-				this.#emitTemplates();
+				return this.#queueConfiguredRefresh(async () => {
+					await this.#loadTemplates();
+					this.#emitTemplates();
+					await this.#loadAppSettings();
+					this.#emitConfigured();
+				});
 			});
+	}
+
+	#queueConfiguredRefresh(refresh) {
+		const queued = this.#configuredRefreshQueue.then(refresh);
+		this.#configuredRefreshQueue = queued.catch((error) => {
+			log.error('Error refreshing configured apps:', error);
+		});
+		return this.#configuredRefreshQueue;
 	}
 
 	get composeDir() {
@@ -122,21 +190,30 @@ class DockerModule extends BaseModule {
 	}
 
 	async getTemplates() {
-		if (!this.getState('templates')) {
-			await this.#loadTemplates();
-			this.#emitTemplates();
-		}
+		await this.#queueConfiguredRefresh(async () => {
+			if (!this.getState('templates')) {
+				await this.#loadTemplates();
+				this.#emitTemplates();
+			}
+		});
 		return this.toArray(this.getState('templates'));
 	}
 
 	async refreshTemplates() {
-		const isLoaded = await this.#loadTemplates();
-		this.#emitTemplates();
+		let isLoaded = false;
+		await this.#queueConfiguredRefresh(async () => {
+			isLoaded = await this.#loadTemplates();
+			this.#emitTemplates();
+		});
 		return (isLoaded ? this.toArray(this.getState('templates')) : []);
 	}
 
 	findTemplateByAppName(templates, appName) {
 		const name = String(appName ?? '').toLowerCase();
+		if (name.startsWith(CUSTOM_NAME_PREFIX)) {
+			return undefined;
+		}
+
 		const exact = templates.find((template) => { return template.name.toLowerCase() === name; });
 		if (exact) {
 			return exact;
@@ -211,7 +288,7 @@ class DockerModule extends BaseModule {
 			}
 
 			if (!apps.has(appName)) {
-				// Only installed apps: an update is offered remotely as an app:update job, which a compose
+				// Only installed apps: an update is offered remotely as an app:stack:update job, which a compose
 				// project that isn't one of them has no way to run.
 				const app = configured.find((entry) => { return entry.type === 'app' && entry.name === appName; });
 				if (!app) {
@@ -258,9 +335,82 @@ class DockerModule extends BaseModule {
 		}
 	}
 
+	async readAppEnv(name) {
+		try {
+			const content = await fs.readFile(path.join(this.appsDir, name, this.composeDir, '.env'), 'utf-8');
+			return Object.fromEntries([...content.matchAll(ENV_LINE_PATTERN)].map(([, key, value]) => {
+				return [key, value.replace(/\\(.)/g, (match, character) => { return ({ n: '\n', r: '\r' })[character] ?? character; })];
+			}));
+		} catch (error) {
+			return null;
+		}
+	}
+
+	async readCustomApp(name) {
+		try {
+			const compose = yaml.load(await fs.readFile(this.projectComposeFile(name), 'utf-8'));
+			if (compose?.['x-virgo'] !== CUSTOM_MARKER) {
+				return null;
+			}
+
+			const nodeDomain = String(traefikConfig.getClusterDomain() ?? '').toLowerCase();
+			return {
+				name,
+				services: Object.entries(compose.services ?? {}).map(([service, definition]) => { return toCustomService(service, definition, nodeDomain); })
+			};
+		} catch (error) {
+			return null;
+		}
+	}
+
+	async #loadAppSettings() {
+		const configured = this.getState('configured');
+		if (!Array.isArray(configured)) {
+			return;
+		}
+
+		const templates = this.toArray(this.getState('templates'));
+		for (const entry of configured.filter((entry) => { return entry.type === 'app'; })) {
+			delete entry.env;
+			delete entry.custom;
+			const custom = await this.readCustomApp(entry.name);
+			if (custom) {
+				const installedEnv = await this.readAppEnv(entry.name) ?? {};
+				entry.custom = {
+					...custom,
+					services: this.toArray(custom.services).map((service) => {
+						return {
+							...service,
+							variables: this.toArray(service.variables).map((variable) => {
+								return { name: variable.name, value: installedEnv[toEnvKey(service.name, variable.name)] ?? '' };
+							})
+						};
+					})
+				};
+				continue;
+			}
+
+			const template = this.findTemplateByAppName(templates, entry.name);
+			if (!template || isCoreApp(entry.name)) {
+				continue;
+			}
+
+			const fields = this.toArray(template.env).filter((field) => {
+				return String(field?.name ?? '').toLowerCase() === 'domain' || (field?.editable === true && field.type !== 'password');
+			});
+			const installedEnv = await this.readAppEnv(entry.name);
+			if (!installedEnv || fields.length === 0) {
+				continue;
+			}
+
+			entry.env = Object.fromEntries(fields.filter((field) => { return Object.hasOwn(installedEnv, field.name); }).map((field) => { return [field.name, installedEnv[field.name]]; }));
+		}
+		this.setState('configured', configured);
+	}
+
 	async #loadTemplates() {
 		try {
-			const response = await fetch(config.apps.templatesUrl);
+			const response = await fetch(config.apps.templatesUrl, { signal: AbortSignal.timeout(TEMPLATES_FETCH_TIMEOUT_MS) });
 			if (!response.ok) {
 				throw new Error(`${response.status} ${response.statusText}`);
 			}

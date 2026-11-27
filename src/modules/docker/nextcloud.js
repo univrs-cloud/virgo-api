@@ -571,7 +571,7 @@ const updateApps = async (job, module) => {
 	}
 
 	if (withContainers) {
-		await module.addJob('app:update', { config: { name: APP_NAME }, username: job.data?.username });
+		await module.addJob('app:stack:update', { config: { name: APP_NAME }, username: job.data?.username });
 	}
 
 	if (failed.length > 0) {

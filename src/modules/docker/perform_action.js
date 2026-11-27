@@ -6,12 +6,37 @@ import docker from '../../utils/docker_client.js';
 import DataService from '../../database/data_service.js';
 import * as sanoid from '../../utils/sanoid.js';
 import { createLog } from '../../utils/log.js';
+import { formatPortConflicts, getPortConflicts } from './port_conflicts.js';
 
 const log = createLog('docker:perform_action');
 
 const allowedAppActions = ['start', 'stop', 'kill', 'restart', 'recreate', 'uninstall'];
 const allowedServiceActions = ['start', 'stop', 'kill', 'restart', 'pause', 'unpause', 'remove'];
 const allowedUnmanagedActions = ['start', 'stop', 'kill', 'restart'];
+
+const getAppPorts = async (module, name, serviceName) => {
+	const custom = await module.readCustomApp(name);
+	if (custom) {
+		const services = (serviceName ? custom.services.filter((service) => { return service.name === serviceName; }) : custom.services);
+		return services.flatMap((service) => { return service.ports; });
+	}
+
+	const template = module.findTemplateByAppName(module.toArray(module.getState('templates')), name);
+	return template?.ports || [];
+};
+
+const ensurePortsAvailable = async (module, name, action, serviceName) => {
+	const requiredPorts = await getAppPorts(module, name, serviceName);
+	if (requiredPorts.length === 0) {
+		return;
+	}
+
+	const containers = camelcaseKeys(await docker.listContainers({ all: true }), { deep: true });
+	const conflicts = getPortConflicts(requiredPorts, containers, module.toArray(module.getState('configured')), name);
+	if (conflicts.length > 0) {
+		throw new Error(formatPortConflicts(conflicts, action));
+	}
+};
 
 /** Recreating is how a broken or outdated app is put back together, so it is built from the template
  * again rather than from whatever is on disk. The project's `.env` is left alone: that is the
@@ -69,6 +94,10 @@ const performAppAction = async (job, module) => {
 	const composeProject = container.labels?.comDockerComposeProject ?? false;
 	if (composeProject === false) {
 		throw new Error(`${title} app is not set up to perform ${config.action} action.`);
+	}
+	if (['start', 'restart', 'recreate'].includes(config.action)) {
+		const action = ({ start: 'starting this app', restart: 'restarting this app', recreate: 'recreating this app' })[config.action];
+		await ensurePortsAvailable(module, config.name, action);
 	}
 	
 	let action = [config.action];
@@ -140,6 +169,9 @@ const performServiceAction = async (job, module) => {
 		if (config.action === 'remove') {
 			await docker.getContainer(container.id).remove({ force: true });
 		} else {
+			if (['start', 'restart'].includes(config.action) && container.labels?.comDockerComposeProject) {
+				await ensurePortsAvailable(module, container.labels.comDockerComposeProject, config.action === 'start' ? 'starting this service' : 'restarting this service', container.labels.comDockerComposeService);
+			}
 			await docker.getContainer(container.id)[config.action]();
 		}
 	});
