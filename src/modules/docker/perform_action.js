@@ -2,7 +2,9 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { execa } from 'execa';
 import camelcaseKeys from 'camelcase-keys';
+import dockerCompose from 'docker-compose';
 import docker from '../../utils/docker_client.js';
+import dockerPullProgressParser from '../../utils/docker_pull_progress_parser.js';
 import DataService from '../../database/data_service.js';
 import * as sanoid from '../../utils/sanoid.js';
 import { createLog } from '../../utils/log.js';
@@ -44,10 +46,6 @@ const ensurePortsAvailable = async (module, name, action, serviceName) => {
  * reached leaves the existing file in place — recreating from it still fixes a container, and losing
  * that on a node with no internet would be worse than being a version behind. */
 const downloadComposeFile = async (job, module, template, name, composeProjectDir) => {
-	if (!template) {
-		return;
-	}
-
 	await module.updateJobProgress(job, `Downloading ${template.title} project template...`);
 	try {
 		const response = await fetch(`${template.repository.url}${template.repository.stackfile}`);
@@ -56,9 +54,11 @@ const downloadComposeFile = async (job, module, template, name, composeProjectDi
 		}
 
 		await fs.writeFile(path.join(composeProjectDir, 'docker-compose.yml'), await response.text(), 'utf-8');
+		return true;
 	} catch (error) {
 		log.error(`Could not download the ${name} project template: ${error.message}`);
-		await module.updateJobProgress(job, `Could not download ${template.title}'s project template, recreating from cache...`);
+		await module.updateJobProgress(job, `Could not download the latest ${template.title} setup, recreating with the previous one...`);
+		return false;
 	}
 };
 
@@ -108,14 +108,36 @@ const performAppAction = async (job, module) => {
 		action = ['down', '-v'];
 	}
 	const composeProjectDir = container.labels?.comDockerComposeProjectWorkingDir || path.join(module.appsDir, composeProject, module.composeDir);
+	let isLatestSetup = true;
 	if (config.action === 'recreate') {
-		const template = module.findTemplateByAppName(await module.refreshTemplates(), config.name);
-		await downloadComposeFile(job, module, template, config.name, composeProjectDir);
+		const templates = await module.refreshTemplates();
+		const template = module.findTemplateByAppName(templates, config.name);
+		if (template) {
+			isLatestSetup = await downloadComposeFile(job, module, template, config.name, composeProjectDir);
+		} else if (templates.length === 0 && !(await module.readCustomApp(config.name))) {
+			isLatestSetup = false;
+			await module.updateJobProgress(job, `Could not download the latest ${title} setup, recreating with the previous one...`);
+		}
 		await module.ensureAppDirEnv(composeProjectDir);
 		if (template) {
 			await DataService.updateApplication(config.name, templateDetails(template, config.name));
 			module.eventEmitter.emit('configured:updated');
 		}
+
+		await module.updateJobProgress(job, `Downloading ${title}...`);
+		const parsePullProgress = dockerPullProgressParser();
+		await dockerCompose.pullAll({
+			cwd: composeProjectDir,
+			composeOptions: [['-p', composeProject], ['--progress', 'json']],
+			commandOptions: [['--policy', 'missing']],
+			callback: (chunk) => {
+				const progress = parsePullProgress(chunk);
+				if (progress) {
+					module.updateJobProgress(job, `Downloading ${title}...`, progress);
+				}
+			}
+		});
+		await module.updateJobProgress(job, `${title} app is ${actionVerbs.gerund}...`);
 	}
 	
 	const composeFiles = (existingApp ? [] : (container.labels?.comDockerComposeProjectConfigFiles || '').split(',').filter(Boolean));
@@ -134,6 +156,9 @@ const performAppAction = async (job, module) => {
 			log.error(`Could not pause the ${existingApp.name} snapshots: ${error.message}`);
 		}
 		module.eventEmitter.emit('configured:updated');
+	}
+	if (config.action === 'recreate' && !isLatestSetup) {
+		return `${title} app recreated with its previous setup. The latest one could not be downloaded, try again in a few minutes.`;
 	}
 	return `${title} app ${actionVerbs.pastTense}.`;
 };
